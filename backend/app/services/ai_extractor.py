@@ -464,7 +464,7 @@ def _deal(text: str, sentences: list[str], account_name: str | None, today: date
         text,
     )
     m = product or re.search(
-        r"\b(?:interested in|evaluating|looking at|looking for|need(?:s)? an?|want(?:s)? an?|for (?:a|an|the|their))\s+"
+        r"\b(?:interested in|excited about|evaluating|looking at|looking for|need(?:s)? an?|want(?:s)? an?|for (?:a|an|the|their))\s+"
         r"((?:[A-Za-z][\w/-]*\s){0,4}?(?:platform|solution|project|rollout|implementation|suite|module|pilot|upgrade|license|licenses|renewal|expansion|integration|system|tool|analytics))\b",
         text,
         re.IGNORECASE,

@@ -35,7 +35,7 @@ _STOP = set(
 # "pricing pushback" and "budget concerns" land close together.
 _CONCEPTS = {
     "cost": "price pricing cost costs budget budgets expensive discount discounts spend quote quotes dollars commercial",
-    "security": "security infosec soc2 soc compliance gdpr hipaa pen pentest audit risk questionnaire legal",
+    "security": "security infosec soc2 soc compliance gdpr hipaa pen pentest audit questionnaire legal",
     "competition": "competitor competitors salesforce hubspot dynamics pipedrive zoho oracle sap incumbent alternative",
     "timeline": "timeline deadline delay delayed slip slipped postpone postponed pushed quarter q1 q2 q3 q4 eoq",
     "champion": "champion sponsor advocate supporter",

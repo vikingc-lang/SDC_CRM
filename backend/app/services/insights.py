@@ -218,6 +218,9 @@ def _headline(tasks: int, risky: int, closing: int) -> str:
 async def ask(db: AsyncSession, question: str, account_id: uuid.UUID | None = None, deal_id: uuid.UUID | None = None) -> dict:
     matches = await semantic_search(db, question, limit=6, account_id=account_id)
     facts = await _structured_facts(db, question, account_id, deal_id)
+    if facts["text"]:
+        # The question was answered from live pipeline data; only keep strongly related notes.
+        matches = [m for m in matches if (m["similarity"] or 0) >= 0.35]
     answer = None
     if llm.provider_name() != "heuristic":
         context = "\n".join(f"[{i + 1}] {m['date']:%Y-%m-%d} {m['account']['name'] if m['account'] else ''}: {m['summary']}" for i, m in enumerate(matches))
@@ -337,7 +340,7 @@ async def account_brief(db: AsyncSession, account: Account, deals: list[dict], c
         total = sum(d["amount"] for d in open_deals)
         parts.append(f"{len(open_deals)} open deal{'s' if len(open_deals) > 1 else ''} worth ${total:,.0f}, led by {open_deals[0]['title']} in {open_deals[0]['stage']}.")
     parts.append(
-        (f"Champion coverage: {', '.join(c.full_name for c in champions)}." if champions else "No Champion or Decision Maker mapped yet: a key risk.")
+        (f"Champion / decision-maker coverage: {', '.join(c.full_name for c in champions)}." if champions else "No Champion or Decision Maker mapped yet: a key risk.")
         + (f" Watch blocker {blockers[0].full_name}." if blockers else "")
     )
     if activities:

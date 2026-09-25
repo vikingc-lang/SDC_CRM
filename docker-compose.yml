@@ -1,0 +1,91 @@
+# relate [R]: single-command private-cloud deployment.
+#   cp .env.example .env && docker compose up -d --build
+#   (first run) docker compose exec ollama ollama pull llama3.1:8b
+#   open http://localhost:3000  -  marcus@relate.demo / relate123
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: relate_db
+    restart: always
+    environment:
+      POSTGRES_USER: relate_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-relate_secure_password}
+      POSTGRES_DB: relate_crm
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U relate_user -d relate_crm"]
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: relate_redis
+    restart: always
+    ports:
+      - "6379:6379"
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: relate_ollama
+    restart: always
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: relate_api
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://relate_user:${POSTGRES_PASSWORD:-relate_secure_password}@db:5432/relate_crm
+      REDIS_URL: redis://redis:6379/0
+      OLLAMA_ENDPOINT: http://ollama:11434
+      USE_CELERY: "true"
+    ports:
+      - "8000:8000"
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: relate_worker
+    restart: always
+    depends_on:
+      - api
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://relate_user:${POSTGRES_PASSWORD:-relate_secure_password}@db:5432/relate_crm
+      REDIS_URL: redis://redis:6379/0
+      OLLAMA_ENDPOINT: http://ollama:11434
+      DB_NULL_POOL: "true"
+      RUN_MIGRATIONS: "false"
+    command: ["celery", "-A", "app.worker", "worker", "--beat", "--loglevel=info"]
+
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    container_name: relate_web
+    restart: always
+    depends_on:
+      - api
+    ports:
+      - "3000:3000"
+
+volumes:
+  postgres_data:
+  ollama_data:

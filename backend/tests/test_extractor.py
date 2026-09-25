@@ -39,3 +39,32 @@ def test_new_account_from_domain_and_no_hallucination():
 def test_amount_units():
     r = heuristic_extract("Proposal for Acme at $1.2M total contract value.", [], date(2026, 9, 25))
     assert r.deal.amount == 1_200_000
+
+
+async def test_unreachable_llm_falls_back_to_heuristic(monkeypatch):
+    from app.core.config import settings
+    from app.services import ai_extractor
+
+    monkeypatch.setattr(settings, "llm_provider", "ollama")
+    monkeypatch.setattr(settings, "ollama_endpoint", "http://127.0.0.1:9")  # nothing listens here
+    monkeypatch.setattr(settings, "llm_timeout_seconds", 2.0)
+    result = await ai_extractor.extract("Call with Priya Nair, CTO at Northwind Logistics about a $50k pilot.", [], date(2026, 9, 25))
+    assert result.engine == "heuristic"
+    assert result.account_name == "Northwind Logistics"
+    assert result.deal.amount == 50000
+
+
+def test_llm_payload_is_validated_into_contract():
+    from app.services.ai_extractor import _LLMQuickLog, _from_llm
+
+    raw = {
+        "account_name": "Apex Industrial Supply", "domain": "ApexIndustrial.com",
+        "contacts": [{"first_name": "Elena", "last_name": "Rostova", "job_title": "VP Procurement", "email": "not-an-email", "buying_role": "Champion"}],
+        "deal": {"title": "Analytics", "amount": 75000, "target_close_date": "2026-12-31", "suggested_stage": "Proposal/InfoSec"},
+        "activity": {"activity_type": "meeting", "summary": "Pricing review", "action_items": [{"task": "Send MSA", "due_date": "bad-date"}], "sentiment": "positive"},
+    }
+    out = _from_llm(_LLMQuickLog.model_validate(raw))
+    assert out.domain == "apexindustrial.com"
+    assert out.contacts[0].email is None  # invalid email dropped, not hallucinated
+    assert out.action_items[0].due_date is None
+    assert out.deal.target_close_date == date(2026, 12, 31)

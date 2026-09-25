@@ -1,0 +1,83 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* relate [R] design tokens. Light is the base; dark is its own selected set. */
+:root {
+  color-scheme: light;
+  --background: 240 20% 98.5%;
+  --foreground: 240 14% 9%;
+  --surface: 0 0% 100%;
+  --surface-2: 240 16% 96.5%;
+  --border: 240 10% 90%;
+  --input: 240 10% 87%;
+  --ring: 249 76% 58%;
+  --muted: 240 12% 95%;
+  --muted-foreground: 240 5% 42%;
+  --subtle: 240 4% 58%;
+  --primary: 249 76% 58%;
+  --primary-foreground: 0 0% 100%;
+  --primary-soft: 249 90% 96%;
+  --ai: 276 70% 55%;
+  --ai-soft: 276 90% 97%;
+  --destructive: 0 62% 50%;
+  --destructive-foreground: 0 0% 100%;
+
+  --series-1: #2a78d6;
+  --series-track: #cde2fb;
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #d03b3b;
+}
+
+.dark {
+  color-scheme: dark;
+  --background: 240 10% 5.5%;
+  --foreground: 240 10% 95%;
+  --surface: 240 8% 8.5%;
+  --surface-2: 240 7% 11%;
+  --border: 240 6% 17%;
+  --input: 240 6% 22%;
+  --ring: 249 90% 70%;
+  --muted: 240 6% 13%;
+  --muted-foreground: 240 5% 64%;
+  --subtle: 240 4% 48%;
+  --primary: 249 90% 68%;
+  --primary-foreground: 240 30% 8%;
+  --primary-soft: 249 40% 16%;
+  --ai: 276 85% 72%;
+  --ai-soft: 276 35% 15%;
+  --destructive: 0 70% 58%;
+  --destructive-foreground: 0 0% 100%;
+
+  --series-1: #3987e5;
+  --series-track: #104281;
+}
+
+@layer base {
+  * { @apply border-border; }
+  html { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+  body { @apply bg-background text-foreground; font-feature-settings: "cv11", "ss01"; }
+  ::selection { background: hsl(var(--primary) / 0.22); }
+}
+
+@layer utilities {
+  .tabular { font-variant-numeric: tabular-nums; }
+  .ai-gradient { background-image: linear-gradient(120deg, hsl(249 76% 58%), hsl(285 72% 58%) 55%, hsl(330 80% 62%)); }
+  .ai-gradient-text {
+    background-image: linear-gradient(120deg, hsl(var(--primary)), hsl(var(--ai)) 60%, hsl(330 80% 62%));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .ai-border {
+    border: 1px solid transparent;
+    background: linear-gradient(hsl(var(--surface)), hsl(var(--surface))) padding-box,
+      linear-gradient(120deg, hsl(var(--primary) / 0.55), hsl(var(--ai) / 0.55), hsl(330 80% 62% / 0.45)) border-box;
+  }
+  .skeleton {
+    background: linear-gradient(90deg, hsl(var(--muted)) 0%, hsl(var(--surface-2)) 50%, hsl(var(--muted)) 100%);
+    background-size: 200% 100%;
+    @apply animate-shimmer rounded-md;
+  }
+  .scrollbar-thin { scrollbar-width: thin; scrollbar-color: hsl(var(--border)) transparent; }
+}

@@ -1,0 +1,227 @@
+"use client";
+
+import { useQuery } from "@tanstack/react-query";
+import {
+  Building2, CheckSquare, ChevronsUpDown, Columns3, Home, LogOut, Menu, Monitor, Moon, Search, Settings, Sparkles, Sun, Users, X,
+} from "lucide-react";
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
+import { useTheme } from "next-themes";
+import { useEffect, useState } from "react";
+import { CopilotPanel } from "@/components/CopilotPanel";
+import { QuickLogModal } from "@/components/QuickLogModal";
+import { Button } from "@/components/ui/button";
+import { Avatar, Dropdown, DropdownContent, DropdownItem, DropdownSeparator, DropdownTrigger, Kbd } from "@/components/ui/misc";
+import { get, getToken, setToken } from "@/lib/api";
+import { ui } from "@/lib/store";
+import type { User } from "@/lib/types";
+import { cn } from "@/lib/utils";
+
+const NAV = [
+  { href: "/", label: "Home", icon: Home },
+  { href: "/pipeline", label: "Pipeline", icon: Columns3 },
+  { href: "/accounts", label: "Accounts", icon: Building2 },
+  { href: "/contacts", label: "Contacts", icon: Users },
+  { href: "/tasks", label: "Tasks", icon: CheckSquare },
+  { href: "/ask", label: "Ask relate", icon: Sparkles },
+];
+
+/** The SDC Solutions product family (Functional Solution Specification section 1). */
+const SDC_SUITE = [
+  { name: "relate", mark: "R", desc: "AI-first CRM", active: true },
+  { name: "promo", mark: "Q", desc: "SDC Solutions" },
+  { name: "Yield", mark: "S", desc: "SDC Solutions" },
+  { name: "deduct", mark: "✔", desc: "SDC Solutions" },
+  { name: "nexora", mark: "§", desc: "SDC Solutions" },
+];
+
+export function Logo({ className }: { className?: string }) {
+  return (
+    <span className={cn("flex items-center gap-2", className)}>
+      <span className="ai-gradient flex h-7 w-7 items-center justify-center rounded-lg text-[13px] font-bold text-white shadow-sm">R</span>
+      <span className="text-[15px] font-semibold tracking-tight">
+        relate <span className="font-medium text-muted-foreground">[R]</span>
+      </span>
+    </span>
+  );
+}
+
+function ThemeToggle() {
+  const { theme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  const next = theme === "light" ? "dark" : theme === "dark" ? "system" : "light";
+  const Icon = !mounted ? Monitor : theme === "light" ? Sun : theme === "dark" ? Moon : Monitor;
+  return (
+    <Button variant="ghost" size="icon" onClick={() => setTheme(next)} aria-label={`Theme: ${theme}. Switch to ${next}`} title={`Theme: ${mounted ? theme : "system"}`}>
+      <Icon className="h-4 w-4" />
+    </Button>
+  );
+}
+
+function Sidebar({ user, onNavigate }: { user?: User; onNavigate?: () => void }) {
+  const pathname = usePathname();
+  const router = useRouter();
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex h-14 items-center px-4">
+        <Link href="/" onClick={onNavigate}><Logo /></Link>
+      </div>
+      <div className="px-3 pb-2">
+        <button
+          onClick={() => { ui.openQuickLog(); onNavigate?.(); }}
+          className="ai-border group flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm shadow-card transition-shadow hover:shadow-pop"
+        >
+          <Sparkles className="h-4 w-4 text-ai" />
+          <span className="flex-1 font-medium">Quick-Log</span>
+          <Kbd>⌘K</Kbd>
+        </button>
+      </div>
+      <nav className="flex-1 space-y-0.5 px-3 py-2">
+        {NAV.map(({ href, label, icon: Icon }) => {
+          const active = href === "/" ? pathname === "/" : pathname.startsWith(href) || (href === "/pipeline" && pathname.startsWith("/deals"));
+          return (
+            <Link
+              key={href}
+              href={href}
+              onClick={onNavigate}
+              className={cn(
+                "flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm transition-colors",
+                active ? "bg-surface font-medium text-foreground shadow-card ring-1 ring-border" : "text-muted-foreground hover:bg-muted hover:text-foreground",
+              )}
+            >
+              <Icon className={cn("h-4 w-4", active && "text-primary")} />
+              {label}
+            </Link>
+          );
+        })}
+      </nav>
+      <div className="space-y-1 border-t p-3">
+        <Dropdown>
+          <DropdownTrigger asChild>
+            <button className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] text-muted-foreground hover:bg-muted">
+              <span className="flex h-5 items-center justify-center rounded bg-foreground px-1 text-[9.5px] font-bold tracking-tight text-background">SDC</span>
+              <span className="flex-1">SDC Solutions suite</span>
+              <ChevronsUpDown className="h-3.5 w-3.5" />
+            </button>
+          </DropdownTrigger>
+          <DropdownContent side="top" align="start" className="w-64">
+            <div className="px-2 pb-1 pt-1.5 text-[11px] font-medium uppercase tracking-wide text-subtle">SDC Solutions portfolio</div>
+            {SDC_SUITE.map((p) => (
+              <DropdownItem key={p.name} disabled={!p.active} className={cn(!p.active && "opacity-60")}>
+                <span className={cn("flex h-6 w-6 items-center justify-center rounded-md text-xs font-bold", p.active ? "ai-gradient text-white" : "bg-muted text-muted-foreground")}>{p.mark}</span>
+                <span className="flex-1">
+                  <span className="block font-medium">{p.name} [{p.mark}]</span>
+                  <span className="block text-[11.5px] text-muted-foreground">{p.desc}</span>
+                </span>
+                {p.active && <span className="text-[11px] text-primary">Current</span>}
+              </DropdownItem>
+            ))}
+          </DropdownContent>
+        </Dropdown>
+        {user && (
+          <Dropdown>
+            <DropdownTrigger asChild>
+              <button className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-muted">
+                <Avatar name={user.full_name} size={26} />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[13px] font-medium">{user.full_name}</span>
+                  <span className="block truncate text-[11.5px] capitalize text-muted-foreground">{user.role.replace("_", " ")}</span>
+                </span>
+              </button>
+            </DropdownTrigger>
+            <DropdownContent side="top" align="start">
+              <DropdownItem onSelect={() => router.push("/settings")}><Settings className="h-4 w-4" />Settings & AI engine</DropdownItem>
+              <DropdownSeparator />
+              <DropdownItem onSelect={() => { setToken(null); window.location.href = "/login"; }}><LogOut className="h-4 w-4" />Sign out</DropdownItem>
+            </DropdownContent>
+          </Dropdown>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export function AppShell({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const [ready, setReady] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+
+  useEffect(() => {
+    if (!getToken()) router.replace("/login");
+    else setReady(true);
+  }, [router]);
+
+  const { data: user } = useQuery({ queryKey: ["me"], queryFn: () => get<User>("/users/me"), enabled: ready });
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        ui.openQuickLog();
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "j") {
+        e.preventDefault();
+        ui.set({ copilotOpen: !ui.get().copilotOpen });
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  useEffect(() => setMobileOpen(false), [pathname]);
+
+  if (!ready) return <div className="min-h-screen bg-background" />;
+
+  return (
+    <div className="flex min-h-screen bg-background">
+      <aside className="sticky top-0 hidden h-screen w-60 shrink-0 border-r bg-surface-2/60 lg:block">
+        <Sidebar user={user} />
+      </aside>
+      {mobileOpen && (
+        <div className="fixed inset-0 z-40 lg:hidden">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setMobileOpen(false)} />
+          <aside className="absolute inset-y-0 left-0 w-64 border-r bg-surface animate-slide-up">
+            <button className="absolute right-3 top-4 rounded p-1 text-muted-foreground" onClick={() => setMobileOpen(false)} aria-label="Close menu"><X className="h-4 w-4" /></button>
+            <Sidebar user={user} onNavigate={() => setMobileOpen(false)} />
+          </aside>
+        </div>
+      )}
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b bg-background/80 px-4 backdrop-blur lg:px-6">
+          <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setMobileOpen(true)} aria-label="Open menu"><Menu className="h-4 w-4" /></Button>
+          <button
+            onClick={() => ui.openQuickLog()}
+            className="flex h-9 min-w-0 max-w-md flex-1 items-center gap-2 rounded-lg border bg-surface px-3 text-left text-sm text-subtle shadow-card transition-colors hover:border-input"
+          >
+            <Search className="h-4 w-4 shrink-0" />
+            <span className="truncate">Search, or paste meeting notes to log…</span>
+            <span className="ml-auto hidden shrink-0 items-center gap-1 sm:flex"><Kbd>⌘</Kbd><Kbd>K</Kbd></span>
+          </button>
+          <div className="ml-auto flex items-center gap-1">
+            <Button variant="outline" size="sm" onClick={() => ui.set({ copilotOpen: true })} className="hidden sm:inline-flex">
+              <Sparkles className="h-3.5 w-3.5 text-ai" />Copilot<Kbd className="ml-1">⌘J</Kbd>
+            </Button>
+            <ThemeToggle />
+          </div>
+        </header>
+        <main className="flex-1 px-4 py-6 lg:px-8">{children}</main>
+      </div>
+      <QuickLogModal />
+      <CopilotPanel />
+    </div>
+  );
+}
+
+export function PageHeader({ title, description, actions }: { title: React.ReactNode; description?: React.ReactNode; actions?: React.ReactNode }) {
+  return (
+    <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+      <div className="min-w-0">
+        <h1 className="text-[22px] font-semibold tracking-tight">{title}</h1>
+        {description && <p className="mt-1 text-sm text-muted-foreground">{description}</p>}
+      </div>
+      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+    </div>
+  );
+}
