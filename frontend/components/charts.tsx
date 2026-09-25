@@ -116,16 +116,18 @@ function niceStep(max: number) {
 }
 
 /** Three-part health breakdown (recency / sentiment / velocity) as labelled meters. */
-export function HealthBreakdown({ breakdown }: { breakdown: { recency: number; sentiment: number; velocity: number } }) {
+export function HealthBreakdown({ breakdown }: { breakdown: { recency: number; sentiment: number; velocity: number; support?: number; milestones?: number } }) {
   const parts = [
-    { key: "Recency", weight: "40%", value: breakdown.recency },
-    { key: "Sentiment", weight: "35%", value: breakdown.sentiment },
-    { key: "Velocity", weight: "25%", value: breakdown.velocity },
+    { key: "Recency", weight: "30%", value: breakdown.recency },
+    { key: "Sentiment", weight: "25%", value: breakdown.sentiment },
+    { key: "Velocity", weight: "15%", value: breakdown.velocity },
+    ...(breakdown.support !== undefined ? [{ key: "Support load", weight: "15%", value: breakdown.support }] : []),
+    ...(breakdown.milestones !== undefined ? [{ key: "Milestones", weight: "15%", value: breakdown.milestones }] : []),
   ];
   return (
     <div className="space-y-2.5">
       {parts.map((p) => (
-        <div key={p.key} className="grid grid-cols-[116px_1fr_32px] items-center gap-3 text-[12.5px]">
+        <div key={p.key} className="grid grid-cols-[124px_1fr_32px] items-center gap-3 text-[12.5px]">
           <span className="text-muted-foreground">{p.key} <span className="text-subtle">· {p.weight}</span></span>
           <div className="h-1.5 overflow-hidden rounded-full bg-series-track">
             <div className="h-full rounded-full bg-series-1" style={{ width: `${Math.max(2, p.value)}%` }} />
@@ -133,6 +135,56 @@ export function HealthBreakdown({ breakdown }: { breakdown: { recency: number; s
           <span className="tabular text-right font-medium">{p.value}</span>
         </div>
       ))}
+    </div>
+  );
+}
+
+const AGING_LABEL: Record<string, string> = { current: "Current", "1_30": "1–30", "31_60": "31–60", "61_90": "61–90", "90_plus": "90+" };
+
+/** A/R aging: one sequential ramp step per bucket (older = darker), labelled so color never carries meaning alone. */
+export function AgingBars({ buckets, currency = "USD" }: { buckets: Record<string, number>; currency?: string }) {
+  const [hover, setHover] = useState<string | null>(null);
+  const keys = ["current", "1_30", "31_60", "61_90", "90_plus"];
+  const max = Math.max(1, ...keys.map((k) => buckets[k] ?? 0));
+  const ramp = ["#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95"];
+  return (
+    <div className="flex items-end gap-2" style={{ height: 120 }}>
+      {keys.map((k, i) => {
+        const v = buckets[k] ?? 0;
+        return (
+          <div key={k} className="relative flex h-full flex-1 flex-col items-center justify-end gap-1" onMouseEnter={() => setHover(k)} onMouseLeave={() => setHover(null)}>
+            {hover === k && <div className="pointer-events-none absolute -top-2 z-10 -translate-y-full whitespace-nowrap rounded-md border bg-surface px-2 py-1 text-xs shadow-pop">{AGING_LABEL[k]} days: {money(v)}</div>}
+            <span className="tabular text-[11px] text-muted-foreground">{v ? money(v, { compact: true }) : "—"}</span>
+            <div className="w-full max-w-[28px] rounded-t" style={{ height: `${Math.max(2, (v / max) * 80)}px`, background: ramp[i] }} />
+            <span className="text-[11px] text-subtle">{AGING_LABEL[k]}</span>
+          </div>
+        );
+      })}
+      <span className="sr-only">{currency}</span>
+    </div>
+  );
+}
+
+/** Seat utilisation over time (active / licensed). */
+export function UsageTrend({ points }: { points: { date: string; active_users: number; licensed_users: number }[] }) {
+  if (points.length < 2) return <p className="text-[13px] text-muted-foreground">Not enough adoption data yet.</p>;
+  const W = 320, H = 90;
+  const max = Math.max(...points.map((p) => p.licensed_users), 1);
+  const x = (i: number) => (i / (points.length - 1)) * W;
+  const y = (v: number) => H - (v / max) * H;
+  const line = points.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p.active_users).toFixed(1)}`).join(" ");
+  const last = points[points.length - 1];
+  return (
+    <div>
+      <svg viewBox={`0 0 ${W} ${H + 4}`} className="h-24 w-full" role="img" aria-label="Active users trend">
+        <line x1={0} x2={W} y1={y(last.licensed_users)} y2={y(last.licensed_users)} className="stroke-border" strokeDasharray="0" strokeWidth={1} />
+        <path d={`${line} L${W},${H} L0,${H} Z`} fill="var(--series-1)" opacity={0.1} />
+        <path d={line} fill="none" stroke="var(--series-1)" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+        <circle cx={x(points.length - 1)} cy={y(last.active_users)} r={4} fill="var(--series-1)" stroke="hsl(var(--surface))" strokeWidth={2} />
+      </svg>
+      <p className="mt-1 text-[12px] text-muted-foreground">
+        {last.active_users} of {last.licensed_users} seats active ({Math.round((100 * last.active_users) / last.licensed_users)}%) · licensed seats shown as the top line
+      </p>
     </div>
   );
 }

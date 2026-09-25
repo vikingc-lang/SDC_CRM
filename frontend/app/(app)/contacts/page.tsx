@@ -46,7 +46,7 @@ export default function ContactsPage() {
                 <th className="px-4 py-2.5 font-medium">Account</th>
                 <th className="px-4 py-2.5 font-medium">Buying role</th>
                 <th className="px-4 py-2.5 font-medium">Email</th>
-                <th className="px-4 py-2.5 font-medium">Phone</th>
+                <th className="px-4 py-2.5 font-medium">Relationship</th>
               </tr>
             </thead>
             <tbody className="divide-y">
@@ -56,13 +56,13 @@ export default function ContactsPage() {
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-3">
                       <Avatar name={c.name} size={30} />
-                      <div className="min-w-0"><p className="truncate font-medium">{c.name}</p><p className="truncate text-[12px] text-muted-foreground">{c.job_title ?? "—"}</p></div>
+                      <div className="min-w-0"><Link href={`/contacts/${c.id}`} className="block truncate font-medium hover:underline">{c.name}</Link><p className="truncate text-[12px] text-muted-foreground">{c.job_title ?? "—"}{c.department ? ` · ${c.department}` : ""}</p></div>
                     </div>
                   </td>
                   <td className="px-4 py-3"><Link href={`/accounts/${c.account_id}`} className="hover:underline">{c.account_name}</Link></td>
                   <td className="px-4 py-3"><RoleBadge role={c.buying_role} /></td>
                   <td className="px-4 py-3 text-muted-foreground">{c.email ? <a href={`mailto:${c.email}`} className="hover:text-foreground hover:underline">{c.email}</a> : "—"}</td>
-                  <td className="px-4 py-3 text-muted-foreground">{c.phone ?? "—"}</td>
+                  <td className="px-4 py-3 text-muted-foreground">{c.relationship_strength != null ? `${c.relationship_strength}/100` : "—"}{c.consent?.opt_out.email && <span className="ml-2 text-[11px]">email opt-out</span>}</td>
                 </tr>
               ))}
             </tbody>

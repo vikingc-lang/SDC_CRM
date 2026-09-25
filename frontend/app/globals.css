@@ -81,3 +81,12 @@
   }
   .scrollbar-thin { scrollbar-width: thin; scrollbar-color: hsl(var(--border)) transparent; }
 }
+
+/* Rendered legal documents (NDA / SOW / Order Form) */
+.doc-body h1 { font-size: 1.35rem; font-weight: 600; margin: 0 0 0.75rem; letter-spacing: -0.01em; }
+.doc-body h2 { font-size: 1rem; font-weight: 600; margin: 1.25rem 0 0.4rem; }
+.doc-body p { margin: 0.4rem 0; }
+.doc-body ul { list-style: disc; padding-left: 1.25rem; margin: 0.4rem 0; }
+.doc-body table { width: 100%; border-collapse: collapse; margin: 0.75rem 0; font-size: 13px; }
+.doc-body th, .doc-body td { border: 1px solid hsl(var(--border)); padding: 6px 8px; text-align: left; }
+.doc-body th { background: hsl(var(--surface-2)); font-weight: 500; }

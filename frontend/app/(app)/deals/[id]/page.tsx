@@ -9,6 +9,9 @@ import { useParams } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 import { ActivityTimeline } from "@/components/ActivityTimeline";
+import { AlertsBanner, DocumentsCard, PartnersCard, QuotesCard } from "@/components/panels";
+import { fmtMoney } from "@/components/ui/extra";
+import { useMe } from "@/lib/me";
 import { NewTaskDialog } from "@/components/forms";
 import { RiskBadge, RoleBadge, riskTone } from "@/components/indicators";
 import { useStageMove } from "@/components/KanbanBoard";
@@ -36,6 +39,7 @@ export default function DealPage() {
   const [draft, setDraft] = useState<string | null>(null);
   const { data: deal, isLoading, isError } = useQuery({ queryKey: ["deal", id], queryFn: () => get<DealDetail>(`/deals/${id}`) });
   const { request, dialog } = useStageMove();
+  const { can } = useMe();
   const draftEmail = useMutation({
     mutationFn: async () => (await api.post<{ draft: string }>(`/ai/deals/${id}/draft-email`)).data,
     onSuccess: (d) => setDraft(d.draft),
@@ -61,19 +65,29 @@ export default function DealPage() {
             <h1 className="text-[24px] font-semibold tracking-tight">{deal.title}</h1>
             {!closed && <RiskBadge score={deal.risk_score} />}
             {deal.stage === "Closed-Won" && <Badge tone="good">Closed-Won</Badge>}
-            {deal.stage === "Closed-Lost" && <Badge tone="critical">Closed-Lost · {deal.loss_reason?.replace("_", " ")}</Badge>}
+            {deal.stage === "Closed-Lost" && <Badge tone="critical">Closed-Lost · {deal.loss_reason?.replace(/_/g, " ")}</Badge>}
+            <Badge tone="outline">{deal.pipeline.name}</Badge>
+            {deal.deal_type && deal.deal_type !== "new_business" && <Badge tone="primary" className="capitalize">{deal.deal_type.replace("_", " ")}</Badge>}
           </div>
           <p className="mt-1 text-[13.5px] text-muted-foreground">
             <Link href={`/accounts/${deal.account.id}`} className="font-medium text-foreground hover:underline">{deal.account.name}</Link>
             {deal.owner && <> · owned by {deal.owner.full_name}</>}
             {deal.target_close_date && <> · target close {shortDate(deal.target_close_date, true)}</>}
+            {!!deal.close_date_pushes && <span className="font-medium text-foreground"> · pushed {deal.close_date_pushes}× (was {shortDate(deal.original_close_date)})</span>}
           </p>
         </div>
         <div className="text-right">
-          <p className="text-[28px] font-semibold leading-8 tracking-tight">{money(deal.amount)}</p>
-          {!closed && <p className="tabular text-[12.5px] text-muted-foreground">{deal.probability}% · weighted {money(deal.weighted_value)}</p>}
+          <p className="text-[28px] font-semibold leading-8 tracking-tight">{fmtMoney(deal.amount, deal.currency)}</p>
+          {!closed && <p className="tabular text-[12.5px] text-muted-foreground">{deal.probability}% · weighted {money(deal.weighted_value)} USD</p>}
         </div>
       </div>
+
+      {deal.account.credit_hold && (
+        <div className="mb-4 rounded-lg border px-3.5 py-2.5 text-[13px]" style={{ borderColor: "color-mix(in srgb, var(--status-critical) 45%, transparent)" }}>
+          <span className="font-medium">Credit hold:</span> {deal.account.name} is on credit hold in the ERP. New quotes route to finance approval. See the account&apos;s Finance tab.
+        </div>
+      )}
+      <AlertsBanner alerts={deal.alerts} />
 
       {/* Stage stepper */}
       <Card className="mb-6 p-2">
@@ -139,6 +153,13 @@ export default function DealPage() {
                           <li key={a.action} className="rounded-md border bg-surface-2/50 p-2.5">
                             <p className="text-[13px] font-medium">{a.action}</p>
                             <p className="text-[12px] text-muted-foreground">{a.why}</p>
+                            {a.message && (
+                              <div className="mt-2 flex items-start gap-2 rounded bg-surface px-2 py-1.5 text-[12.5px]">
+                                <span className="flex-1 italic">{a.message}</span>
+                                <button className="shrink-0 text-subtle hover:text-foreground" aria-label="Copy suggested message"
+                                  onClick={() => { navigator.clipboard?.writeText(a.message ?? ""); toast.success("Suggested message copied"); }}><Copy className="h-3.5 w-3.5" /></button>
+                              </div>
+                            )}
                           </li>
                         ))}
                       </ul>
@@ -181,6 +202,18 @@ export default function DealPage() {
             )}
           </div>
 
+          {deal.is_lost && (
+            <Card>
+              <CardHeader title="Loss debrief" description={`${deal.loss_taxonomy[deal.loss_reason ?? "other"] ?? deal.loss_reason}${deal.loss_competitor ? ` · ${deal.loss_competitor}` : ""}`} />
+              <CardBody><p className="text-[13.5px] leading-relaxed">{deal.loss_debrief ?? "No debrief recorded."}</p></CardBody>
+            </Card>
+          )}
+          <div className="grid gap-6 md:grid-cols-2">
+            <QuotesCard dealId={deal.id} quotes={deal.quotes} canCreate={can("quotes", "create") && !closed} />
+            <DocumentsCard dealId={deal.id} documents={deal.documents} canCreate={can("documents", "create")}
+              hasApprovedQuote={deal.quotes.some((q) => ["approved", "sent", "accepted"].includes(q.status))} />
+          </div>
+
           <Card>
             <CardHeader title="Activity" action={<Button variant="ghost" size="sm" onClick={() => ui.openQuickLog({ accountId: deal.account.id })}><Plus className="h-3.5 w-3.5" />Log</Button>} />
             <CardBody><ActivityTimeline activities={deal.activities} /></CardBody>
@@ -210,6 +243,7 @@ export default function DealPage() {
               ))}
             </CardBody>
           </Card>
+          <PartnersCard dealId={deal.id} partners={deal.partners} canEdit={can("deals", "update")} />
           <Card>
             <CardHeader title="Stage-gate audit trail" icon={<History className="h-4 w-4 text-muted-foreground" />} />
             <CardBody>

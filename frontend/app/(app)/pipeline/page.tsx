@@ -3,6 +3,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Search } from "lucide-react";
 import { useMemo, useState } from "react";
+import { Tabs } from "@/components/ui/extra";
 import { PageHeader } from "@/components/AppShell";
 import { NewDealDialog } from "@/components/forms";
 import { KanbanBoard } from "@/components/KanbanBoard";
@@ -10,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/misc";
 import { get } from "@/lib/api";
-import type { Kanban, Pipeline } from "@/lib/types";
+import type { Kanban, PipelineFull } from "@/lib/types";
 import { money } from "@/lib/utils";
 
 export default function PipelinePage() {
@@ -19,8 +20,10 @@ export default function PipelinePage() {
   const [owner, setOwner] = useState("");
   const [risk, setRisk] = useState("");
   const [newDeal, setNewDeal] = useState(false);
-  const pipelines = useQuery({ queryKey: ["pipelines"], queryFn: () => get<Pipeline[]>("/pipelines") });
-  const pipelineId = pipelines.data?.[0]?.id;
+  const pipelines = useQuery({ queryKey: ["pipelines"], queryFn: () => get<PipelineFull[]>("/pipelines") });
+  const [selected, setSelected] = useState<string | null>(null);
+  const pipelineId = selected ?? pipelines.data?.[0]?.id;
+  const current = pipelines.data?.find((p) => p.id === pipelineId);
   const board = useQuery({
     queryKey: ["kanban", pipelineId],
     queryFn: () => get<Kanban>(`/pipeline/${pipelineId}/kanban`),
@@ -48,7 +51,7 @@ export default function PipelinePage() {
         return {
           ...c,
           deals,
-          metrics: { count: deals.length, total: deals.reduce((a, d) => a + d.amount, 0), weighted: deals.reduce((a, d) => a + d.weighted_value, 0) },
+          metrics: { count: deals.length, total: deals.reduce((a, d) => a + (d.amount_usd ?? d.amount), 0), weighted: deals.reduce((a, d) => a + d.weighted_value, 0) },
         };
       }),
     };
@@ -76,10 +79,15 @@ export default function PipelinePage() {
   return (
     <div>
       <PageHeader
-        title={pipelines.data?.[0]?.name ?? "Pipeline"}
-        description={board.data ? `${money(total)} open · ${money(weighted)} risk-adjusted weighted forecast` : "Loading…"}
+        title="Pipeline"
+        description={board.data ? `${current?.name}: ${money(total)} open · ${money(weighted)} risk-adjusted weighted forecast (USD)` : "Loading…"}
         actions={<Button size="sm" onClick={() => setNewDeal(true)}><Plus className="h-4 w-4" />New deal</Button>}
       />
+      {pipelines.data && pipelines.data.length > 1 && (
+        <Tabs value={pipelineId ?? ""} onChange={(v) => setSelected(v)}
+          tabs={pipelines.data.map((p) => ({ value: p.id, label: p.name }))} className="mb-4" />
+      )}
+      {current?.description && <p className="-mt-2 mb-4 text-[12.5px] text-muted-foreground">{current.description}</p>}
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <div className="relative w-full sm:w-64">
           <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-subtle" />
@@ -106,7 +114,7 @@ export default function PipelinePage() {
           ))}
         </div>
       )}
-      <NewDealDialog open={newDeal} onOpenChange={setNewDeal} />
+      <NewDealDialog open={newDeal} onOpenChange={setNewDeal} pipelineId={pipelineId} />
     </div>
   );
 }

@@ -13,20 +13,25 @@ import { toast } from "sonner";
 import { RiskBadge } from "@/components/indicators";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { Label, Select } from "@/components/ui/input";
+import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Avatar } from "@/components/ui/misc";
 import { api, errorMessage } from "@/lib/api";
 import type { Deal, GateCheck, Kanban, KanbanColumn, LossReason } from "@/lib/types";
+import { fmtMoney } from "@/components/ui/extra";
 import { cn, money, shortDate } from "@/lib/utils";
 
 export const LOSS_REASONS: { value: LossReason; label: string }[] = [
-  { value: "price", label: "Price" },
   { value: "competitor", label: "Lost to competitor" },
+  { value: "budget_frozen", label: "Budget frozen" },
+  { value: "feature_gap", label: "Feature gap" },
+  { value: "champion_departed", label: "Champion departed" },
+  { value: "price", label: "Price" },
   { value: "no_decision", label: "No decision / status quo" },
-  { value: "timing", label: "Timing / budget freeze" },
-  { value: "product_fit", label: "Product fit" },
+  { value: "timing", label: "Timing" },
   { value: "other", label: "Other" },
 ];
+
+interface LossInput { reason?: LossReason; debrief?: string; competitor?: string }
 
 interface PendingMove { deal: Deal; to: KanbanColumn; gates?: GateCheck[]; needsReason?: boolean }
 
@@ -35,8 +40,11 @@ export function useStageMove(onSettled?: () => void) {
   const qc = useQueryClient();
   const [pending, setPending] = useState<PendingMove | null>(null);
   const mutation = useMutation({
-    mutationFn: async (v: { deal: Deal; to: KanbanColumn; loss_reason?: LossReason; override_gates?: boolean }) =>
-      (await api.patch(`/deals/${v.deal.id}/stage`, { stage_id: v.to.id, loss_reason: v.loss_reason ?? null, override_gates: !!v.override_gates })).data,
+    mutationFn: async (v: { deal: Deal; to: KanbanColumn; loss?: LossInput; override_gates?: boolean }) =>
+      (await api.patch(`/deals/${v.deal.id}/stage`, {
+        stage_id: v.to.id, loss_reason: v.loss?.reason ?? null, loss_debrief: v.loss?.debrief ?? null,
+        loss_competitor: v.loss?.competitor || null, override_gates: !!v.override_gates,
+      })).data,
     onSuccess: (res: { forecast_delta: number; triggered_action: string | null; deal: Deal }) => {
       setPending(null);
       const delta = res.forecast_delta;
@@ -72,16 +80,19 @@ export function useStageMove(onSettled?: () => void) {
       pending={pending}
       busy={mutation.isPending}
       onCancel={() => { setPending(null); qc.invalidateQueries({ queryKey: ["kanban"] }); }}
-      onConfirm={(reason, override) => pending && mutation.mutate({ deal: pending.deal, to: pending.to, loss_reason: reason, override_gates: override })}
+      onConfirm={(loss, override) => pending && mutation.mutate({ deal: pending.deal, to: pending.to, loss, override_gates: override })}
     />
   );
   return { request, dialog, busy: mutation.isPending };
 }
 
 function StageMoveDialog({ pending, busy, onCancel, onConfirm }: {
-  pending: PendingMove | null; busy: boolean; onCancel: () => void; onConfirm: (reason: LossReason | undefined, override: boolean) => void;
+  pending: PendingMove | null; busy: boolean; onCancel: () => void; onConfirm: (loss: LossInput | undefined, override: boolean) => void;
 }) {
   const [reason, setReason] = useState<LossReason | "">("");
+  const [debrief, setDebrief] = useState("");
+  const [competitor, setCompetitor] = useState("");
+  const debriefOk = debrief.trim().length >= 15;
   const unmet = pending?.gates?.filter((g) => !g.met) ?? [];
   return (
     <Dialog open={!!pending} onOpenChange={(o) => !o && onCancel()}>
@@ -105,13 +116,26 @@ function StageMoveDialog({ pending, busy, onCancel, onConfirm }: {
               </ul>
             )}
             {pending.needsReason && (
-              <div className="mt-4">
-                <Label htmlFor="loss-reason">Loss reason (required)</Label>
-                <Select id="loss-reason" value={reason} onChange={(e) => setReason(e.target.value as LossReason)}>
-                  <option value="" disabled>Select a reason…</option>
-                  {LOSS_REASONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
-                </Select>
-                <p className="mt-2 text-[12px] text-muted-foreground">relate logs a post-mortem to vector memory so future deals learn from it.</p>
+              <div className="mt-4 space-y-3">
+                <div>
+                  <Label htmlFor="loss-reason">Loss reason (required)</Label>
+                  <Select id="loss-reason" value={reason} onChange={(e) => setReason(e.target.value as LossReason)}>
+                    <option value="" disabled>Select a reason…</option>
+                    {LOSS_REASONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+                  </Select>
+                </div>
+                {reason === "competitor" && (
+                  <div>
+                    <Label htmlFor="loss-competitor">Which competitor?</Label>
+                    <Input id="loss-competitor" value={competitor} onChange={(e) => setCompetitor(e.target.value)} placeholder="e.g. Salesforce" />
+                  </div>
+                )}
+                <div>
+                  <Label htmlFor="loss-debrief">Rep debrief (required)</Label>
+                  <Textarea id="loss-debrief" value={debrief} onChange={(e) => setDebrief(e.target.value)} className="min-h-[88px]"
+                    placeholder="What happened, what signals did we miss, what would we do differently?" />
+                  <p className="mt-1 text-[12px] text-muted-foreground">{debriefOk ? "Saved to win/loss attribution and vector memory." : `${Math.max(0, 15 - debrief.trim().length)} more characters`}</p>
+                </div>
               </div>
             )}
             {unmet.length > 0 && !pending.needsReason && (
@@ -122,7 +146,8 @@ function StageMoveDialog({ pending, busy, onCancel, onConfirm }: {
             <div className="mt-5 flex justify-end gap-2">
               <Button variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
               {pending.needsReason ? (
-                <Button variant="destructive" size="sm" disabled={!reason} loading={busy} onClick={() => onConfirm(reason as LossReason, true)}>Close as lost</Button>
+                <Button variant="destructive" size="sm" disabled={!reason || !debriefOk} loading={busy}
+                  onClick={() => onConfirm({ reason: reason as LossReason, debrief, competitor }, true)}>Close as lost</Button>
               ) : (
                 <Button size="sm" loading={busy} onClick={() => onConfirm(undefined, true)}>Move anyway</Button>
               )}
@@ -156,7 +181,7 @@ export function DealCard({ deal, dragging, overlay }: { deal: Deal; dragging?: b
         {deal.account.name}
       </Link>
       <div className="mt-2.5 flex items-baseline justify-between">
-        <span className="text-[15px] font-semibold">{money(deal.amount, { compact: true })}</span>
+        <span className="text-[15px] font-semibold">{fmtMoney(deal.amount, deal.currency, true)}</span>
         {!closed && <span className="tabular text-[12px] text-muted-foreground">wtd {money(deal.weighted_value, { compact: true })}</span>}
       </div>
       <div className="mt-2.5 flex items-center gap-3 border-t pt-2.5 text-[11.5px] text-muted-foreground">
@@ -164,7 +189,8 @@ export function DealCard({ deal, dragging, overlay }: { deal: Deal; dragging?: b
         {!closed && <span className={cn("flex items-center gap-1", deal.days_in_stage > 21 && "font-medium text-foreground")}><Clock className="h-3 w-3" />{deal.days_in_stage}d</span>}
         {competitors.length > 0 && <span className="flex items-center gap-1" title={`Competitors: ${competitors.join(", ")}`}><Swords className="h-3 w-3" />{competitors[0]}</span>}
         {deal.stage === "Closed-Won" && <span className="flex items-center gap-1 text-foreground"><Trophy className="h-3 w-3" style={{ color: "var(--status-good)" }} />Won</span>}
-        {deal.loss_reason && <span className="capitalize">{deal.loss_reason.replace("_", " ")}</span>}
+        {deal.loss_reason && <span className="capitalize">{deal.loss_reason.replace(/_/g, " ")}</span>}
+        {deal.account.credit_hold && <span className="font-medium text-foreground" title="Account on ERP credit hold">Credit hold</span>}
         {deal.owner && <Avatar name={deal.owner.full_name} size={20} className="ml-auto" />}
       </div>
     </div>

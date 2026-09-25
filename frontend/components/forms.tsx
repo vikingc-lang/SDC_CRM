@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input, Label, Select } from "@/components/ui/input";
 import { api, errorMessage, get } from "@/lib/api";
-import type { AccountListItem, Pipeline } from "@/lib/types";
+import type { AccountListItem, PipelineFull } from "@/lib/types";
 
 type Opener = { open: boolean; onOpenChange: (o: boolean) => void };
 
@@ -62,16 +62,17 @@ export function NewAccountDialog({ open, onOpenChange }: Opener) {
   );
 }
 
-export function NewDealDialog({ open, onOpenChange, accountId }: Opener & { accountId?: string }) {
-  const [f, setF] = useState({ title: "", account_id: accountId ?? "", amount: "", stage_id: "", target_close_date: "" });
+export function NewDealDialog({ open, onOpenChange, accountId, pipelineId }: Opener & { accountId?: string; pipelineId?: string }) {
+  const [f, setF] = useState({ title: "", account_id: accountId ?? "", amount: "", currency: "USD", pipeline_id: pipelineId ?? "", stage_id: "", target_close_date: "" });
   const qc = useQueryClient();
   const { data: accounts } = useAccounts(open && !accountId);
-  const { data: pipelines } = useQuery({ queryKey: ["pipelines"], queryFn: () => get<Pipeline[]>("/pipelines"), enabled: open });
-  const stages = pipelines?.[0]?.stages.filter((s) => !s.is_closed_won && !s.is_closed_lost) ?? [];
+  const { data: pipelines } = useQuery({ queryKey: ["pipelines"], queryFn: () => get<PipelineFull[]>("/pipelines"), enabled: open });
+  const pipeline = pipelines?.find((p) => p.id === (f.pipeline_id || pipelineId)) ?? pipelines?.[0];
+  const stages = pipeline?.stages.filter((s) => !s.is_closed_won && !s.is_closed_lost) ?? [];
   const m = useMutation({
     mutationFn: async () =>
       (await api.post("/deals", {
-        title: f.title, account_id: accountId ?? f.account_id, amount: Number(f.amount || 0),
+        title: f.title, account_id: accountId ?? f.account_id, amount: Number(f.amount || 0), currency: f.currency, pipeline_id: pipeline?.id,
         stage_id: f.stage_id || null, target_close_date: f.target_close_date || null,
       })).data,
     onSuccess: () => { qc.invalidateQueries(); onOpenChange(false); toast.success("Deal created"); setF({ ...f, title: "", amount: "" }); },
@@ -90,16 +91,26 @@ export function NewDealDialog({ open, onOpenChange, accountId }: Opener & { acco
               </Select>
             </div>
           )}
+          <div className="grid grid-cols-[1fr_96px] gap-3">
+            <div><Label htmlFor="deal-amt">Amount</Label><Input id="deal-amt" type="number" min={0} value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} /></div>
+            <div><Label htmlFor="deal-cur">Currency</Label>
+              <Select id="deal-cur" value={f.currency} onChange={(e) => setF({ ...f, currency: e.target.value })}>{["USD", "EUR", "GBP", "CAD", "AUD"].map((c) => <option key={c}>{c}</option>)}</Select>
+            </div>
+          </div>
           <div className="grid grid-cols-2 gap-3">
-            <div><Label htmlFor="deal-amt">Amount (USD)</Label><Input id="deal-amt" type="number" min={0} value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} /></div>
-            <div><Label htmlFor="deal-close">Target close</Label><Input id="deal-close" type="date" value={f.target_close_date} onChange={(e) => setF({ ...f, target_close_date: e.target.value })} /></div>
+            <div><Label htmlFor="deal-pipe">Pipeline</Label>
+              <Select id="deal-pipe" value={pipeline?.id ?? ""} onChange={(e) => setF({ ...f, pipeline_id: e.target.value, stage_id: "" })}>
+                {pipelines?.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </Select>
+            </div>
+            <div><Label htmlFor="deal-stage">Stage</Label>
+              <Select id="deal-stage" value={f.stage_id} onChange={(e) => setF({ ...f, stage_id: e.target.value })}>
+                <option value="">{stages[0]?.name ?? "First stage"} (default)</option>
+                {stages.slice(1).map((s) => <option key={s.id} value={s.id}>{s.name} · {s.default_probability}%</option>)}
+              </Select>
+            </div>
           </div>
-          <div><Label htmlFor="deal-stage">Stage</Label>
-            <Select id="deal-stage" value={f.stage_id} onChange={(e) => setF({ ...f, stage_id: e.target.value })}>
-              <option value="">Discovery (default)</option>
-              {stages.map((s) => <option key={s.id} value={s.id}>{s.name} · {s.default_probability}%</option>)}
-            </Select>
-          </div>
+          <div><Label htmlFor="deal-close">Target close</Label><Input id="deal-close" type="date" value={f.target_close_date} onChange={(e) => setF({ ...f, target_close_date: e.target.value })} /></div>
         </FormShell>
       </DialogContent>
     </Dialog>
