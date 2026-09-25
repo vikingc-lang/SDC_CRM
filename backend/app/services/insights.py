@@ -35,28 +35,10 @@ async def embed_activity(db: AsyncSession, activity_id: uuid.UUID) -> None:
 
 
 async def semantic_search(db: AsyncSession, query: str, limit: int = 10, account_id: uuid.UUID | None = None) -> list[dict]:
-    vector = await embeddings.embed(query)
-    results: list[dict] = []
-    if vector is not None:
-        stmt = (
-            select(Activity, (1 - Activity.embedding.cosine_distance(vector)).label("similarity"))
-            .where(Activity.embedding.is_not(None))
-            .order_by(Activity.embedding.cosine_distance(vector))
-            .limit(limit)
-        )
-        if account_id:
-            stmt = stmt.where(Activity.account_id == account_id)
-        for activity, similarity in (await db.execute(stmt)).unique().all():
-            if similarity is not None and similarity > 0.05:
-                results.append(activity_out(activity, round(float(similarity), 3)))
-    if not results:  # keyword fallback when vectors are unavailable
-        terms = [t for t in re.findall(r"\w{3,}", query.lower())][:6]
-        if terms:
-            stmt = select(Activity).where(or_(*[Activity.summary.ilike(f"%{t}%") for t in terms])).order_by(Activity.occurred_at.desc()).limit(limit)
-            if account_id:
-                stmt = stmt.where(Activity.account_id == account_id)
-            results = [activity_out(a, None) for a in (await db.execute(stmt)).scalars().unique().all()]
-    return results
+    """Activity results from hybrid (vector + keyword) retrieval."""
+    from app.services.search import hybrid_search
+
+    return [r for r in await hybrid_search(db, query, limit, None, account_id) if r["entity"] == "activity"]
 
 
 # ---- stage-gate autonomous actions ---------------------------------------------
@@ -78,39 +60,44 @@ async def run_stage_trigger(db: AsyncSession, deal_id: uuid.UUID, user_id: uuid.
     insights = dict(deal.ai_insights or {})
     now = datetime.now(timezone.utc)
 
-    if stage.name == "Discovery":
-        insights["pain_points"] = signals["pain_points"] or insights.get("pain_points", [])
-    elif stage.name == "Pain Fit":
-        insights["competitors"] = signals["competitors"]
-    elif stage.name == "Solution Demo":
-        insights["recap_email"] = await draft_email(db, deal, purpose="demo recap")
-        for title in ("Send demo recap email with agreed evaluation criteria", "Confirm technical validation owner and timeline"):
-            db.add(Task(title=title, due_date=date.today() + timedelta(days=2), account_id=deal.account_id, deal_id=deal.id, owner_id=deal.owner_id, source="ai"))
-    elif stage.name == "Proposal/InfoSec":
-        days_open = days_between(deal.created_at, now)
-        insights["velocity"] = {
-            "days_in_pipeline": days_open,
-            "benchmark_days": 14,
-            "status": "stagnating" if days_open > 14 else "on_pace",
-        }
-        if days_open > 14:
-            db.add(Task(title="Deal is behind 14-day velocity benchmark: agree a mutual close plan", due_date=date.today() + timedelta(days=1), account_id=deal.account_id, deal_id=deal.id, owner_id=deal.owner_id, source="ai"))
-    elif stage.is_closed_won:
+    if stage.is_closed_won:
+        from app.services.success import provision_onboarding, renew_contract_from_deal
+
         deal.account.health_score = 100
-        db.add(Activity(account_id=deal.account_id, deal_id=deal.id, user_id=user_id, activity_type="system", summary=f"Onboarding event dispatched for {deal.title}. Customer success notified.", sentiment="positive"))
-        db.add(Task(title=f"Run onboarding kickoff for {deal.account.name}", due_date=date.today() + timedelta(days=3), account_id=deal.account_id, deal_id=deal.id, owner_id=deal.owner_id, source="ai"))
+        deal.account.lifecycle_stage = "customer"
+        await renew_contract_from_deal(db, deal)
+        await provision_onboarding(db, deal)
     elif stage.is_closed_lost:
         reason = (deal.loss_reason or "other").replace("_", " ")
-        comp = ", ".join(signals["competitors"]) or "none recorded"
+        comp = deal.loss_competitor or ", ".join(signals["competitors"]) or "none recorded"
         risks = " ".join(signals["risks"][:2]) or "No explicit risks were logged."
         postmortem = (
-            f"Loss post-mortem for {deal.title} ({deal.account.name}): lost on {reason}. Amount ${float(deal.amount):,.0f}. "
-            f"Competitors mentioned: {comp}. Signals before loss: {risks}"
+            f"Loss post-mortem for {deal.title} ({deal.account.name}): lost on {reason}. Amount {deal.currency} {float(deal.amount):,.0f}. "
+            f"Competitors: {comp}. Rep debrief: {deal.loss_debrief or 'n/a'} Signals before loss: {risks}"
         )
-        memo = Activity(account_id=deal.account_id, deal_id=deal.id, user_id=user_id, activity_type="note", summary=postmortem, sentiment="negative")
+        memo = Activity(account_id=deal.account_id, deal_id=deal.id, user_id=user_id, activity_type="note", summary=postmortem,
+                        sentiment="negative", source="system")
         memo.embedding = await embeddings.embed(postmortem)
         db.add(memo)
         insights["postmortem"] = postmortem
+        if deal.deal_type == "renewal":
+            deal.account.lifecycle_stage = "churned"
+    elif stage.name in ("Discovery", "Lead", "Registered", "Renewal Identified"):
+        insights["pain_points"] = signals["pain_points"] or insights.get("pain_points", [])
+    elif stage.name in ("Pain Fit", "Qualified", "Customer Review"):
+        insights["competitors"] = signals["competitors"] or insights.get("competitors", [])
+        insights["pain_points"] = insights.get("pain_points") or signals["pain_points"]
+    elif stage.name in ("Solution Demo", "Demo Completed", "Joint Demo"):
+        insights["recap_email"] = await draft_email(db, deal, purpose="demo recap")
+        for title in ("Send demo recap email with agreed evaluation criteria", "Confirm technical validation owner and timeline"):
+            db.add(Task(title=title, due_date=date.today() + timedelta(days=2), account_id=deal.account_id, deal_id=deal.id,
+                        owner_id=deal.owner_id, assignee_id=deal.owner_id, source="ai"))
+    elif stage.name in ("Proposal/InfoSec", "Proposal Sent", "Negotiation"):
+        days_open = days_between(deal.created_at, now)
+        insights["velocity"] = {"days_in_pipeline": days_open, "benchmark_days": 14, "status": "stagnating" if days_open > 14 else "on_pace"}
+        if days_open > 14:
+            db.add(Task(title="Deal is behind 14-day velocity benchmark: agree a mutual close plan", due_date=date.today() + timedelta(days=1),
+                        account_id=deal.account_id, deal_id=deal.id, owner_id=deal.owner_id, assignee_id=deal.owner_id, source="ai", priority="high"))
 
     insights["last_trigger"] = {"stage": stage.name, "at": now.isoformat()}
     deal.ai_insights = insights
@@ -118,23 +105,105 @@ async def run_stage_trigger(db: AsyncSession, deal_id: uuid.UUID, user_id: uuid.
 
 
 # ---- next best actions & briefing -------------------------------------------------
-def next_best_actions(deal: dict) -> list[dict]:
-    """Explainable recommendations derived from the risk factors."""
+CADENCE_DAYS = {1: 10, 2: 7, 3: 5, 4: 3, 5: 3}  # stage order -> ideal days between touches
+_ROLE_PROMPTS = {
+    "Champion": ("Recruit an internal champion", "Ask your most engaged contact: \"What would make this a win for you personally, and who else should see it?\""),
+    "Economic Buyer": ("Identify the economic buyer", "\"Who owns the budget line for this, and what do they need to see to approve it?\""),
+    "Decision Maker": ("Map the final decision maker", "\"Besides you, who signs off on the final decision, and how have similar purchases been approved?\""),
+}
+_STAGE_MESSAGES = {
+    1: "Share a short case study that mirrors their pain and propose a 30-minute discovery follow-up.",
+    2: "Recap the quantified pain and ask for a meeting that includes the economic buyer.",
+    3: "Send the demo recap with the agreed evaluation criteria and propose next validation steps.",
+    4: "Confirm the mutual close plan: legal, security review and signature dates.",
+    5: "Confirm commercial terms and the signature path.",
+}
+
+
+def next_best_actions(deal: dict, roles: list[str] | None = None, stage_order: int = 1) -> list[dict]:
+    """Explainable next steps: risk drivers, follow-up cadence, missing buying roles, messaging."""
     f = deal.get("risk_factors") or {}
+    roles = set(roles or [])
     actions: list[dict] = []
-    if f.get("no_champion"):
-        actions.append({"action": "Map a Champion or Decision Maker", "why": "No champion on the buying committee (+40 risk).", "impact": 40})
-    if f.get("stale"):
-        days = f.get("days_since_activity")
-        actions.append({"action": "Re-engage with a value-focused touchpoint", "why": f"No activity for {int(days) if days else 'many'} days (+30 risk).", "impact": 30})
+    needed = ["Champion"] + (["Economic Buyer", "Decision Maker"] if stage_order >= 2 else [])
+    missing = [r for r in needed if r not in roles]
+    if "Champion" in missing and "Decision Maker" in roles:
+        missing.remove("Champion")
+    for r in missing:
+        title, msg = _ROLE_PROMPTS[r]
+        actions.append({"kind": "missing_role", "action": title, "why": f"No {r} mapped on the buying committee.", "impact": 40 if r == "Champion" else 25, "message": msg})
+    days = f.get("days_since_activity")
+    cadence = CADENCE_DAYS.get(stage_order, 7)
+    if days is not None and days > cadence:
+        actions.append({"kind": "cadence", "action": "Follow up today",
+                        "why": f"{int(days)} days since the last touch; target cadence at this stage is every {cadence} days" + (" (+30 risk)." if f.get("stale") else "."),
+                        "impact": 30 if f.get("stale") else 15, "message": _STAGE_MESSAGES.get(stage_order, _STAGE_MESSAGES[1])})
     if f.get("sentiment_drop"):
-        actions.append({"action": "Address the latest objection directly", "why": "Most recent interaction was negative (+30 risk).", "impact": 30})
+        actions.append({"kind": "sentiment", "action": "Address the latest objection directly", "why": "Most recent interaction was negative (+30 risk).",
+                        "impact": 30, "message": "Acknowledge the concern in writing, propose a specific remedy and a date to review it together."})
     if (f.get("days_in_stage") or 0) > 21:
-        actions.append({"action": "Agree a mutual action plan to unstick the deal", "why": f"In {deal['stage']} for {int(f['days_in_stage'])} days (> 21).", "impact": 20})
+        actions.append({"kind": "stalled", "action": "Agree a mutual action plan to unstick the deal", "why": f"In {deal['stage']} for {int(f['days_in_stage'])} days (> 21).", "impact": 20,
+                        "message": "Propose a dated mutual action plan listing each remaining step and owner on both sides."})
+    if (deal.get("close_date_pushes") or 0) >= 2:
+        actions.append({"kind": "slippage", "action": "Re-qualify the timeline", "why": f"Close date pushed {deal['close_date_pushes']} times.", "impact": 20,
+                        "message": "Ask what has changed in their priorities and whether the compelling event still stands."})
     close = deal.get("target_close_date")
     if close and isinstance(close, date) and close < date.today():
-        actions.append({"action": "Update the target close date", "why": f"Close date {close.isoformat()} has passed.", "impact": 10})
-    return actions
+        actions.append({"kind": "overdue", "action": "Update the target close date", "why": f"Close date {close.isoformat()} has passed.", "impact": 10, "message": None})
+    if (deal.get("account") or {}).get("credit_hold"):
+        actions.append({"kind": "finance", "action": "Coordinate with finance before quoting", "why": "Account is on ERP credit hold; quotes will route to finance approval.", "impact": 10, "message": None})
+    return sorted(actions, key=lambda a: -a["impact"])
+
+
+async def scan_pipeline(db: AsyncSession) -> dict:
+    """Deal risk & slippage copilot: open/resolve alerts for every open deal."""
+    from app.models import Account, Contact, DealAlert, PipelineStage
+    from app.services.notify import notify
+
+    today = date.today()
+    deals = (
+        await db.execute(select(Deal).join(PipelineStage, Deal.stage_id == PipelineStage.id)
+                         .where(PipelineStage.is_closed_won.is_(False), PipelineStage.is_closed_lost.is_(False)))
+    ).scalars().unique().all()
+    open_alerts = {(a.deal_id, a.kind): a for a in (await db.execute(select(DealAlert).where(DealAlert.resolved_at.is_(None)))).scalars().unique().all()}
+    stats = {"opened": 0, "resolved": 0, "deals_scanned": len(deals)}
+    now = datetime.now(timezone.utc)
+    seen = set()
+    for d in deals:
+        f = d.risk_factors or {}
+        roles = set((await db.execute(select(Contact.buying_role).where(Contact.account_id == d.account_id, Contact.status == "active"))).scalars().all())
+        drift = ((d.account.custom_metadata or {}).get("health_breakdown") or {}).get("sentiment_drift", 0)
+        checks = []
+        if f.get("days_since_activity") is None or f.get("days_since_activity", 0) > 14:
+            checks.append(("stagnant", "high" if (f.get("days_since_activity") or 99) > 30 else "medium",
+                           f"No touchpoint for {int(f.get('days_since_activity') or 0)} days (threshold 14).", {"days": f.get("days_since_activity")}))
+        if d.close_date_pushes:
+            checks.append(("close_date_pushed", "high" if d.close_date_pushes >= 2 else "medium",
+                           f"Close date pushed {d.close_date_pushes}x (originally {d.original_close_date}, now {d.target_close_date}).",
+                           {"pushes": d.close_date_pushes, "original": str(d.original_close_date), "current": str(d.target_close_date)}))
+        if drift <= -20:
+            checks.append(("sentiment_drift", "high" if drift <= -40 else "medium", f"Sentiment trending down ({drift} points vs previous notes).", {"drift": drift}))
+        missing = [r for r in ("Champion", "Economic Buyer") if r not in roles and not (r == "Champion" and "Decision Maker" in roles)]
+        if d.stage.stage_order >= 2 and missing:
+            checks.append(("missing_roles", "medium", f"Missing buying roles: {', '.join(missing)}.", {"missing": missing}))
+        if d.target_close_date and d.target_close_date < today:
+            checks.append(("overdue_close", "medium", f"Target close {d.target_close_date} has passed.", {}))
+        for kind, severity, message, details in checks:
+            seen.add((d.id, kind))
+            alert = open_alerts.get((d.id, kind))
+            if alert:
+                alert.severity, alert.message, alert.details = severity, message, details
+                continue
+            db.add(DealAlert(deal_id=d.id, kind=kind, severity=severity, message=message, details=details))
+            stats["opened"] += 1
+            if severity == "high":
+                notify(db, [d.owner_id], "risk", f"{d.title}: {message}", None, f"/deals/{d.id}")
+    for key, alert in open_alerts.items():
+        if key not in seen:
+            alert.resolved_at = now
+            stats["resolved"] += 1
+    await db.commit()
+    return stats
 
 
 async def briefing(db: AsyncSession, user_id: uuid.UUID | None = None) -> dict:
@@ -220,7 +289,7 @@ async def ask(db: AsyncSession, question: str, account_id: uuid.UUID | None = No
     facts = await _structured_facts(db, question, account_id, deal_id)
     if facts["text"]:
         # The question was answered from live pipeline data; only keep strongly related notes.
-        matches = [m for m in matches if (m["similarity"] or 0) >= 0.35]
+        matches = [m for m in matches if (m["similarity"] or 0) >= 0.35 or "keyword" in m.get("matched_by", [])]
     answer = None
     if llm.provider_name() != "heuristic":
         context = "\n".join(f"[{i + 1}] {m['date']:%Y-%m-%d} {m['account']['name'] if m['account'] else ''}: {m['summary']}" for i, m in enumerate(matches))
@@ -346,3 +415,18 @@ async def account_brief(db: AsyncSession, account: Account, deals: list[dict], c
     if activities:
         parts.append(f"Last touch {days_between(activities[0].occurred_at)} day(s) ago ({activities[0].sentiment}).")
     return " ".join(parts)
+
+
+async def reindex(db: AsyncSession) -> dict:
+    """Embed activities missing vectors (e.g. after erasure redaction) and refresh account-record vectors."""
+    from app.models import Account
+    from app.services.search import account_document
+
+    acts = (await db.execute(select(Activity).where(Activity.embedding.is_(None), Activity.activity_type != "system").limit(2000))).scalars().unique().all()
+    for a in acts:
+        a.embedding = await embeddings.embed(f"{a.subject or ''}\n{a.summary}\n{a.raw_text or ''}")
+    accounts = (await db.execute(select(Account))).scalars().unique().all()
+    for acc in accounts:
+        acc.embedding = await embeddings.embed(account_document(acc))
+    await db.commit()
+    return {"activities_embedded": len(acts), "accounts_embedded": len(accounts)}

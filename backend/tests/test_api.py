@@ -16,18 +16,23 @@ async def test_requires_auth(seeded):
 
 
 async def test_accounts_and_360(client):
-    accounts = (await client.get("/api/v1/accounts", params={"search": "apex"})).json()
-    assert accounts[0]["name"] == "Apex Industrial Supply"
+    accounts = [a for a in (await client.get("/api/v1/accounts", params={"search": "apex"})).json() if a["name"] == "Apex Industrial Supply"]
+    assert accounts
     assert 0 <= accounts[0]["health"] <= 100
     view = (await client.get(f"/api/v1/accounts/{accounts[0]['id']}/360")).json()
     assert {"account", "contacts", "deals", "recent_activities"} <= view.keys()
     deal = view["deals"][0]
     assert deal["stage"] == "Proposal/InfoSec"
-    assert deal["weighted_value"] == pytest.approx(75000 * 0.75 * (1 - deal["risk_score"] / 200))
+    # the approved quote set the deal's amount to its TCV
+    assert deal["weighted_value"] == pytest.approx(deal["amount"] * 0.75 * (1 - deal["risk_score"] / 200))
+    assert view["account"]["customer_master"] and view["account"]["annual_revenue"] == 420_000_000
+    assert {"contracts", "finance", "onboarding", "usage", "alerts"} <= view.keys()
 
 
 async def test_kanban_and_stage_gates(client):
-    pipeline = (await client.get("/api/v1/pipelines")).json()[0]
+    pipelines = (await client.get("/api/v1/pipelines")).json()
+    assert [p["kind"] for p in pipelines] == ["direct", "inbound", "renewal", "partner"]
+    pipeline = pipelines[0]
     board = (await client.get(f"/api/v1/pipeline/{pipeline['id']}/kanban")).json()
     names = [c["name"] for c in board["columns"]]
     assert names == ["Discovery", "Pain Fit", "Solution Demo", "Proposal/InfoSec", "Closed-Won", "Closed-Lost"]
@@ -37,8 +42,10 @@ async def test_kanban_and_stage_gates(client):
     # forward move with unmet criteria is blocked with a gate checklist
     resp = await client.patch(f"/api/v1/deals/{cobalt['id']}/stage", json={"stage_id": stage["Proposal/InfoSec"]})
     assert resp.status_code == 409 and resp.json()["gates"]
-    # closing lost without a reason is always blocked
+    # closing lost without a taxonomy reason + debrief is always blocked, even with override
     resp = await client.patch(f"/api/v1/deals/{cobalt['id']}/stage", json={"stage_id": stage["Closed-Lost"], "override_gates": True})
+    assert resp.status_code == 409 and resp.json()["loss_taxonomy"]["champion_departed"]
+    resp = await client.patch(f"/api/v1/deals/{cobalt['id']}/stage", json={"stage_id": stage["Closed-Lost"], "loss_reason": "budget_frozen", "loss_debrief": "short"})
     assert resp.status_code == 409
     # conscious override succeeds and reports a forecast delta + AI action
     resp = await client.patch(f"/api/v1/deals/{cobalt['id']}/stage", json={"stage_id": stage["Pain Fit"], "override_gates": True})
@@ -75,7 +82,7 @@ async def test_quick_log_preview_then_commit(client):
 
 async def test_semantic_search_and_copilot(client):
     results = (await client.post("/api/v1/search/semantic", json={"query": "security questionnaire soc2", "limit": 5})).json()
-    assert results and results[0]["similarity"] > 0
+    assert results and results[0]["score"] > 0 and results[0]["matched_by"]
     assert any("SOC 2" in r["summary"] or "security" in r["summary"].lower() for r in results[:3])
     answer = (await client.post("/api/v1/ai/ask", json={"question": "Which deals are at risk?"})).json()
     assert "Fleet Telemetry Rollout" in answer["answer"]
@@ -89,13 +96,11 @@ async def test_dashboard_and_briefing(client):
     assert brief["headline"] and brief["priorities"]
 
 
-async def test_read_only_user_cannot_write(client):
-    from httpx import ASGITransport, AsyncClient
+async def test_auditor_reads_and_exports_but_cannot_write(client):
+    from tests.helpers import login_as
 
-    from app.main import app
-
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-        token = (await c.post("/api/v1/auth/login", json={"username": "viewer@relate.demo", "password": "relate123"})).json()["access_token"]
-        c.headers["Authorization"] = f"Bearer {token}"
+    async with login_as("viewer@relate.demo") as c:
         assert (await c.get("/api/v1/accounts")).status_code == 200
         assert (await c.post("/api/v1/tasks", json={"title": "x"})).status_code == 403
+        assert (await c.get("/api/v1/admin/export/accounts")).status_code == 200
+        assert (await c.get("/api/v1/admin/audit")).status_code == 200

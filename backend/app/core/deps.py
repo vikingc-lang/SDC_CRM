@@ -6,6 +6,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.audit import current_user_id
 from app.core.database import get_db
 from app.core.security import decode_access_token
 from app.models import User
@@ -24,8 +25,9 @@ async def get_current_user(
         user = await db.get(User, uuid.UUID(payload["sub"]))
     except (jwt.PyJWTError, KeyError, ValueError):
         raise unauthorized
-    if user is None:
+    if user is None or not user.is_active:
         raise unauthorized
+    current_user_id.set(user.id)  # attributes audit-trail entries to this user
     return user
 
 

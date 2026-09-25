@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
-from app.api.v1 import accounts, activities, ai, auth, contacts, deals
+from app.api.v1 import accounts, activities, admin, ai, auth, contacts, cpq, deals, finance, partners, success
 from app.core.config import settings
 from app.core.database import engine
 
@@ -24,8 +24,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-for module in (auth, accounts, contacts, deals, activities, ai):
-    app.include_router(module.router, prefix="/api/v1")
+for router in (auth.router, accounts.router, contacts.router, deals.router, activities.router, ai.router, cpq.router, cpq.public,
+               success.router, finance.router, partners.router, partners.portal, admin.router):
+    app.include_router(router, prefix="/api/v1")
 
 
 @app.get("/health", tags=["system"])

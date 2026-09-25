@@ -2,16 +2,18 @@ import re
 import uuid
 from datetime import date
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.deps import get_current_user, require_writer
+from app.core.deps import get_current_user
+from app.core.rbac import Principal, authorize
 from app.models import Account, Activity, Contact, Deal, DealStageHistory, PipelineStage, Task, User
 from app.schemas.ai import AskRequest, CommitLogRequest, CommitLogResponse, QuickLogRequest, QuickLogResponse, SemanticSearchRequest
-from app.services import ai_extractor, insights, llm, pipeline_service, scoring
+from app.services import ai_extractor, dedup, insights, llm, pipeline_service, scoring, voice
+from app.services.search import hybrid_search
 from app.services.jobs import enqueue
 from app.services.serializers import deal_card
 
@@ -31,6 +33,8 @@ async def ai_status(_: User = Depends(get_current_user)):
         "embedding_provider": settings.embedding_provider,
         "embedding_dim": settings.embedding_dim,
         "background": "celery" if settings.use_celery else "in-process",
+        "transcription_provider": settings.transcription_provider,
+        "erp_connector": settings.erp_connector,
     }
 
 
@@ -57,12 +61,16 @@ def _best_deal(deals: list[Deal], title: str | None) -> Deal | None:
 
 
 @router.post("/ai/quick-log", response_model=QuickLogResponse)
-async def quick_log(body: QuickLogRequest, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
+async def quick_log(body: QuickLogRequest, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("activities", "read"))):
     """Parse unstructured notes into a validated preview. Nothing is written."""
-    known = [(a.name, a.domain) for a in (await db.execute(select(Account))).scalars().unique().all()]
+    known = [(a.name, a.domain) for a in (await db.execute(p.scope_accounts(select(Account)))).scalars().unique().all()]
     result = await ai_extractor.extract(body.raw_text, known)
+    return await _enrich(db, result, body.account_id)
 
-    account = await db.get(Account, body.account_id) if body.account_id else None
+
+async def _enrich(db: AsyncSession, result: QuickLogResponse, account_id: uuid.UUID | None) -> QuickLogResponse:
+
+    account = await db.get(Account, account_id) if account_id else None
     if account is None and (result.domain or result.account_name):
         conds = []
         if result.domain:
@@ -70,6 +78,12 @@ async def quick_log(body: QuickLogRequest, db: AsyncSession = Depends(get_db), _
         if result.account_name:
             conds.append(func.lower(Account.name) == result.account_name.lower())
         account = (await db.execute(select(Account).where(or_(*conds)))).scalars().first()
+    if account is None and result.account_name:
+        # fuzzy (Jaro-Winkler / Levenshtein / domain) match avoids creating duplicates
+        match = await dedup.find_account_duplicate(db, result.account_name, result.domain)
+        if match and match["score"] >= dedup.ACCOUNT_SUGGEST_AT:
+            account = await db.get(Account, match["account"]["id"])
+            result.signals = {**result.signals, "fuzzy_account_match": {"score": match["score"], "reasons": match["reasons"]}}
     if account is not None:
         result.matched_account_id = account.id
         result.account_name = account.name
@@ -83,7 +97,8 @@ async def quick_log(body: QuickLogRequest, db: AsyncSession = Depends(get_db), _
 
 
 @router.post("/ai/commit-log", response_model=CommitLogResponse)
-async def commit_log(body: CommitLogRequest, background: BackgroundTasks, db: AsyncSession = Depends(get_db), user: User = Depends(require_writer)):
+async def commit_log(body: CommitLogRequest, background: BackgroundTasks, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("activities", "create"))):
+    user = p.user
     """Persist a (user-confirmed) QuickLogResponse: account, contacts, deal, activity, tasks."""
     # 1. Account
     account = None
@@ -94,6 +109,12 @@ async def commit_log(body: CommitLogRequest, background: BackgroundTasks, db: As
         account = (await db.execute(select(Account).where(Account.domain == body.domain.lower()))).scalars().first()
     if account is None and body.account_name:
         account = (await db.execute(select(Account).where(func.lower(Account.name) == body.account_name.lower()))).scalars().first()
+    if account is None and body.account_name:
+        match = await dedup.find_account_duplicate(db, body.account_name, body.domain)
+        if match and match["score"] >= dedup.ACCOUNT_SUGGEST_AT:
+            account = await db.get(Account, match["account"]["id"])
+    if account is not None:
+        await p.ensure_account(db, account.id, "activities")
     if account is None:
         if not body.account_name:
             raise HTTPException(422, "Could not determine the account. Add an account name or pick an existing account.")
@@ -192,6 +213,7 @@ async def commit_log(body: CommitLogRequest, background: BackgroundTasks, db: As
         summary=body.summary,
         raw_text=body.raw_text,
         sentiment=body.sentiment,
+        source="quick_log",
     )
     db.add(activity)
     await db.flush()
@@ -211,18 +233,19 @@ async def commit_log(body: CommitLogRequest, background: BackgroundTasks, db: As
 
 
 @router.post("/search/semantic")
-async def semantic_search(body: SemanticSearchRequest, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
-    return await insights.semantic_search(db, body.query, body.limit)
+async def semantic_search(body: SemanticSearchRequest, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("activities", "read"))):
+    """Hybrid RAG retrieval: pgvector similarity fused with full-text rank over notes, emails and account records."""
+    return await hybrid_search(db, body.query, body.limit, p)
 
 
 @router.get("/search/global")
-async def global_search(q: str, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
+async def global_search(q: str, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("accounts", "read"))):
     like = f"%{q}%"
-    accounts = (await db.execute(select(Account).where(or_(Account.name.ilike(like), Account.domain.ilike(like))).limit(5))).scalars().unique().all()
+    accounts = (await db.execute(p.scope_accounts(select(Account)).where(or_(Account.name.ilike(like), Account.domain.ilike(like))).limit(5))).scalars().unique().all()
     contacts = (
-        await db.execute(select(Contact).where(or_(Contact.first_name.ilike(like), Contact.last_name.ilike(like), Contact.email.ilike(like), (Contact.first_name + " " + Contact.last_name).ilike(like))).limit(5))
+        await db.execute(p.scope_accounts(select(Contact), "contacts", Contact.account_id).where(Contact.status != "erased", or_(Contact.first_name.ilike(like), Contact.last_name.ilike(like), Contact.email.ilike(like), (Contact.first_name + " " + Contact.last_name).ilike(like))).limit(5))
     ).scalars().all()
-    deals = (await db.execute(select(Deal).where(Deal.title.ilike(like)).limit(5))).scalars().unique().all()
+    deals = (await db.execute(p.scope_deals(select(Deal)).where(Deal.title.ilike(like)).limit(5))).scalars().unique().all()
     return {
         "accounts": [{"id": a.id, "name": a.name, "domain": a.domain, "health": a.health_score} for a in accounts],
         "contacts": [{"id": c.id, "name": c.full_name, "job_title": c.job_title, "account_id": c.account_id} for c in contacts],
@@ -231,7 +254,7 @@ async def global_search(q: str, db: AsyncSession = Depends(get_db), _: User = De
 
 
 @router.post("/ai/ask")
-async def ask(body: AskRequest, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
+async def ask(body: AskRequest, db: AsyncSession = Depends(get_db), _: Principal = Depends(authorize("activities", "read"))):
     return await insights.ask(db, body.question, body.account_id, body.deal_id)
 
 
@@ -241,7 +264,7 @@ async def briefing(db: AsyncSession = Depends(get_db), user: User = Depends(get_
 
 
 @router.post("/ai/deals/{deal_id}/draft-email")
-async def draft_email(deal_id: uuid.UUID, purpose: str = "follow-up", db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
+async def draft_email(deal_id: uuid.UUID, purpose: str = "follow-up", db: AsyncSession = Depends(get_db), _: Principal = Depends(authorize("deals", "read"))):
     deal = await db.get(Deal, deal_id)
     if deal is None:
         raise HTTPException(404, "Deal not found")
@@ -249,10 +272,11 @@ async def draft_email(deal_id: uuid.UUID, purpose: str = "follow-up", db: AsyncS
 
 
 @router.get("/ai/accounts/{account_id}/brief")
-async def account_brief(account_id: uuid.UUID, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
+async def account_brief(account_id: uuid.UUID, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("accounts", "read"))):
     account = await db.get(Account, account_id)
     if account is None:
         raise HTTPException(404, "Account not found")
+    await p.ensure_account(db, account_id)
     deals = [deal_card(d) for d in (await db.execute(select(Deal).where(Deal.account_id == account_id))).scalars().unique().all()]
     activities = (
         await db.execute(select(Activity).where(Activity.account_id == account_id, Activity.activity_type != "system").order_by(Activity.occurred_at.desc()).limit(10))
@@ -261,17 +285,43 @@ async def account_brief(account_id: uuid.UUID, db: AsyncSession = Depends(get_db
 
 
 @router.get("/dashboard/summary")
-async def dashboard(db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
-    fc = await pipeline_service.forecast(db)
-    fc["open_tasks"] = await pipeline_service.open_task_count(db)
-    fc["overdue_tasks"] = (
-        await db.execute(select(func.count()).select_from(Task).where(Task.completed.is_(False), Task.due_date < date.today()))
-    ).scalar_one()
+async def dashboard(db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("deals", "read"))):
+    fc = await pipeline_service.forecast(db, p)
+    task_q = select(func.count()).select_from(Task).where(Task.completed.is_(False))
+    if p.is_own_scope("tasks"):
+        task_q = task_q.where(or_(Task.owner_id == p.id, Task.assignee_id == p.id))
+    fc["open_tasks"] = (await db.execute(task_q)).scalar_one()
+    fc["overdue_tasks"] = (await db.execute(task_q.where(Task.due_date < date.today()))).scalar_one()
     return fc
 
 
-@router.post("/admin/rescore")
-async def rescore(db: AsyncSession = Depends(get_db), user: User = Depends(require_writer)):
-    if user.role not in ("super_admin", "sales_manager"):
-        raise HTTPException(403, "Managers only")
-    return {"accounts_rescored": await scoring.rescore_all(db)}
+@router.get("/alerts")
+async def alerts(db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("deals", "read"))):
+    """Open alerts from the deal risk & slippage copilot."""
+    from app.models import DealAlert
+
+    stmt = p.scope_deals(select(DealAlert).join(Deal, DealAlert.deal_id == Deal.id)).where(DealAlert.resolved_at.is_(None)).order_by(DealAlert.created_at.desc())
+    rows = (await db.execute(stmt)).scalars().unique().all()
+    order = {"high": 0, "medium": 1, "low": 2}
+    return sorted([{"id": a.id, "kind": a.kind, "severity": a.severity, "message": a.message, "details": a.details, "created_at": a.created_at,
+                    "deal": {"id": a.deal.id, "title": a.deal.title, "account": a.deal.account.name, "amount": float(a.deal.amount), "currency": a.deal.currency}}
+                   for a in rows], key=lambda x: order[x["severity"]])
+
+
+@router.post("/ai/transcribe")
+async def transcribe(file: UploadFile = File(...), account_id: uuid.UUID | None = Form(default=None), db: AsyncSession = Depends(get_db),
+                     p: Principal = Depends(authorize("activities", "read"))):
+    """Private audio transcription -> ambient extraction preview (same contract as /ai/quick-log)."""
+    data = await file.read()
+    if len(data) > settings.max_upload_mb * 1024 * 1024:
+        raise HTTPException(413, f"Audio exceeds {settings.max_upload_mb} MB")
+    try:
+        transcript = await voice.transcribe(data, file.filename or "audio.webm", file.content_type)
+    except voice.TranscriptionUnavailable as exc:
+        raise HTTPException(503, str(exc))
+    if not transcript.strip():
+        raise HTTPException(422, "No speech detected in the recording")
+    known = [(a.name, a.domain) for a in (await db.execute(p.scope_accounts(select(Account)))).scalars().unique().all()]
+    result = await _enrich(db, await ai_extractor.extract(transcript, known), account_id)
+    result.signals = {**result.signals, "transcript": transcript}
+    return result

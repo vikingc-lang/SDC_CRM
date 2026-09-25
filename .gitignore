@@ -14,3 +14,7 @@ next-env.d.ts
 
 # OS
 .DS_Store
+
+# Runtime data
+backend/storage/
+backend/erp-exchange/

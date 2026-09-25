@@ -19,6 +19,13 @@ class Settings(BaseSettings):
     jwt_expire_minutes: int = 60 * 12
 
     cors_origins: str = "http://localhost:3000"
+    public_web_url: str = "http://localhost:3000"
+
+    # Encrypts stored secrets (mailbox passwords). Derived from JWT_SECRET when unset.
+    data_encryption_key: str | None = None
+    # File storage for attachments, generated PDFs and collateral (a mounted volume in production).
+    storage_dir: str = "./storage"
+    max_upload_mb: int = 25
 
     # --- Intelligence layer -------------------------------------------------
     # 'ollama' (private, local) | 'aws_bedrock' (Claude in your VPC) |
@@ -33,6 +40,19 @@ class Settings(BaseSettings):
     bedrock_embed_model_id: str = "amazon.titan-embed-text-v1"
     anthropic_model: str = "claude-opus-5"
     llm_timeout_seconds: float = 60.0
+
+    # Voice: 'whisper_asr' (self-hosted service) | 'faster_whisper' (in-process) | 'disabled'
+    transcription_provider: Literal["whisper_asr", "faster_whisper", "disabled"] = "disabled"
+    whisper_endpoint: str = "http://localhost:9000"
+    whisper_model: str = "base"
+
+    # ERP / back-office: 'demo' | 'file' (JSON exchange folder) | 'rest' (middleware API) | 'disabled'
+    erp_connector: Literal["demo", "file", "rest", "disabled"] = "demo"
+    erp_exchange_dir: str = "./erp-exchange"
+    erp_rest_url: str | None = None
+    erp_rest_token: str | None = None
+    # JSON map of SDC module -> webhook URL for ecosystem event delivery, e.g. {"yield": "http://yield/api/events"}
+    ecosystem_webhooks: str = "{}"
 
     # 'hash' (offline feature-hashing) | 'ollama' | 'aws_bedrock'
     embedding_provider: Literal["hash", "ollama", "aws_bedrock"] = "hash"

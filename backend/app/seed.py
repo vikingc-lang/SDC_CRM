@@ -1,11 +1,13 @@
-"""Seed relate [R] with demo data.
+"""Seed relate [R] with a demo workspace that exercises every capability pillar.
 
     python -m app.seed            # full demo dataset (idempotent)
     python -m app.seed --minimal  # specification minimum: 3 accounts, 6 contacts, 3 active deals
-    python -m app.seed --reset    # wipe CRM data first
+    python -m app.seed --reset    # wipe everything (including the append-only ledgers) first
 
-Pipeline: the four open stage gates (Discovery, Pain Fit, Solution Demo,
-Proposal/InfoSec) plus the two terminal states (Closed-Won, Closed-Lost).
+Four pipelines (Enterprise Direct, Inbound Mid-Market, Renewals & Upsells,
+Partner Channels) each with their own stage gates; product catalog with tiered
+rate cards; approval policies; document templates; partners and a partner
+portal user; contracts, onboarding, tickets, usage and ERP-synced invoices.
 """
 from __future__ import annotations
 
@@ -13,31 +15,34 @@ import argparse
 import asyncio
 from datetime import date, datetime, timedelta, timezone
 
+from fpdf import FPDF
 from sqlalchemy import func, select, text
 
 from app.core.database import SessionLocal
+from app.core.rbac import seed_permissions
 from app.core.security import hash_password
-from app.models import Account, Activity, Contact, Deal, DealStageHistory, Pipeline, PipelineStage, Task, User
-from app.services import embeddings, scoring
+from app.models import (
+    Account, Activity, ApprovalPolicy, Collateral, Contact, Contract, CustomFieldDefinition, Deal, DealPartner, DealRegistration,
+    DealStageHistory, FxRate, OnboardingMilestone, Partner, Pipeline, PipelineStage, PriceBookEntry, Product, ProductUsage, Quote,
+    SupportTicket, Task, User,
+)
+from app.services import clm, cpq, embeddings, erp, fx, insights, prm, scoring, sla, storage
+from app.services.pipeline_templates import PIPELINES
+from app.services.search import account_document
+from app.services.success import provision_onboarding
 
 DEMO_PASSWORD = "relate123"
 
+# (email, name, role, manager email)
 USERS = [
-    ("admin@relate.demo", "Avery Admin", "super_admin"),
-    ("marcus@relate.demo", "Marcus Vance", "sales_manager"),
-    ("priya@relate.demo", "Priya Raman", "sales_rep"),
-    ("diego@relate.demo", "Diego Alvarez", "sales_rep"),
-    ("viewer@relate.demo", "Robin Viewer", "read_only"),
+    ("admin@relate.demo", "Avery Admin", "super_admin", None),
+    ("marcus@relate.demo", "Marcus Vance", "sales_manager", "admin@relate.demo"),
+    ("priya@relate.demo", "Priya Raman", "account_executive", "marcus@relate.demo"),
+    ("diego@relate.demo", "Diego Alvarez", "account_executive", "marcus@relate.demo"),
+    ("sam@relate.demo", "Sam Okoye", "sdr", "marcus@relate.demo"),
+    ("viewer@relate.demo", "Robin Viewer", "auditor", None),
 ]
-
-STAGES = [
-    ("Discovery", 10, False, False),
-    ("Pain Fit", 25, False, False),
-    ("Solution Demo", 50, False, False),
-    ("Proposal/InfoSec", 75, False, False),
-    ("Closed-Won", 100, True, False),
-    ("Closed-Lost", 0, False, True),
-]
+PARTNER_USER = ("partner@northstar-partners.com", "Nia Fontaine")
 
 # Each account: (name, domain, industry, tier, owner_email, contacts, deals, activities, tasks)
 # contacts: (first, last, email, title, role)
@@ -153,100 +158,434 @@ ACCOUNTS = [
     ),
 ]
 
+# Firmographics & customer master per account
+FIRMO = {
+    "Apex Industrial Supply": dict(annual_revenue=420_000_000, employee_count=1800, industry_code="423840", legal_name="Apex Industrial Supply LLC",
+                                   locations=[{"type": "HQ", "city": "Cleveland", "region": "OH", "country": "US"}, {"type": "DC", "city": "Dallas", "region": "TX", "country": "US"}],
+                                   custom={"erp_region": "NA", "strategic_account": True}),
+    "Northwind Logistics": dict(annual_revenue=1_250_000_000, employee_count=6400, industry_code="484121", locations=[{"type": "HQ", "city": "Rotterdam", "country": "NL"}],
+                                custom={"erp_region": "EMEA"}),
+    "Helios Energy": dict(annual_revenue=5_800_000_000, employee_count=14200, industry_code="221122", legal_name="Helios Energy AG",
+                          locations=[{"type": "HQ", "city": "Munich", "country": "DE"}], custom={"erp_region": "EMEA", "strategic_account": True}),
+    "Bluepeak Health": dict(annual_revenue=2_100_000_000, employee_count=9800, industry_code="622110", legal_name="Bluepeak Health System Inc.", lifecycle="customer",
+                            locations=[{"type": "HQ", "city": "Denver", "region": "CO", "country": "US"}], custom={"erp_region": "NA"}),
+    "Cobalt Retail Group": dict(annual_revenue=310_000_000, employee_count=2300, industry_code="452319", locations=[{"type": "HQ", "city": "Atlanta", "region": "GA", "country": "US"}]),
+    "Summit Foods Co.": dict(annual_revenue=640_000_000, employee_count=3100, industry_code="311999", legal_name="Summit Foods Company",
+                             locations=[{"type": "HQ", "city": "Minneapolis", "region": "MN", "country": "US"}]),
+    "Vertex Manufacturing": dict(annual_revenue=85_000_000, employee_count=420, industry_code="332710", locations=[{"type": "HQ", "city": "Toledo", "region": "OH", "country": "US"}]),
+    "Orion Financial": dict(annual_revenue=3_400_000_000, employee_count=7600, industry_code="523920", legal_name="Orion Financial Corp.",
+                            locations=[{"type": "HQ", "city": "Boston", "region": "MA", "country": "US"}, {"type": "Office", "city": "London", "country": "GB"}]),
+}
+
+# Extra contact profile data: email -> fields
+CONTACT_PROFILE = {
+    "elena.rostova@apexindustrial.com": dict(timezone="America/New_York", department="Procurement", mobile="+1 216 555 0142",
+                                             linkedin_url="https://www.linkedin.com/in/elena-rostova", privacy_regime="CCPA", consent_email="granted", consent_basis="consent"),
+    "james.cole@apexindustrial.com": dict(timezone="America/New_York", department="IT", privacy_regime="CCPA", consent_email="granted", consent_basis="consent"),
+    "s.okafor@northwind.io": dict(timezone="Europe/Amsterdam", department="Operations", privacy_regime="GDPR", consent_email="granted", consent_basis="consent"),
+    "liam.chen@northwind.io": dict(timezone="Europe/Amsterdam", department="Fleet Systems", privacy_regime="GDPR", consent_email="unknown"),
+    "marta.keller@heliosenergy.com": dict(timezone="Europe/Berlin", department="Digital Transformation", privacy_regime="GDPR",
+                                          consent_email="unknown", consent_basis="legitimate_interest"),
+    "raj.patel@heliosenergy.com": dict(timezone="Europe/Berlin", department="Finance", privacy_regime="GDPR", consent_email="granted", consent_basis="consent"),
+    "nora.lindqvist@bluepeakhealth.org": dict(timezone="America/Denver", department="IT", privacy_regime="CCPA", consent_email="granted", consent_basis="contract"),
+    "grace.huang@cobaltretail.com": dict(timezone="America/New_York", department="eCommerce", opt_out_email=True, privacy_regime="CCPA"),
+    "hannah.weiss@orionfinancial.com": dict(timezone="America/New_York", department="Revenue Operations", privacy_regime="CCPA", consent_email="granted", consent_basis="consent"),
+}
+
+PRODUCTS = [
+    ("REL-PLAT", "relate [R] Platform", "Private-cloud CRM subscription", "relate [R]", "recurring", "user / month",
+     {"USD": [(1, 65), (100, 58), (500, 49)], "EUR": [(1, 60), (100, 53), (500, 45)], "GBP": [(1, 52), (100, 46), (500, 39)]}),
+    ("REL-AI", "Ambient AI add-on", "Quick-Log, voice transcription, copilot", "relate [R]", "recurring", "user / month",
+     {"USD": [(1, 20), (100, 17), (500, 14)], "EUR": [(1, 18), (100, 16), (500, 13)]}),
+    ("REL-SUP", "Premium Support", "24x7 support with named TAM", "relate [R]", "recurring", "org / month", {"USD": [(1, 1500)], "EUR": [(1, 1400)]}),
+    ("REL-IMPL", "Implementation Services", "Deployment, migration and enablement", "Services", "one_time", "project", {"USD": [(1, 15000)], "EUR": [(1, 14000)]}),
+    ("PROMO-Q", "promo [Q] module", "SDC Solutions module", "SDC Solutions", "recurring", "user / month", {"USD": [(1, 45), (100, 40)]}),
+    ("YIELD-S", "Yield [S] module", "SDC Solutions module", "SDC Solutions", "recurring", "user / month", {"USD": [(1, 55), (100, 49)]}),
+    ("DEDUCT", "deduct module", "SDC Solutions module", "SDC Solutions", "recurring", "user / month", {"USD": [(1, 40), (100, 35)]}),
+]
+
+POLICIES = [
+    ("Discount above 10% needs sales manager", "discount_pct", 10, "sales_manager"),
+    ("Discount above 25% needs finance", "discount_pct", 25, "finance"),
+    ("Payment terms beyond NET45 need finance", "payment_terms", 45, "finance"),
+    ("Accounts on credit hold need finance", "credit_hold", None, "finance"),
+    ("Deals above 500k TCV need sales manager", "tcv", 500000, "sales_manager"),
+]
+
+CUSTOM_FIELDS = [
+    ("account", "erp_region", "ERP region", "select", ["NA", "EMEA", "APAC"]),
+    ("account", "strategic_account", "Strategic account", "boolean", []),
+    ("account", "procurement_portal", "Procurement portal", "url", []),
+    ("contact", "preferred_language", "Preferred language", "select", ["English", "German", "Dutch", "French"]),
+    ("deal", "competitor_incumbent", "Incumbent vendor", "text", []),
+]
+
+
+def _pdf(title: str, lines: list[str]) -> bytes:
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 18)
+    pdf.cell(0, 12, title, new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", size=11)
+    for line in lines:
+        pdf.multi_cell(0, 7, line, new_x="LMARGIN", new_y="NEXT")
+    return bytes(pdf.output())
+
+
+async def _reset(db) -> None:
+    await db.execute(text("SET LOCAL relate.allow_ledger_reset = 'on'"))
+    tables = (await db.execute(text("SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'alembic_version'"))).scalars().all()
+    await db.execute(text("TRUNCATE " + ", ".join(f'"{t}"' for t in tables) + " RESTART IDENTITY CASCADE"))
+    await db.commit()
+
 
 async def seed(minimal: bool = False, reset: bool = False) -> None:
     async with SessionLocal() as db:
         if reset:
-            await db.execute(text("TRUNCATE deal_stage_history, tasks, activities, deals, contacts, accounts, pipeline_stages, pipelines, users CASCADE"))
-            await db.commit()
-
+            await _reset(db)
         if (await db.execute(select(func.count()).select_from(User))).scalar_one():
             print("Database already seeded. Use --reset to start over.")
             return
 
-        users = {}
-        for email, name, role in USERS:
-            u = User(email=email, full_name=name, role=role, password_hash=hash_password(DEMO_PASSWORD))
-            db.add(u)
-            users[email] = u
-        pipeline = Pipeline(name="Enterprise Sales", is_default=True)
-        db.add(pipeline)
-        await db.flush()
-        stages = {}
-        for order, (name, prob, won, lost) in enumerate(STAGES, start=1):
-            s = PipelineStage(pipeline_id=pipeline.id, name=name, stage_order=order, default_probability=prob, is_closed_won=won, is_closed_lost=lost)
-            db.add(s)
-            stages[name] = s
-        await db.flush()
-
         now = datetime.now(timezone.utc)
         today = date.today()
+
+        # ---- platform core -----------------------------------------------------------------
+        await seed_permissions(db)
+        for cur, rate in fx.DEFAULT_RATES.items():
+            db.add(FxRate(currency=cur, rate_to_usd=rate))
+        users: dict[str, User] = {}
+        for email, name, role, _ in USERS:
+            users[email] = User(email=email, full_name=name, role=role, password_hash=hash_password(DEMO_PASSWORD))
+            db.add(users[email])
+        await db.flush()
+        for email, _, _, manager in USERS:
+            if manager:
+                users[email].manager_id = users[manager].id
+        for entity, key, label, ftype, options in CUSTOM_FIELDS:
+            db.add(CustomFieldDefinition(entity=entity, key=key, label=label, field_type=ftype, options=options))
+
+        pipelines: dict[str, Pipeline] = {}
+        stages: dict[tuple[str, str], PipelineStage] = {}
+        for spec in PIPELINES:
+            p = Pipeline(name=spec["name"], kind=spec["kind"], is_default=spec["is_default"], description=spec["description"])
+            db.add(p)
+            await db.flush()
+            pipelines[spec["kind"]] = p
+            for order, (name, prob, rules) in enumerate(spec["stages"], start=1):
+                s = PipelineStage(pipeline_id=p.id, name=name, stage_order=order, default_probability=prob, gate_rules=rules,
+                                  is_closed_won=name == "Closed-Won", is_closed_lost=name == "Closed-Lost")
+                db.add(s)
+                stages[(spec["kind"], name)] = s
+        await db.flush()
+
+        products: dict[str, Product] = {}
+        for sku, name, desc, family, billing, unit, prices in PRODUCTS:
+            prod = Product(sku=sku, name=name, description=desc, family=family, billing_type=billing, unit=unit,
+                           prices=[PriceBookEntry(currency=c, tiers=[{"min_qty": q, "unit_price": up} for q, up in tiers]) for c, tiers in prices.items()])
+            db.add(prod)
+            products[sku] = prod
+        for name, rule, threshold, role in POLICIES:
+            db.add(ApprovalPolicy(name=name, rule_type=rule, threshold=threshold, approver_role=role))
+        await clm.ensure_templates(db)
+        await db.flush()
+
+        # ---- accounts, contacts, deals, activities --------------------------------------------
+        direct = pipelines["direct"]
+        accounts: dict[str, Account] = {}
+        deals: dict[str, Deal] = {}
+        contacts_by_email: dict[str, Contact] = {}
         dataset = ACCOUNTS[:3] if minimal else ACCOUNTS
-        for name, domain, industry, tier, owner_email, contacts, deals, activities, tasks in dataset:
+        for name, domain, industry, tier, owner_email, contacts, deal_specs, activities, tasks in dataset:
             owner = users[owner_email]
-            account = Account(name=name, domain=domain, industry=industry, tier=tier, owner_id=owner.id, custom_metadata={},
-                              created_at=now - timedelta(days=60))
+            f = FIRMO.get(name, {})
+            account = Account(name=name, domain=domain, industry=industry, tier=tier, owner_id=owner.id, created_at=now - timedelta(days=60),
+                              annual_revenue=f.get("annual_revenue"), employee_count=f.get("employee_count"), industry_code=f.get("industry_code"),
+                              legal_name=f.get("legal_name"), locations=f.get("locations", []), lifecycle_stage=f.get("lifecycle", "prospect"),
+                              custom_metadata=dict(f.get("custom", {})))
             db.add(account)
             await db.flush()
-            contact_rows = []
+            accounts[name] = account
+            rows = []
             for first, last, email, title, role in contacts:
                 c = Contact(account_id=account.id, first_name=first, last_name=last, email=email, job_title=title, buying_role=role,
-                            phone=None)
+                            **CONTACT_PROFILE.get(email, {}))
                 db.add(c)
-                contact_rows.append(c)
+                rows.append(c)
+                contacts_by_email[email] = c
             await db.flush()
-            key_contact = next((c for c in contact_rows if c.buying_role in ("Champion", "Decision Maker")), contact_rows[0])
+            key_contact = next((c for c in rows if c.buying_role in ("Champion", "Decision Maker")), rows[0])
 
             deal_rows = []
-            for title, amount, stage_name, days_in_stage, close_in, loss_reason in deals:
-                stage = stages[stage_name]
+            for title, amount, stage_name, days_in_stage, close_in, loss_reason in deal_specs:
+                stage = stages[("direct", stage_name)]
                 entered = now - timedelta(days=days_in_stage)
-                d = Deal(
-                    title=title, account_id=account.id, pipeline_id=pipeline.id, stage_id=stage.id, owner_id=owner.id,
-                    amount=amount, target_close_date=today + timedelta(days=close_in), primary_contact_id=key_contact.id,
-                    stage_entered_at=entered, created_at=entered - timedelta(days=10 * stage.stage_order),
-                    closed_at=entered if stage.is_closed_won or stage.is_closed_lost else None,
-                    loss_reason=loss_reason, risk_factors={}, ai_insights={},
-                )
+                d = Deal(title=title, account_id=account.id, pipeline_id=direct.id, stage_id=stage.id, owner_id=owner.id, amount=amount,
+                         target_close_date=today + timedelta(days=close_in), original_close_date=today + timedelta(days=close_in),
+                         primary_contact_id=key_contact.id, stage_entered_at=entered, created_at=entered - timedelta(days=10 * stage.stage_order),
+                         closed_at=entered if stage.is_closed else None, loss_reason=loss_reason,
+                         loss_debrief="Selected an SAP add-on bundled with their existing ERP licence; integration effort was the deciding factor." if loss_reason else None,
+                         loss_competitor="SAP" if loss_reason == "competitor" else None, risk_factors={}, ai_insights={})
                 db.add(d)
                 deal_rows.append(d)
+                deals[title] = d
                 await db.flush()
-                # reconstruct a plausible stage-gate audit trail
+                path = [s for s in PIPELINES[0]["stages"][:4] if stages[("direct", s[0])].stage_order <= min(stage.stage_order, 4 if stage.is_closed_won else 2 if stage.is_closed_lost else stage.stage_order)]
+                names = [s[0] for s in path] + ([stage_name] if stage.is_closed else [])
                 prev = None
-                path = [s for s in STAGES if not s[2] and not s[3] and stages[s[0]].stage_order <= stage.stage_order]
-                if stage.is_closed_won or stage.is_closed_lost:
-                    path = [s for s in STAGES[:4] if stages[s[0]].stage_order <= (4 if stage.is_closed_won else 2)] + [(stage_name,)]
-                for i, step in enumerate(path):
-                    to = stages[step[0]]
+                for i, n in enumerate(names):
+                    to = stages[("direct", n)]
                     db.add(DealStageHistory(deal_id=d.id, from_stage_id=prev.id if prev else None, to_stage_id=to.id, changed_by=owner.id,
-                                            changed_at=entered - timedelta(days=7 * (len(path) - 1 - i))))
+                                            changed_at=entered - timedelta(days=7 * (len(names) - 1 - i))))
                     prev = to
 
             main_deal = deal_rows[0] if deal_rows else None
             for days_ago, kind, sentiment, summary in activities:
                 a = Activity(account_id=account.id, deal_id=main_deal.id if main_deal else None, contact_id=key_contact.id, user_id=owner.id,
-                             activity_type=kind, sentiment=sentiment, summary=summary, occurred_at=now - timedelta(days=days_ago, hours=3))
+                             activity_type=kind, sentiment=sentiment, summary=summary, occurred_at=now - timedelta(days=days_ago, hours=3),
+                             direction="outbound" if kind == "email" else None, attendance="attended" if kind == "meeting" else None,
+                             duration_seconds=1800 if kind == "call" else 3600 if kind == "meeting" else None,
+                             disposition="connected" if kind == "call" else None)
                 a.embedding = await embeddings.embed(summary)
                 db.add(a)
             for title, due_in in tasks:
-                db.add(Task(title=title, due_date=today + timedelta(days=due_in), account_id=account.id,
-                            deal_id=main_deal.id if main_deal else None, owner_id=owner.id, source="ai"))
+                db.add(Task(title=title, due_date=today + timedelta(days=due_in), account_id=account.id, deal_id=main_deal.id if main_deal else None,
+                            owner_id=owner.id, assignee_id=owner.id, source="ai", priority="high" if due_in < 0 else "normal"))
             await db.flush()
 
-        # AI insights that the stage triggers would have produced
-        for d in (await db.execute(select(Deal))).scalars().unique().all():
-            if d.title == "Supply Chain Analytics Platform":
-                d.ai_insights = {"competitors": ["Salesforce"], "pain_points": ["Forecasting happens in spreadsheets and stock-outs cost ~$400k a year."]}
-            if d.title == "Fleet Telemetry Rollout":
-                d.ai_insights = {"competitors": ["HubSpot"], "pain_points": ["No visibility into idle time across 1,200 trucks."]}
-            if d.title == "Grid Asset Intelligence Suite":
-                d.ai_insights = {"pain_points": ["Manual asset inspections are slow and error-prone."]}
+        insights_by_deal = {
+            "Supply Chain Analytics Platform": {"competitors": ["Salesforce"], "pain_points": ["Forecasting happens in spreadsheets and stock-outs cost ~$400k a year."]},
+            "Fleet Telemetry Rollout": {"competitors": ["HubSpot"], "pain_points": ["No visibility into idle time across 1,200 trucks."]},
+            "Grid Asset Intelligence Suite": {"pain_points": ["Manual asset inspections are slow and error-prone."]},
+        }
+        for title, ins in insights_by_deal.items():
+            if title in deals:
+                deals[title].ai_insights = ins
+
+        if not minimal:
+            await _enterprise(db, users, accounts, deals, contacts_by_email, stages, pipelines, products, now, today)
 
         await db.flush()
         for account in (await db.execute(select(Account))).scalars().unique().all():
+            account.embedding = await embeddings.embed(account_document(account))
             await scoring.rescore_account(db, account.id)
         await db.commit()
-        print(f"Seeded {len(dataset)} accounts. Log in with marcus@relate.demo / {DEMO_PASSWORD}")
+        if not minimal:
+            await insights.scan_pipeline(db)
+            await sla.escalate_overdue(db)
+        total = (await db.execute(select(func.count()).select_from(Account))).scalar_one()
+        print(f"Seeded {total} accounts. Log in with marcus@relate.demo / {DEMO_PASSWORD} "
+              f"(partner portal: {PARTNER_USER[0]} / {DEMO_PASSWORD})")
+
+
+async def _enterprise(db, users, accounts, deals, contacts, stages, pipelines, products, now, today) -> None:
+    marcus, priya, diego, sam, admin = (users[e] for e in ("marcus@relate.demo", "priya@relate.demo", "diego@relate.demo", "sam@relate.demo", "admin@relate.demo"))
+
+    # -- hierarchies (pillar 1) -------------------------------------------------------------------
+    helios_group = Account(name="Helios Group", domain="heliosgroup.com", industry="Energy & Utilities", tier="Enterprise", owner_id=diego.id,
+                           annual_revenue=11_200_000_000, employee_count=31000, legal_name="Helios Group SE", custom_metadata={"erp_region": "EMEA"},
+                           locations=[{"type": "HQ", "city": "Frankfurt", "country": "DE"}], created_at=now - timedelta(days=200))
+    renewables = Account(name="Helios Renewables", domain="heliosrenewables.com", industry="Energy & Utilities", tier="Mid-Market", owner_id=diego.id,
+                         annual_revenue=900_000_000, employee_count=2100, lifecycle_stage="customer", legal_name="Helios Renewables GmbH",
+                         payment_terms="NET30", custom_metadata={"erp_region": "EMEA"}, locations=[{"type": "HQ", "city": "Hamburg", "country": "DE"}],
+                         created_at=now - timedelta(days=400))
+    orion_holdings = Account(name="Orion Holdings", domain="orionholdings.com", industry="Financial Services", tier="Enterprise", owner_id=marcus.id,
+                             annual_revenue=9_000_000_000, employee_count=18000, created_at=now - timedelta(days=300))
+    orion_am = Account(name="Orion Asset Management", domain="orion-am.com", industry="Financial Services", tier="Enterprise", owner_id=marcus.id,
+                       lifecycle_stage="customer", annual_revenue=1_700_000_000, employee_count=2600, created_at=now - timedelta(days=500))
+    # a planted near-duplicate for the dedup demo (similar name, different domain -> suggestion, not auto-merge)
+    apex_dupe = Account(name="Apex Industrial Supplies", domain="apexindustrialsupply.com", industry="Industrial Distribution", tier="Mid-Market",
+                        owner_id=sam.id, annual_revenue=None, custom_metadata={"source": "trade show list"}, created_at=now - timedelta(days=5))
+    for a in (helios_group, renewables, orion_holdings, orion_am, apex_dupe):
+        db.add(a)
+    await db.flush()
+    accounts["Helios Energy"].parent_id = helios_group.id
+    renewables.parent_id = accounts["Helios Energy"].id
+    accounts["Orion Financial"].parent_id = orion_holdings.id
+    orion_am.parent_id = orion_holdings.id
+    db.add(Contact(account_id=apex_dupe.id, first_name="Elena", last_name="Rostova", job_title="VP Procurement", buying_role="Evaluator"))
+    ren_c = Contact(account_id=renewables.id, first_name="Jonas", last_name="Weber", email="jonas.weber@heliosrenewables.com", job_title="Head of Operations",
+                    buying_role="Champion", timezone="Europe/Berlin", department="Operations", privacy_regime="GDPR", consent_email="granted", consent_basis="contract")
+    oam_c = Contact(account_id=orion_am.id, first_name="Priscilla", last_name="Grant", email="p.grant@orion-am.com", job_title="COO",
+                    buying_role="Decision Maker", timezone="America/New_York", department="Operations")
+    db.add_all([ren_c, oam_c])
+
+    # -- champion turnover at Bluepeak (churn signal) -----------------------------------------------
+    blue = accounts["Bluepeak Health"]
+    db.add(Contact(account_id=blue.id, first_name="Ian", last_name="Moss", email="ian.moss@bluepeakhealth.org", job_title="Director of Patient Experience",
+                   buying_role="Champion", status="departed", departed_at=now - timedelta(days=40), department="Patient Experience"))
+
+    # -- two-way email threads & meeting attendance (relationship strength) -----------------------
+    def thread(contact, owner, deal, hours_to_reply, days_ago, subject):
+        base = now - timedelta(days=days_ago)
+        db.add(Activity(account_id=contact.account_id, contact_id=contact.id, user_id=owner.id, deal_id=deal.id if deal else None, activity_type="email",
+                        direction="outbound", subject=subject, summary=f"{subject}: sent follow-up materials.", sentiment="neutral", occurred_at=base, source="email_sync"))
+        if hours_to_reply is not None:
+            db.add(Activity(account_id=contact.account_id, contact_id=contact.id, deal_id=deal.id if deal else None, activity_type="email", direction="inbound",
+                            subject=f"Re: {subject}", summary=f"Re: {subject}: thanks, reviewing with the team.", sentiment="positive",
+                            occurred_at=base + timedelta(hours=hours_to_reply), source="email_sync"))
+    apex_deal, nw_deal = deals["Supply Chain Analytics Platform"], deals["Fleet Telemetry Rollout"]
+    thread(contacts["elena.rostova@apexindustrial.com"], marcus, apex_deal, 2, 6, "Pricing proposal")
+    thread(contacts["elena.rostova@apexindustrial.com"], marcus, apex_deal, 3, 3, "Data residency addendum")
+    thread(contacts["james.cole@apexindustrial.com"], marcus, apex_deal, 30, 9, "Security questionnaire")
+    thread(contacts["liam.chen@northwind.io"], priya, nw_deal, None, 21, "Latency benchmark results")
+    thread(contacts["s.okafor@northwind.io"], priya, nw_deal, 60, 25, "Rollout timeline")
+    db.add(Activity(account_id=nw_deal.account_id, contact_id=contacts["s.okafor@northwind.io"].id, user_id=priya.id, deal_id=nw_deal.id,
+                    activity_type="meeting", attendance="no_show", subject="Executive alignment", summary="Executive alignment call: Samantha did not join.",
+                    sentiment="negative", occurred_at=now - timedelta(days=17), duration_seconds=1800, agenda="1. Pilot results\n2. Timeline\n3. Next steps"))
+    db.add(Activity(account_id=nw_deal.account_id, contact_id=contacts["liam.chen@northwind.io"].id, user_id=priya.id, deal_id=nw_deal.id,
+                    activity_type="call", direction="outbound", disposition="left_voicemail", duration_seconds=45, summary="Called Liam re: pilot delay, left voicemail.",
+                    sentiment="neutral", occurred_at=now - timedelta(days=16)))
+    # slippage: close date pushed twice
+    nw_deal.original_close_date, nw_deal.close_date_pushes = today + timedelta(days=5), 2
+
+    # -- CPQ: approved quote + Order Form out for signature (Apex) -------------------------------------
+    apex_quote = Quote(deal_id=apex_deal.id, quote_number=await cpq.next_quote_number(db), name="Supply Chain Analytics: 3-year", currency="USD",
+                       term_months=12, payment_terms="NET30", created_by=marcus.id)
+    db.add(apex_quote)
+    await db.flush()
+    await cpq.rebuild(db, apex_quote, [{"product_id": products["REL-PLAT"].id, "quantity": 100, "discount_pct": 8},
+                                       {"product_id": products["REL-AI"].id, "quantity": 100, "discount_pct": 0},
+                                       {"product_id": products["REL-IMPL"].id, "quantity": 1, "discount_pct": 0}])
+    await cpq.submit(db, apex_quote)
+    order_form = await clm.generate(db, "order_form", accounts["Apex Industrial Supply"], apex_deal, apex_quote, marcus.id)
+    await clm.send_for_signature(db, order_form, [{"name": "Elena Rostova", "email": "elena.rostova@apexindustrial.com", "party": "customer"},
+                                                  {"name": "Marcus Vance", "email": "marcus@relate.demo", "party": "company"}])
+    # -- CPQ: quote needing manager + finance approval (Summit Foods) ------------------------------------
+    summit_deal = deals["Trade Deduction Automation"]
+    summit_quote = Quote(deal_id=summit_deal.id, quote_number=await cpq.next_quote_number(db), name="Deduction automation rollout", currency="USD",
+                         term_months=24, payment_terms="NET60", created_by=diego.id)
+    db.add(summit_quote)
+    await db.flush()
+    await cpq.rebuild(db, summit_quote, [{"product_id": products["DEDUCT"].id, "quantity": 120, "discount_pct": 18},
+                                         {"product_id": products["REL-PLAT"].id, "quantity": 40, "discount_pct": 12},
+                                         {"product_id": products["REL-IMPL"].id, "quantity": 1, "discount_pct": 0}])
+    await cpq.submit(db, summit_quote)
+
+    # -- Bluepeak: won deal signed through built-in e-signature -> contract -> onboarding ------------------
+    blue_deal = deals["Patient Engagement Platform"]
+    blue_quote = Quote(deal_id=blue_deal.id, quote_number=await cpq.next_quote_number(db), name="Patient Engagement Platform", currency="USD",
+                       term_months=12, payment_terms="NET30", created_by=marcus.id)
+    db.add(blue_quote)
+    await db.flush()
+    await cpq.rebuild(db, blue_quote, [{"product_id": products["REL-PLAT"].id, "quantity": 400, "discount_pct": 5},
+                                       {"product_id": products["REL-SUP"].id, "quantity": 1, "discount_pct": 0},
+                                       {"product_id": products["REL-IMPL"].id, "quantity": 1, "discount_pct": 0}])
+    blue_quote.status, blue_quote.approved_at = "approved", now - timedelta(days=15)
+    blue_doc = await clm.generate(db, "order_form", blue, blue_deal, blue_quote, marcus.id)
+    await clm.send_for_signature(db, blue_doc, [{"name": "Nora Lindqvist", "email": "nora.lindqvist@bluepeakhealth.org", "party": "customer"},
+                                                {"name": "Marcus Vance", "email": "marcus@relate.demo", "party": "company"}])
+    for signer in sorted(blue_doc.signers, key=lambda s: s.sign_order):
+        await clm.sign(db, signer, signer.signer_name, None, "203.0.113.24" if signer.signer_party == "customer" else "10.0.4.12", "Mozilla/5.0 (seed)")
+    blue_contract = (await db.execute(select(Contract).where(Contract.quote_id == blue_quote.id))).scalars().first()
+    blue_contract.start_date = today - timedelta(days=12)
+    blue_contract.end_date = today - timedelta(days=12) + timedelta(days=364)
+    blue_deal.amount = blue_quote.tcv
+    project = await provision_onboarding(db, blue_deal)
+    # it's been three weeks: kickoff done, technical setup running late
+    project.status, project.kickoff_date = "in_progress", today - timedelta(days=18)
+    for m in project.milestones:
+        m.due_date = m.due_date - timedelta(days=20)
+        if m.position == 0:
+            m.status, m.completed_at = "done", now - timedelta(days=16)
+        elif m.position == 1:
+            m.status = "in_progress"
+    for t in (await db.execute(select(Task).where(Task.milestone_id.in_([m.id for m in project.milestones])))).scalars().unique().all():
+        ms = next(m for m in project.milestones if m.id == t.milestone_id)
+        t.due_date, t.completed = ms.due_date, ms.status == "done"
+
+    # -- contracts for renewals (pillar 7) ------------------------------------------------------------------
+    ren_contract = Contract(account_id=renewables.id, contract_number="CT-2025-0007", name="Helios Renewables: relate [R] Platform", currency="EUR",
+                            start_date=today - timedelta(days=290), end_date=today + timedelta(days=75), acv=138000, tcv=138000, payment_terms="NET30",
+                            terms={"term_months": 12, "lines": [{"sku": "REL-PLAT", "quantity": 220, "net_unit_price": 52.27, "billing_type": "recurring"}]})
+    oam_contract = Contract(account_id=orion_am.id, contract_number="CT-2025-0003", name="Orion Asset Management: Platform + Yield [S]", currency="USD",
+                            start_date=today - timedelta(days=160), end_date=today + timedelta(days=205), acv=264000, tcv=528000, payment_terms="NET45",
+                            terms={"term_months": 24, "lines": [{"sku": "REL-PLAT", "quantity": 250, "net_unit_price": 58}, {"sku": "YIELD-S", "quantity": 120, "net_unit_price": 49}]})
+    db.add_all([ren_contract, oam_contract])
+    await db.flush()
+    await clm.run_renewals(db, today)  # opens the Helios Renewables renewal (expires in 75 days)
+
+    # -- support & adoption signals -------------------------------------------------------------------------
+    db.add_all([
+        SupportTicket(account_id=blue.id, subject="SSO login loop for clinicians", severity="high", status="open", opened_at=now - timedelta(days=4)),
+        SupportTicket(account_id=blue.id, subject="Nightly EHR sync failing", severity="critical", status="open", opened_at=now - timedelta(days=2)),
+        SupportTicket(account_id=renewables.id, subject="Dashboard export formatting", severity="low", status="open", opened_at=now - timedelta(days=9)),
+        SupportTicket(account_id=orion_am.id, subject="API rate limit question", severity="medium", status="resolved", opened_at=now - timedelta(days=30),
+                      resolved_at=now - timedelta(days=28)),
+    ])
+    for week in range(13):
+        d = today - timedelta(days=7 * week)
+        db.add(ProductUsage(account_id=blue.id, metric_date=d, active_users=150 + week * 9, licensed_users=400, feature_adoption=35 + week))
+        db.add(ProductUsage(account_id=renewables.id, metric_date=d, active_users=178 - week, licensed_users=220, feature_adoption=72))
+        db.add(ProductUsage(account_id=orion_am.id, metric_date=d, active_users=205, licensed_users=250, feature_adoption=64))
+
+    # -- partners (pillar 9) --------------------------------------------------------------------------------------
+    northstar = Partner(name="Northstar Partners", partner_type="distributor", tier="gold", domains=["northstar-partners.com"],
+                        territories=["NA-East", "NA-Central"], commission_rate=12, referral_fee_rate=6)
+    brightpath = Partner(name="BrightPath Agency", partner_type="agency", tier="silver", domains=["brightpath.agency"], territories=["EMEA"],
+                         commission_rate=10, referral_fee_rate=5)
+    keystone = Partner(name="Keystone Advisors", partner_type="referral", tier="registered", domains=["keystone-advisors.com"], territories=["NA-West"],
+                       commission_rate=8, referral_fee_rate=7)
+    db.add_all([northstar, brightpath, keystone])
+    await db.flush()
+    db.add(User(email=PARTNER_USER[0], full_name=PARTNER_USER[1], role="partner", partner_id=northstar.id, password_hash=hash_password(DEMO_PASSWORD)))
+    await db.flush()
+    nia = (await db.execute(select(User).where(User.email == PARTNER_USER[0]))).scalars().one()
+    approved = await prm.submit(db, northstar, nia, {"company_name": "Vantage Freight", "domain": "vantagefreight.com", "contact_name": "Leo Marsh",
+                                                     "contact_email": "leo.marsh@vantagefreight.com", "estimated_amount": 96000, "territory": "NA-East",
+                                                     "product_interest": "Platform + Ambient AI", "notes": "Met at a logistics summit; evaluating CRM replacement in Q1."})
+    await prm.decide(db, approved, marcus, True, "Approved: no conflicts.")
+    await prm.submit(db, northstar, nia, {"company_name": "Lumina Retail", "domain": "lumina-retail.com", "contact_name": "Ava Chen",
+                                          "estimated_amount": 90000, "territory": "NA-Central", "product_interest": "promo [Q] + relate [R]"})
+    await prm.submit(db, northstar, nia, {"company_name": "Cobalt Retail Group", "domain": "cobaltretail.com", "estimated_amount": 64000,
+                                          "territory": "NA-East", "product_interest": "Promotions"})
+    db.add(DealPartner(deal_id=deals["Revenue Intelligence Platform"].id, partner_id=brightpath.id, role="co_sell", split_pct=30))
+    db.add(DealPartner(deal_id=blue_deal.id, partner_id=keystone.id, role="referral", split_pct=100))
+    for title, category, tier, domains, lines in (
+        ("relate [R] partner overview", "deck", "registered", [], ["Positioning, ideal customer profile and the private-cloud deployment model.",
+                                                                    "Use with new prospects in your territory."]),
+        ("Battlecard: relate [R] vs incumbent SaaS CRMs", "battlecard", "silver", [], ["Private-cloud data residency, ambient AI capture and stage-gate governance.",
+                                                                                      "Handle objections about migration effort with the import engine."]),
+        ("Channel price list (Gold and above)", "price_list", "gold", [], ["relate [R] Platform: tiered per-user pricing; distributor margin per agreement."]),
+        ("EMEA case study: utilities", "case_study", "registered", ["brightpath.agency"], ["Restricted to BrightPath Agency."]),
+    ):
+        att = storage.save(_pdf(title, lines), f"{title}.pdf", "application/pdf", uploaded_by=admin.id)
+        db.add(att)
+        await db.flush()
+        db.add(Collateral(title=title, category=category, min_tier=tier, allowed_domains=domains, attachment_id=att.id, description=lines[0]))
+
+    # -- a pending NDA for Northwind (e-signature demo) ------------------------------------------------------
+    nda = await clm.generate(db, "nda", accounts["Northwind Logistics"], nw_deal, None, priya.id)
+    await clm.send_for_signature(db, nda, [{"name": "Samantha Okafor", "email": "s.okafor@northwind.io", "party": "customer"},
+                                           {"name": "Priya Raman", "email": "priya@relate.demo", "party": "company"}])
+
+    # -- SDR-sourced inbound lead in the mid-market pipeline ------------------------------------------------------
+    inbound = pipelines["inbound"]
+    lead_acc = Account(name="Quarry Labs", domain="quarrylabs.io", industry="Software", tier="SMB", owner_id=sam.id, custom_metadata={"source": "website demo request"})
+    db.add(lead_acc)
+    await db.flush()
+    db.add(Contact(account_id=lead_acc.id, first_name="Tomas", last_name="Reyes", email="tomas@quarrylabs.io", job_title="Head of Sales", buying_role="Champion"))
+    db.add(Deal(title="Quarry Labs: 25 seats", account_id=lead_acc.id, pipeline_id=inbound.id, stage_id=stages[("inbound", "Qualified")].id, owner_id=sam.id,
+                amount=19500, target_close_date=today + timedelta(days=30), original_close_date=today + timedelta(days=30), source="inbound",
+                risk_factors={}, ai_insights={}))
+    # EUR deal in Helios Renewables expansion
+    db.add(Deal(title="Helios Renewables: Ambient AI expansion", account_id=renewables.id, pipeline_id=pipelines["renewal"].id,
+                stage_id=stages[("renewal", "Customer Review")].id, owner_id=diego.id, amount=26400, currency="EUR", deal_type="upsell", source="direct",
+                target_close_date=today + timedelta(days=45), original_close_date=today + timedelta(days=45), risk_factors={}, ai_insights={}))
+    # an overdue delegated task chain for the SLA engine
+    t1 = Task(title="Collect InfoSec evidence pack from James Cole", due_date=today - timedelta(days=4), account_id=accounts["Apex Industrial Supply"].id,
+              deal_id=apex_deal.id, owner_id=marcus.id, assignee_id=priya.id, priority="high", source="manual")
+    db.add(t1)
+    await db.flush()
+    db.add(Task(title="Submit security questionnaire answers", due_date=today + timedelta(days=3), account_id=accounts["Apex Industrial Supply"].id,
+                deal_id=apex_deal.id, owner_id=marcus.id, assignee_id=marcus.id, depends_on_id=t1.id, source="manual"))
+
+    # an aged receivable at Orion Asset Management puts it on credit hold after the ERP sync
+    from app.models import Invoice
+    db.add(Invoice(account_id=orion_am.id, invoice_number="INV-2025-0412", issue_date=today - timedelta(days=150), due_date=today - timedelta(days=120),
+                   amount=66000, balance=66000, status="open", currency="USD"))
+    await db.flush()
+    await erp.sync_inbound(db)  # demo ERP: customer master + invoices + credit holds
 
 
 if __name__ == "__main__":

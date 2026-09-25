@@ -11,6 +11,7 @@ from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    Computed,
     Date,
     DateTime,
     ForeignKey,
@@ -21,18 +22,18 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.config import settings
 from app.core.database import Base
 
-USER_ROLES = ("super_admin", "sales_manager", "sales_rep", "read_only")
+USER_ROLES = ("super_admin", "sales_manager", "account_executive", "sdr", "auditor", "partner")
 ACCOUNT_TIERS = ("SMB", "Mid-Market", "Enterprise")
 BUYING_ROLES = ("Champion", "Decision Maker", "Economic Buyer", "Blocker", "Evaluator", "Influencer")
-ACTIVITY_TYPES = ("meeting", "call", "note", "email", "system")
+ACTIVITY_TYPES = ("meeting", "call", "note", "email", "system", "file", "document")
 SENTIMENTS = ("positive", "neutral", "negative")
-LOSS_REASONS = ("price", "competitor", "no_decision", "timing", "product_fit", "other")
+LOSS_REASONS = ("competitor", "budget_frozen", "feature_gap", "champion_departed", "price", "no_decision", "timing", "other")
 
 
 def _uuid_pk() -> Mapped[uuid.UUID]:
@@ -51,7 +52,11 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True)
     password_hash: Mapped[str] = mapped_column(String(255))
     full_name: Mapped[str] = mapped_column(String(150))
-    role: Mapped[str] = mapped_column(String(50), default="sales_rep")
+    role: Mapped[str] = mapped_column(String(50), default="account_executive")
+    manager_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    partner_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("partners.id", ondelete="SET NULL"))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    ical_token: Mapped[str | None] = mapped_column(String(64), unique=True)
     created_at: Mapped[datetime] = _created()
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -71,6 +76,28 @@ class Account(Base):
     health_score: Mapped[int] = mapped_column(Integer, default=100)
     owner_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     custom_metadata: Mapped[dict] = mapped_column(JSONB, default=dict)
+    # firmographics & hierarchy (pillar 1)
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("accounts.id", ondelete="SET NULL"), index=True)
+    industry_code: Mapped[str | None] = mapped_column(String(20))
+    annual_revenue: Mapped[Decimal | None] = mapped_column(Numeric(16, 2))
+    employee_count: Mapped[int | None] = mapped_column(Integer)
+    locations: Mapped[list] = mapped_column(JSONB, default=list)
+    alt_domains: Mapped[list] = mapped_column(JSONB, default=list)
+    lifecycle_stage: Mapped[str] = mapped_column(String(20), default="prospect")
+    # customer master (pillar 8)
+    legal_name: Mapped[str | None] = mapped_column(String(255))
+    tax_id: Mapped[str | None] = mapped_column(String(64))
+    billing_address: Mapped[dict] = mapped_column(JSONB, default=dict)
+    credit_limit: Mapped[Decimal | None] = mapped_column(Numeric(16, 2))
+    credit_hold: Mapped[bool] = mapped_column(Boolean, default=False)
+    payment_terms: Mapped[str] = mapped_column(String(20), default="NET30")
+    erp_customer_id: Mapped[str | None] = mapped_column(String(64), unique=True)
+    erp_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # retention & relationship signals (pillars 2, 7)
+    churn_risk: Mapped[int] = mapped_column(Integer, default=0)
+    churn_factors: Mapped[dict] = mapped_column(JSONB, default=dict)
+    relationship_strength: Mapped[int | None] = mapped_column(Integer)
+    embedding = mapped_column(Vector(settings.embedding_dim), nullable=True)
     created_at: Mapped[datetime] = _created()
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -90,9 +117,29 @@ class Contact(Base):
     phone: Mapped[str | None] = mapped_column(String(50))
     job_title: Mapped[str | None] = mapped_column(String(150))
     buying_role: Mapped[str] = mapped_column(String(50), default="Evaluator")
+    mobile: Mapped[str | None] = mapped_column(String(50))
+    linkedin_url: Mapped[str | None] = mapped_column(String(255))
+    timezone: Mapped[str | None] = mapped_column(String(64))
+    department: Mapped[str | None] = mapped_column(String(100))
+    status: Mapped[str] = mapped_column(String(20), default="active")
+    departed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    consent_email: Mapped[str] = mapped_column(String(20), default="unknown")
+    consent_basis: Mapped[str | None] = mapped_column(String(40))
+    privacy_regime: Mapped[str | None] = mapped_column(String(10))
+    consent_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    do_not_sell: Mapped[bool] = mapped_column(Boolean, default=False)
+    opt_out_email: Mapped[bool] = mapped_column(Boolean, default=False)
+    opt_out_phone: Mapped[bool] = mapped_column(Boolean, default=False)
+    opt_out_sms: Mapped[bool] = mapped_column(Boolean, default=False)
+    relationship_strength: Mapped[int | None] = mapped_column(Integer)
+    rsi_factors: Mapped[dict] = mapped_column(JSONB, default=dict)
+    custom_fields: Mapped[dict] = mapped_column(JSONB, default=dict)
     created_at: Mapped[datetime] = _created()
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     account: Mapped[Account] = relationship(back_populates="contacts")
+
+    PII_FIELDS = ("first_name", "last_name", "email", "phone", "mobile", "linkedin_url")
 
     @property
     def full_name(self) -> str:
@@ -105,6 +152,8 @@ class Pipeline(Base):
     id: Mapped[uuid.UUID] = _uuid_pk()
     name: Mapped[str] = mapped_column(String(100))
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+    kind: Mapped[str] = mapped_column(String(20), default="direct")
+    description: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = _created()
 
     stages: Mapped[list["PipelineStage"]] = relationship(
@@ -126,6 +175,7 @@ class PipelineStage(Base):
     default_probability: Mapped[int] = mapped_column(Integer)
     is_closed_won: Mapped[bool] = mapped_column(Boolean, default=False)
     is_closed_lost: Mapped[bool] = mapped_column(Boolean, default=False)
+    gate_rules: Mapped[list] = mapped_column(JSONB, default=list)
 
     pipeline: Mapped[Pipeline] = relationship(back_populates="stages")
 
@@ -155,6 +205,15 @@ class Deal(Base):
     risk_factors: Mapped[dict] = mapped_column(JSONB, default=dict)
     ai_insights: Mapped[dict] = mapped_column(JSONB, default=dict)
     loss_reason: Mapped[str | None] = mapped_column(String(50))
+    loss_debrief: Mapped[str | None] = mapped_column(Text)
+    loss_competitor: Mapped[str | None] = mapped_column(String(100))
+    win_debrief: Mapped[str | None] = mapped_column(Text)
+    deal_type: Mapped[str] = mapped_column(String(20), default="new_business")
+    source: Mapped[str] = mapped_column(String(20), default="direct")
+    contract_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("contracts.id", ondelete="SET NULL", use_alter=True))
+    original_close_date: Mapped[date | None] = mapped_column(Date)
+    close_date_pushes: Mapped[int] = mapped_column(Integer, default=0)
+    custom_fields: Mapped[dict] = mapped_column(JSONB, default=dict)
     stage_entered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = _created()
@@ -184,11 +243,27 @@ class Activity(Base):
     sentiment: Mapped[str] = mapped_column(String(10), default="neutral")
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
     embedding = mapped_column(Vector(settings.embedding_dim), nullable=True)
+    # omnichannel ledger (pillar 5)
+    direction: Mapped[str | None] = mapped_column(String(10))
+    subject: Mapped[str | None] = mapped_column(String(500))
+    duration_seconds: Mapped[int | None] = mapped_column(Integer)
+    disposition: Mapped[str | None] = mapped_column(String(20))
+    agenda: Mapped[str | None] = mapped_column(Text)
+    attendance: Mapped[str | None] = mapped_column(String(12))
+    external_id: Mapped[str | None] = mapped_column(String(500), unique=True)
+    thread_id: Mapped[str | None] = mapped_column(String(500))
+    source: Mapped[str] = mapped_column(String(20), default="manual")
+    search_tsv = mapped_column(
+        TSVECTOR,
+        Computed("to_tsvector('english', coalesce(subject, '') || ' ' || coalesce(summary, '') || ' ' || coalesce(raw_text, ''))", persisted=True),
+        deferred=True,
+    )
     created_at: Mapped[datetime] = _created()
 
     user: Mapped[User | None] = relationship(lazy="joined")
     account: Mapped[Account] = relationship(lazy="joined")
     deal: Mapped[Deal | None] = relationship(lazy="joined")
+    contact: Mapped[Contact | None] = relationship(lazy="joined")
 
 
 class Task(Base):
@@ -203,11 +278,21 @@ class Task(Base):
     deal_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("deals.id", ondelete="SET NULL"))
     activity_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("activities.id", ondelete="SET NULL"))
     owner_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
-    source: Mapped[str] = mapped_column(String(20), default="manual")  # manual | ai
+    source: Mapped[str] = mapped_column(String(20), default="manual")  # manual | ai | system
+    assignee_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)
+    description: Mapped[str | None] = mapped_column(Text)
+    priority: Mapped[str] = mapped_column(String(10), default="normal")
+    depends_on_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("tasks.id", ondelete="SET NULL"))
+    escalation_level: Mapped[int] = mapped_column(Integer, default=0)
+    escalated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    milestone_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("onboarding_milestones.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = _created()
 
     account: Mapped[Account | None] = relationship(lazy="joined")
     deal: Mapped[Deal | None] = relationship(lazy="joined")
+    owner: Mapped[User | None] = relationship(foreign_keys=[owner_id], lazy="joined")
+    assignee: Mapped[User | None] = relationship(foreign_keys=[assignee_id], lazy="joined")
+    depends_on: Mapped["Task | None"] = relationship(remote_side="Task.id", lazy="joined", join_depth=1)
 
 
 class DealStageHistory(Base):
@@ -227,3 +312,13 @@ class DealStageHistory(Base):
     from_stage: Mapped[PipelineStage | None] = relationship(foreign_keys=[from_stage_id], lazy="joined")
     to_stage: Mapped[PipelineStage] = relationship(foreign_keys=[to_stage_id], lazy="joined")
     user: Mapped[User | None] = relationship(lazy="joined")
+
+
+# Models for the enterprise pillars live in sibling modules; importing them here
+# registers every table on Base.metadata.
+from app.models.platform import *  # noqa: E402,F401,F403
+from app.models.revenue import *  # noqa: E402,F401,F403
+from app.models.success import *  # noqa: E402,F401,F403
+from app.models.partners import *  # noqa: E402,F401,F403
+
+import app.core.audit  # noqa: E402,F401  (registers the audit-trail flush listener)
