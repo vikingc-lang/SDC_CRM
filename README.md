@@ -17,6 +17,10 @@ searchable semantic memory (pgvector) that the Copilot (⌘J) can answer questio
 
 Dark mode, phone-width layouts and keyboard shortcuts are built in (`docs/screenshots/home-dark.png`, `mobile-home-light.png`).
 
+**No setup needed to look around:** open [`docs/relate-ui-preview.html`](docs/relate-ui-preview.html) in any browser. It is a single
+self-contained file (works offline) with every screen rendered from the real app and demo data. Links, ⌘K / ⌘J and the
+theme toggle work, while live features (drag-and-drop, AI extraction, saving) need the running app.
+
 ---
 
 ## Quick start
