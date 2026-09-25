@@ -59,7 +59,7 @@ export default function ReportsPage() {
                 <StatTile label="Win rate" value={`${fc.data.win_rate}%`} icon={<Target className="h-4 w-4" />} sub={`avg deal ${fmtMoney(fc.data.avg_deal_size, "USD", true)}`} />
                 <StatTile label="Open deals at risk" value={`${fc.data.at_risk_deals} / ${fc.data.open_deals}`} icon={<TrendingDown className="h-4 w-4" />} />
               </div>
-              <div className="grid gap-4 lg:grid-cols-2">
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                 <Card><CardHeader title="By stage" description="Track = open value; fill = weighted" /><CardBody><ForecastByStage data={fc.data.by_stage} /></CardBody></Card>
                 <Card><CardHeader title="Weighted by close month" /><CardBody><ForecastByMonth data={fc.data.by_close_month} /></CardBody></Card>
               </div>
@@ -89,7 +89,7 @@ export default function ReportsPage() {
             <StatTile label="Lost" value={fmtMoney(wl.data.lost.amount, "USD", true)} sub={`${wl.data.lost.count} deal${wl.data.lost.count === 1 ? "" : "s"}`} />
             <StatTile label="Top loss reason" value={wl.data.loss_reasons[0]?.label ?? "—"} />
           </div>
-          <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_320px]">
             <Card>
               <CardHeader title="Loss reasons" description="Every Closed-Lost requires a taxonomy reason and a rep debrief." />
               {!wl.data.loss_reasons.length ? <EmptyState icon={<TrendingDown className="h-4 w-4" />} title="No lost deals yet" /> : (

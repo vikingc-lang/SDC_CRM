@@ -24,7 +24,7 @@ const PROVIDER_LABEL: Record<string, string> = {
   anthropic: "Claude API",
   heuristic: "relate deterministic engine (offline)",
 };
-const ASR_LABEL: Record<string, string> = { disabled: "Disabled (type or paste notes)", http: "Local Whisper server (HTTP)", local: "faster-whisper in the worker", openai: "Whisper API" };
+const ASR_LABEL: Record<string, string> = { disabled: "Disabled (type or paste notes)", whisper_asr: "Local Whisper ASR service", faster_whisper: "faster-whisper in the API container" };
 
 export default function SettingsPage() {
   const qc = useQueryClient();

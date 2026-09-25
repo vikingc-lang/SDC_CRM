@@ -1,0 +1,150 @@
+{{- $fn := include "relate.fullname" . }}
+{{- if .Values.postgresql.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $fn }}-postgres
+  labels: {{- include "relate.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+spec:
+  serviceName: {{ $fn }}-postgres
+  replicas: 1
+  selector:
+    matchLabels: {{- include "relate.selector" (dict "root" . "component" "postgres") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "relate.selector" (dict "root" . "component" "postgres") | nindent 8 }}
+    spec:
+      containers:
+        - name: postgres
+          image: {{ .Values.postgresql.image }}
+          env:
+            - { name: POSTGRES_USER, value: {{ .Values.externalDatabase.user | quote }} }
+            - { name: POSTGRES_DB, value: {{ .Values.externalDatabase.database | quote }} }
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ include "relate.secretName" . }}, key: POSTGRES_PASSWORD } }
+          ports: [{ name: pg, containerPort: 5432 }]
+          readinessProbe: { exec: { command: ["pg_isready", "-U", {{ .Values.externalDatabase.user | quote }}] }, periodSeconds: 5 }
+          volumeMounts: [{ name: data, mountPath: /var/lib/postgresql/data }]
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: [ReadWriteOnce]
+        {{- with .Values.postgresql.storageClass }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources: { requests: { storage: {{ .Values.postgresql.size }} } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fn }}-postgres
+  labels: {{- include "relate.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "relate.selector" (dict "root" . "component" "postgres") | nindent 4 }}
+  ports: [{ port: 5432, targetPort: pg }]
+{{- end }}
+{{- if .Values.redis.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fn }}-redis
+  labels: {{- include "relate.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {{- include "relate.selector" (dict "root" . "component" "redis") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "relate.selector" (dict "root" . "component" "redis") | nindent 8 }}
+    spec:
+      containers:
+        - name: redis
+          image: {{ .Values.redis.image }}
+          ports: [{ name: redis, containerPort: 6379 }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fn }}-redis
+  labels: {{- include "relate.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "relate.selector" (dict "root" . "component" "redis") | nindent 4 }}
+  ports: [{ port: 6379, targetPort: redis }]
+{{- end }}
+{{- if .Values.ollama.enabled }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $fn }}-ollama
+  labels: {{- include "relate.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ollama
+spec:
+  serviceName: {{ $fn }}-ollama
+  replicas: 1
+  selector:
+    matchLabels: {{- include "relate.selector" (dict "root" . "component" "ollama") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "relate.selector" (dict "root" . "component" "ollama") | nindent 8 }}
+    spec:
+      containers:
+        - name: ollama
+          image: {{ .Values.ollama.image }}
+          ports: [{ name: http, containerPort: 11434 }]
+          volumeMounts: [{ name: models, mountPath: /root/.ollama }]
+          {{- if .Values.ollama.gpu }}
+          resources: { limits: { nvidia.com/gpu: 1 } }
+          {{- end }}
+  volumeClaimTemplates:
+    - metadata: { name: models }
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: { requests: { storage: {{ .Values.ollama.size }} } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fn }}-ollama
+  labels: {{- include "relate.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "relate.selector" (dict "root" . "component" "ollama") | nindent 4 }}
+  ports: [{ port: 11434, targetPort: http }]
+{{- end }}
+{{- if .Values.whisper.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fn }}-whisper
+  labels: {{- include "relate.labels" . | nindent 4 }}
+    app.kubernetes.io/component: whisper
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {{- include "relate.selector" (dict "root" . "component" "whisper") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "relate.selector" (dict "root" . "component" "whisper") | nindent 8 }}
+    spec:
+      containers:
+        - name: whisper
+          image: {{ .Values.whisper.image }}
+          env:
+            - { name: ASR_ENGINE, value: faster_whisper }
+            - { name: ASR_MODEL, value: {{ .Values.whisper.model | quote }} }
+          ports: [{ name: http, containerPort: 9000 }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fn }}-whisper
+  labels: {{- include "relate.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "relate.selector" (dict "root" . "component" "whisper") | nindent 4 }}
+  ports: [{ port: 9000, targetPort: http }]
+{{- end }}

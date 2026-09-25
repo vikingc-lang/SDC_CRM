@@ -115,7 +115,7 @@ export default function DashboardPage() {
         )}
       </div>
 
-      <div className="mb-6 grid gap-6 lg:grid-cols-5">
+      <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-5">
         <Card className="lg:col-span-3">
           <CardHeader title="Forecast by stage" description="Weighted = amount × stage probability × (1 − risk ÷ 200)" />
           <CardBody>{s ? (s.by_stage.length ? <ForecastByStage data={s.by_stage} /> : <p className="text-sm text-muted-foreground">No open deals.</p>) : <Skeleton className="h-40 w-full" />}</CardBody>
@@ -126,7 +126,7 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <Card>
           <CardHeader title="Needs attention" description="Highest deal risk first" action={<Link href="/pipeline" className="text-[12.5px] font-medium text-primary hover:underline">Pipeline</Link>} />
           <CardBody className="space-y-1 px-3">

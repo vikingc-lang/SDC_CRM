@@ -14,7 +14,7 @@ RUN npm run build
 FROM node:20-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3000 HOSTNAME=0.0.0.0
-RUN addgroup -S relate && adduser -S relate -G relate
+RUN addgroup -S -g 1001 relate && adduser -S -u 1001 relate -G relate
 COPY --from=build --chown=relate:relate /app/.next/standalone ./
 COPY --from=build --chown=relate:relate /app/.next/static ./.next/static
 COPY --from=build --chown=relate:relate /app/public ./public

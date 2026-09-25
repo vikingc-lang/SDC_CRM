@@ -1,0 +1,7 @@
+apiVersion: v2
+name: relate
+description: relate [R] AI-assisted CRM by SDC Solutions (API, worker, web, optional Postgres/pgvector, Redis, Ollama and Whisper)
+type: application
+version: 0.2.0
+appVersion: "0.2.0"
+keywords: [crm, sdc, pgvector, on-prem]

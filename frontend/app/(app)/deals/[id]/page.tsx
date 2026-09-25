@@ -116,13 +116,13 @@ export default function DealPage() {
         </div>
       </Card>
 
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
           {!closed && (
             <Card>
               <CardHeader title="Deal risk" icon={<Gauge className="h-4 w-4 text-muted-foreground" />} description="R = 30·Stale + 30·SentimentDrop + 40·NoChampion" />
               <CardBody>
-                <div className="grid gap-6 md:grid-cols-2">
+                <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
                   <div className="space-y-2.5">
                     {RISK_ROWS.map((r) => {
                       const on = !!f[r.key];
@@ -176,7 +176,7 @@ export default function DealPage() {
               {ins.last_trigger && <span className="text-[11.5px] text-subtle">Last stage action: {ins.last_trigger.stage}, {relativeDays(ins.last_trigger.at)}</span>}
               <Button variant="outline" size="sm" className="ml-auto" loading={draftEmail.isPending} onClick={() => draftEmail.mutate()}><Mail className="h-3.5 w-3.5" />Draft follow-up</Button>
             </div>
-            <div className="mt-3 grid gap-4 md:grid-cols-2">
+            <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2">
               <div>
                 <p className="mb-1.5 text-[12px] font-medium text-muted-foreground">Pain points</p>
                 {(ins.pain_points ?? []).length ? (
@@ -208,7 +208,7 @@ export default function DealPage() {
               <CardBody><p className="text-[13.5px] leading-relaxed">{deal.loss_debrief ?? "No debrief recorded."}</p></CardBody>
             </Card>
           )}
-          <div className="grid gap-6 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
             <QuotesCard dealId={deal.id} quotes={deal.quotes} canCreate={can("quotes", "create") && !closed} />
             <DocumentsCard dealId={deal.id} documents={deal.documents} canCreate={can("documents", "create")}
               hasApprovedQuote={deal.quotes.some((q) => ["approved", "sent", "accepted"].includes(q.status))} />

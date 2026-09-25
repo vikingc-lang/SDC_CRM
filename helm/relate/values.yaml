@@ -1,0 +1,90 @@
+# relate [R] Helm values. Every component runs inside the cluster; with the default
+# NetworkPolicy the workloads have no egress beyond cluster DNS and each other.
+
+image:
+  registry: ""                 # e.g. registry.internal/sdc
+  api: relate-api
+  web: relate-web
+  tag: "0.2.0"
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+publicWebUrl: https://crm.example.com    # used in e-signature links
+publicApiUrl: https://crm.example.com    # baked into the web image at build time (NEXT_PUBLIC_API_URL)
+seedDemoData: false
+
+secrets:
+  # Provide an existing Secret with keys JWT_SECRET, DATA_ENCRYPTION_KEY, POSTGRES_PASSWORD
+  # (and optionally ERP_REST_TOKEN, ANTHROPIC_API_KEY), or let the chart create one.
+  existingSecret: ""
+  jwtSecret: ""                 # generated if empty
+  dataEncryptionKey: ""         # generated if empty
+  postgresPassword: ""          # generated if empty; use URL-safe characters (it is embedded in DATABASE_URL)
+  erpRestToken: ""
+
+config:
+  LLM_PROVIDER: ollama          # ollama | aws_bedrock | anthropic | heuristic
+  OLLAMA_MODEL: llama3.1:8b
+  EMBEDDING_PROVIDER: hash
+  TRANSCRIPTION_PROVIDER: disabled   # whisper_asr when whisper.enabled
+  ERP_CONNECTOR: demo                # demo | file | rest | disabled
+  ERP_REST_URL: ""
+  ECOSYSTEM_WEBHOOKS: "{}"
+  MAX_UPLOAD_MB: "25"
+  JWT_EXPIRE_MINUTES: "720"
+
+api:
+  replicas: 2
+  resources: { requests: { cpu: 250m, memory: 512Mi }, limits: { memory: 1Gi } }
+worker:
+  replicas: 1          # runs Celery worker + beat; keep at 1 unless beat is split out
+  resources: { requests: { cpu: 250m, memory: 512Mi }, limits: { memory: 1Gi } }
+web:
+  replicas: 2
+  resources: { requests: { cpu: 100m, memory: 256Mi }, limits: { memory: 512Mi } }
+
+# Shared file storage for contracts, signed PDFs, attachments and collateral.
+# Use a ReadWriteMany class when api.replicas > 1.
+storage:
+  size: 20Gi
+  storageClass: ""
+  accessMode: ReadWriteMany
+
+postgresql:
+  enabled: true                 # set false and fill externalDatabase to use a managed Postgres 16 + pgvector
+  image: pgvector/pgvector:pg16
+  size: 20Gi
+  storageClass: ""
+externalDatabase:
+  host: ""
+  port: 5432
+  database: relate_crm
+  user: relate_user
+
+redis:
+  enabled: true
+  image: redis:7-alpine
+externalRedisUrl: ""
+
+ollama:
+  enabled: true
+  image: ollama/ollama:latest
+  size: 30Gi
+  gpu: false
+
+whisper:
+  enabled: false
+  image: onerahmet/openai-whisper-asr-webservice:latest
+  model: base
+
+ingress:
+  enabled: true
+  className: nginx
+  host: crm.example.com
+  tls: []                       # - { secretName: relate-tls, hosts: [crm.example.com] }
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: 30m
+
+networkPolicy:
+  enabled: true                 # zero egress: pods may only reach each other and cluster DNS
+  allowEgressCIDRs: []          # e.g. ["10.20.0.0/16"] for an on-prem ERP or SMTP/IMAP relay

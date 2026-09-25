@@ -54,7 +54,7 @@ export default function DocumentPage() {
         <StatusPill status={doc.status} />
         <Button variant="outline" size="sm" onClick={() => openPdf(doc.id, doc.title)}><Download className="h-4 w-4" />{doc.status === "completed" ? "Signed PDF" : "Preview PDF"}</Button>
       </div>
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <CardBody className="pt-5">
             <article className="doc-body max-w-none text-[14px] leading-relaxed" dangerouslySetInnerHTML={{ __html: doc.body_html ?? "" }} />

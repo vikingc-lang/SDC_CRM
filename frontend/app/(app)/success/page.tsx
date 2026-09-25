@@ -84,7 +84,7 @@ function Onboarding({ projects, loading }: { projects?: OnboardingProject[]; loa
               <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary" style={{ width: `${p.progress}%` }} /></div>
               <span className="text-[12.5px] tabular-nums text-muted-foreground">{p.progress}% complete</span>
             </div>
-            <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_320px]">
               <ul className="divide-y rounded-md border">
                 {p.milestones.map((m) => (
                   <li key={m.id} className="flex flex-wrap items-center gap-3 px-3 py-2">

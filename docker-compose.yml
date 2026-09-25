@@ -2,6 +2,10 @@
 #   cp .env.example .env && docker compose up -d --build
 #   (first run) docker compose exec ollama ollama pull llama3.1:8b
 #   open http://localhost:3000  -  marcus@relate.demo / relate123
+#   optional private voice transcription:  docker compose --profile voice up -d
+#
+# Zero egress: nothing below needs outbound internet at runtime. Outbound calls only happen
+# if you opt into a cloud LLM, configure ECOSYSTEM_WEBHOOKS, or point ERP_CONNECTOR=rest at a remote ERP.
 services:
   db:
     image: pgvector/pgvector:pg16
@@ -53,6 +57,11 @@ services:
       REDIS_URL: redis://redis:6379/0
       OLLAMA_ENDPOINT: http://ollama:11434
       USE_CELERY: "true"
+      STORAGE_DIR: /data/storage
+      ERP_EXCHANGE_DIR: /data/erp-exchange
+      WHISPER_ENDPOINT: http://whisper:9000
+    volumes:
+      - relate_files:/data
     ports:
       - "8000:8000"
 
@@ -71,7 +80,24 @@ services:
       OLLAMA_ENDPOINT: http://ollama:11434
       DB_NULL_POOL: "true"
       RUN_MIGRATIONS: "false"
+      STORAGE_DIR: /data/storage
+      ERP_EXCHANGE_DIR: /data/erp-exchange
+      WHISPER_ENDPOINT: http://whisper:9000
+    volumes:
+      - relate_files:/data
     command: ["celery", "-A", "app.worker", "worker", "--beat", "--loglevel=info"]
+
+  # Local speech-to-text for Quick-Log voice notes (set TRANSCRIPTION_PROVIDER=whisper_asr).
+  whisper:
+    image: onerahmet/openai-whisper-asr-webservice:latest
+    container_name: relate_whisper
+    profiles: ["voice"]
+    restart: always
+    environment:
+      ASR_ENGINE: faster_whisper
+      ASR_MODEL: ${WHISPER_MODEL:-base}
+    volumes:
+      - whisper_cache:/root/.cache
 
   web:
     build:
@@ -89,3 +115,5 @@ services:
 volumes:
   postgres_data:
   ollama_data:
+  relate_files:     # contracts, signed PDFs, attachments, collateral
+  whisper_cache:

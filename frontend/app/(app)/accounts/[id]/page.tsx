@@ -118,7 +118,7 @@ function Overview({ data, brief, onDialog }: { data: Account360; brief?: string;
   const [filter, setFilter] = useState("all");
   const acts = filter === "all" ? recent_activities : recent_activities.filter((a) => a.type === filter);
   return (
-    <div className="grid gap-6 lg:grid-cols-3">
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
       <div className="space-y-6 lg:col-span-2">
         <div className="ai-border rounded-xl p-4 shadow-card">
           <p className="flex items-center gap-1.5 text-[11.5px] font-medium uppercase tracking-wide text-ai"><Sparkles className="h-3.5 w-3.5" />Account brief</p>
@@ -212,7 +212,7 @@ function Details({ data }: { data: Account360 }) {
   });
   const addr = Object.values(cm.billing_address || {}).filter(Boolean).join(", ");
   return (
-    <div className="grid gap-6 lg:grid-cols-2">
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
       <Card>
         <CardHeader title="Firmographics" icon={<Building2 className="h-4 w-4 text-muted-foreground" />}
           action={can("accounts", "update") && !edit && <Button variant="ghost" size="sm" onClick={() => setEdit(true)}>Edit</Button>} />
@@ -313,7 +313,7 @@ function Hierarchy({ id }: { id: string }) {
 function Commercial({ data }: { data: Account360 }) {
   const f = data.finance;
   return (
-    <div className="grid gap-6 lg:grid-cols-2">
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
       <Card>
         <CardHeader title="Contracts" />
         <CardBody><ContractList contracts={data.contracts} /></CardBody>
@@ -345,7 +345,7 @@ function Commercial({ data }: { data: Account360 }) {
 function Success({ data }: { data: Account360 }) {
   const churn = data.account.churn_factors as Record<string, unknown>;
   return (
-    <div className="grid gap-6 lg:grid-cols-2">
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
       <Card>
         <CardHeader title="Churn early warning" icon={<LifeBuoy className="h-4 w-4 text-muted-foreground" />} description={`Churn risk ${data.account.churn_risk}/100`} />
         <CardBody className="space-y-2 text-[13px]">
