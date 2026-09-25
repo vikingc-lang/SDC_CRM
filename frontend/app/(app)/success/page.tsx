@@ -42,7 +42,7 @@ export default function SuccessPage() {
       <PageHeader title="Customer success" description="Onboarding hand-offs from Closed-Won, churn early warning and renewal coverage in one place." />
       <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatTile label="Active onboardings" value={String(active.length)} icon={<Rocket className="h-4 w-4" />}
-          sub={`${active.reduce((a, p) => a + p.overdue, 0)} overdue milestones`} />
+          sub={`${active.reduce((a, p) => a + p.overdue, 0)} overdue milestone(s)`} />
         <StatTile label="Churn watchlist" value={String(atRisk.length)} icon={<AlertTriangle className="h-4 w-4" />} sub="customers at 60+ churn risk" />
         <StatTile label="Renewals ≤ 180 days" value={String(renewals.data?.length ?? 0)} icon={<CalendarClock className="h-4 w-4" />} sub={`${fmtMoney(renewalAcv, "USD", true)} ACV up for renewal`} />
         <StatTile label="Renewal deals opened" value={String(renewals.data?.filter((r) => r.renewal_deal_id).length ?? 0)} icon={<RefreshCw className="h-4 w-4" />} sub="auto-created 90–120 days out" />

@@ -7,6 +7,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
 from app.core.rbac import Principal, authorize
@@ -238,7 +239,11 @@ async def submit_quote(quote_id: uuid.UUID, db: AsyncSession = Depends(get_db), 
 @router.get("/approvals")
 async def approvals_inbox(status: Literal["pending", "decided", "all"] = "pending", db: AsyncSession = Depends(get_db),
                           p: Principal = Depends(authorize("approvals", "read"))):
-    stmt = select(ApprovalRequest).order_by(ApprovalRequest.created_at.desc()).limit(200)
+    stmt = (select(ApprovalRequest).options(selectinload(ApprovalRequest.quote).joinedload(Quote.deal).joinedload(Deal.account))
+            .order_by(ApprovalRequest.created_at.desc()).limit(200))
+    if p.is_own_scope("approvals"):
+        stmt = stmt.where(ApprovalRequest.quote_id.in_(select(Quote.id).join(Deal, Quote.deal_id == Deal.id).where(
+            (Deal.owner_id == p.id) | Deal.account_id.in_(p.owned_account_ids()))))
     if status == "pending":
         stmt = stmt.where(ApprovalRequest.status == "pending")
     elif status == "decided":

@@ -117,7 +117,7 @@ export default function PartnerPortal() {
                       <span className="ml-auto text-[12.5px] tabular-nums">{fmtMoney(r.estimated_amount, r.currency)}</span>
                     </div>
                     <p className="mt-0.5 text-[12px] text-muted-foreground">Submitted {relativeDays(r.created_at)}{r.exclusivity_expires_at && r.status === "approved" && ` · exclusive until ${shortDate(r.exclusivity_expires_at, true)}`}</p>
-                    {r.status === "pending" && <ConflictList conflicts={r.conflicts} />}
+                    {r.status === "submitted" && <ConflictList conflicts={r.conflicts} />}
                     {r.decision_note && <p className="mt-1 text-[12.5px]">Channel team: {r.decision_note}</p>}
                   </li>
                 ))}

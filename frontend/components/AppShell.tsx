@@ -206,7 +206,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   useEffect(() => setMobileOpen(false), [pathname]);
 
-  if (!ready) return <div className="min-h-screen bg-background" />;
+  // Hold rendering until the role is known, so partner users never fire internal CRM queries.
+  if (!ready || !user || user.role === "partner") return <div className="min-h-screen bg-background" />;
 
   return (
     <div className="flex min-h-screen bg-background">

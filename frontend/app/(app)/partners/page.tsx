@@ -26,7 +26,7 @@ export default function PartnersPage() {
   const [tab, setTab] = useState<"registrations" | "partners" | "commissions" | "collateral">("registrations");
   const regs = useQuery({ queryKey: ["prm", "registrations"], queryFn: () => get<Registration[]>("/partners/registrations") });
   const comm = useQuery({ queryKey: ["prm", "commissions"], queryFn: () => get<CommissionReport>("/partners/commissions") });
-  const pending = regs.data?.filter((r) => r.status === "pending") ?? [];
+  const pending = regs.data?.filter((r) => r.status === "submitted") ?? [];
   const sum = (k: "attributed_pipeline" | "attributed_won" | "commission_earned") => comm.data?.partners.reduce((a, p) => a + p[k], 0) ?? 0;
   return (
     <div className="mx-auto max-w-6xl">
@@ -82,7 +82,7 @@ function Registrations({ rows, loading }: { rows?: Registration[]; loading: bool
               {r.deal_id && <Link href={`/deals/${r.deal_id}`} className="mt-1 inline-block text-[12.5px] text-primary hover:underline">Open registered deal →</Link>}
               {r.exclusivity_expires_at && r.status === "approved" && <p className="text-[12px] text-muted-foreground">Exclusive until {shortDate(r.exclusivity_expires_at, true)}</p>}
             </div>
-            {r.status === "pending" && can("partners", "update") && (
+            {r.status === "submitted" && can("partners", "update") && (
               <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
                 <Input className="h-8 w-full sm:w-48" placeholder="Decision note" value={notes[r.id] ?? ""} onChange={(e) => setNotes({ ...notes, [r.id]: e.target.value })} />
                 <Button size="sm" variant="outline" disabled={decide.isPending} onClick={() => decide.mutate({ id: r.id, approve: false })}><X className="h-3.5 w-3.5" />Reject</Button>

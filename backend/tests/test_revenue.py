@@ -72,6 +72,12 @@ async def test_cpq_tiers_tcv_and_two_level_approval_routing(client):
     async with login_as("priya@relate.demo") as ae:
         assert (await ae.post(f"/api/v1/approvals/{roles['sales_manager']['id']}/decide", json={"approve": True})).status_code == 403
     assert (await client.post(f"/api/v1/approvals/{roles['finance']['id']}/decide", json={"approve": True})).status_code == 403  # manager isn't finance
+    inbox = (await client.get("/api/v1/approvals", params={"status": "pending"})).json()
+    item = next(a for a in inbox if a["id"] == roles["sales_manager"]["id"])
+    assert item["can_decide"] and item["quote"]["deal"]["title"] == "Quote Routing"
+    async with login_as("diego@relate.demo") as other_ae:  # row-level scope: not his deal
+        theirs = (await other_ae.get("/api/v1/approvals", params={"status": "all"})).json()
+        assert all(a["quote"]["deal"]["title"] != "Quote Routing" for a in theirs)
     q = (await client.post(f"/api/v1/approvals/{roles['sales_manager']['id']}/decide", json={"approve": True, "comment": "Strategic logo"})).json()
     assert q["status"] == "pending_approval"
     async with login_as("admin@relate.demo") as finance:

@@ -85,8 +85,8 @@ export default function ReportsPage() {
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <StatTile label="Win rate" value={`${wl.data.win_rate}%`} emphasis />
-            <StatTile label="Won" value={fmtMoney(wl.data.won.amount, "USD", true)} sub={`${wl.data.won.count} deals`} />
-            <StatTile label="Lost" value={fmtMoney(wl.data.lost.amount, "USD", true)} sub={`${wl.data.lost.count} deals`} />
+            <StatTile label="Won" value={fmtMoney(wl.data.won.amount, "USD", true)} sub={`${wl.data.won.count} deal${wl.data.won.count === 1 ? "" : "s"}`} />
+            <StatTile label="Lost" value={fmtMoney(wl.data.lost.amount, "USD", true)} sub={`${wl.data.lost.count} deal${wl.data.lost.count === 1 ? "" : "s"}`} />
             <StatTile label="Top loss reason" value={wl.data.loss_reasons[0]?.label ?? "—"} />
           </div>
           <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
