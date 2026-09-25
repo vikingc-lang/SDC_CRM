@@ -44,6 +44,7 @@ export interface Activity {
   subject?: string | null; direction?: "inbound" | "outbound" | "internal" | null; duration_seconds?: number | null; disposition?: string | null;
   agenda?: string | null; attendance?: string | null; source?: string; contact?: { id: UUID; name: string } | null;
   attachments?: { id: UUID; filename: string; size_bytes: number; content_type: string }[];
+  entity?: "activity" | "account"; matched_by?: ("keyword" | "vector")[]; score?: number; name?: string; health_score?: number;
 }
 
 export interface Task {
@@ -168,7 +169,7 @@ export interface Partner { id: UUID; name: string; partner_type: string; tier: s
   referral_fee_rate: number; status: string }
 export interface Registration { id: UUID; partner: { id: UUID; name: string; tier: string }; company_name: string; domain: string; contact_name: string | null;
   contact_email: string | null; estimated_amount: number; currency: string; territory: string | null; product_interest: string | null; notes: string | null;
-  status: string; exclusivity_expires_at: string | null; conflicts: { type: string; severity: string; account?: string; partner?: string; open_deals?: number }[];
+  status: string; exclusivity_expires_at: string | null; conflicts: { type: string; severity: string; account?: string; partner?: string; open_deals?: number; expires?: string }[];
   decision_note: string | null; deal_id: UUID | null; created_at: string }
 export interface Notification { id: UUID; kind: string; title: string; body: string | null; link: string | null; read: boolean; created_at: string }
 export interface CustomFieldDef { id?: UUID; entity?: string; key: string; label: string; field_type: "text" | "number" | "date" | "select" | "boolean" | "url"; options: string[]; required?: boolean }

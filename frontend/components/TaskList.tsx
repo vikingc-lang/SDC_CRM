@@ -1,14 +1,16 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Check, Sparkles } from "lucide-react";
+import { ArrowUpRight, Check, Link2, Siren, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { api, errorMessage } from "@/lib/api";
 import type { Task } from "@/lib/types";
 import { cn, dueLabel } from "@/lib/utils";
 
-export function TaskRow({ task, showContext = true }: { task: Task; showContext?: boolean }) {
+const PRIORITY_COLOR: Record<string, string> = { urgent: "var(--status-critical)", high: "var(--status-warning)" };
+
+export function TaskRow({ task, showContext = true, showPeople = false }: { task: Task; showContext?: boolean; showPeople?: boolean }) {
   const qc = useQueryClient();
   const toggle = useMutation({
     mutationFn: async () => (await api.patch(`/tasks/${task.id}`, { completed: !task.completed })).data,
@@ -23,7 +25,8 @@ export function TaskRow({ task, showContext = true }: { task: Task; showContext?
     <div className="group flex items-start gap-3 rounded-md px-2 py-2 hover:bg-muted/60">
       <button
         onClick={() => toggle.mutate()}
-        disabled={toggle.isPending}
+        disabled={toggle.isPending || (!!task.blocked && !task.completed)}
+        title={task.blocked && !task.completed ? `Blocked by ${task.depends_on?.title}` : undefined}
         className={cn(
           "mt-0.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border-[1.5px] transition-colors",
           task.completed ? "border-primary bg-primary text-primary-foreground" : "border-input hover:border-primary",
@@ -39,8 +42,18 @@ export function TaskRow({ task, showContext = true }: { task: Task; showContext?
             {task.deal ? <Link href={`/deals/${task.deal.id}`} className="hover:underline">{task.deal.title}</Link> : task.account && <Link href={`/accounts/${task.account.id}`} className="hover:underline">{task.account.name}</Link>}
           </p>
         )}
+        {(task.blocked || (task.escalation_level ?? 0) > 0 || (showPeople && task.assignee && task.owner && task.assignee.id !== task.owner.id)) && !task.completed && (
+          <p className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[12px]">
+            {task.blocked && task.depends_on && <span className="inline-flex items-center gap-1 text-muted-foreground"><Link2 className="h-3 w-3" />Blocked by “{task.depends_on.title}”</span>}
+            {(task.escalation_level ?? 0) > 0 && <span className="inline-flex items-center gap-1 font-medium" style={{ color: "var(--status-critical)" }}><Siren className="h-3 w-3" />Escalated L{task.escalation_level}</span>}
+            {showPeople && task.assignee && task.owner && task.assignee.id !== task.owner.id && <span className="inline-flex items-center gap-1 text-muted-foreground"><ArrowUpRight className="h-3 w-3" />{task.owner.full_name} → {task.assignee.full_name}</span>}
+          </p>
+        )}
       </div>
       <div className="flex shrink-0 items-center gap-2">
+        {task.priority && PRIORITY_COLOR[task.priority] && !task.completed && (
+          <span className="rounded-full px-1.5 text-[11px] font-medium capitalize" style={{ color: PRIORITY_COLOR[task.priority], background: `color-mix(in srgb, ${PRIORITY_COLOR[task.priority]} 12%, transparent)` }}>{task.priority}</span>
+        )}
         {task.source === "ai" && <span title="Created by AI"><Sparkles className="h-3 w-3 text-ai" /></span>}
         {!task.completed && (
           <span

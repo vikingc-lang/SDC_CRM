@@ -50,3 +50,14 @@ export function errorMessage(error: unknown, fallback = "Something went wrong"):
 }
 
 export const get = async <T,>(url: string, params?: object) => (await api.get<T>(url, { params })).data;
+
+/** Authenticated file download (exports, PDFs, collateral) via a temporary object URL. */
+export async function downloadFile(path: string, filename: string, params?: object) {
+  const res = await api.get(path, { params, responseType: "blob" });
+  const url = URL.createObjectURL(res.data as Blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}

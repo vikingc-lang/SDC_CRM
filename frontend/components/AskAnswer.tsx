@@ -16,13 +16,13 @@ export function AnswerBlock({ answer, onNavigate }: { answer: AskResponse; onNav
           {answer.sources.slice(0, 4).map((s, i) => (
             <Link
               key={s.id}
-              href={s.deal ? `/deals/${s.deal.id}` : s.account ? `/accounts/${s.account.id}` : "#"}
+              href={s.entity === "account" ? `/accounts/${s.id}` : s.deal ? `/deals/${s.deal.id}` : s.account ? `/accounts/${s.account.id}` : "#"}
               onClick={onNavigate}
               className="flex gap-2 rounded-md border bg-surface-2/50 px-2.5 py-2 text-[12.5px] transition-colors hover:border-primary/40"
             >
               <span className="font-semibold text-primary">[{i + 1}]</span>
               <span className="min-w-0 flex-1">
-                <span className="block truncate font-medium">{s.account?.name} · {shortDate(s.date)}</span>
+                <span className="block truncate font-medium">{s.entity === "account" ? s.name : `${s.account?.name ?? ""} · ${shortDate(s.date)}`}</span>
                 <span className="line-clamp-2 text-muted-foreground">{s.summary}</span>
               </span>
               {s.similarity != null && <span className="tabular shrink-0 text-subtle">{Math.round(s.similarity * 100)}%</span>}

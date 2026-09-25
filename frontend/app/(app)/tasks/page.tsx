@@ -1,7 +1,8 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { CheckSquare, Plus } from "lucide-react";
+import { CalendarDays, CheckSquare, Plus } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 import { PageHeader } from "@/components/AppShell";
 import { NewTaskDialog } from "@/components/forms";
@@ -28,14 +29,16 @@ const ORDER = ["Overdue", "Today", "Next 7 days", "Later", "Someday"];
 export default function TasksPage() {
   const [status, setStatus] = useState<"open" | "done">("open");
   const [creating, setCreating] = useState(false);
-  const { data, isLoading } = useQuery({ queryKey: ["tasks", status], queryFn: () => get<Task[]>("/tasks", { status }) });
+  const [mine, setMine] = useState(false);
+  const { data, isLoading } = useQuery({ queryKey: ["tasks", status, mine], queryFn: () => get<Task[]>("/tasks", { status, assignee: mine ? "me" : "all" }) });
+  const escalated = data?.filter((t) => (t.escalation_level ?? 0) > 0 && !t.completed).length ?? 0;
   const groups = ORDER.map((g) => ({ name: g, tasks: (data ?? []).filter((t) => bucket(t) === g) })).filter((g) => g.tasks.length);
 
   return (
     <div className="mx-auto max-w-3xl">
       <PageHeader
         title="Tasks"
-        description="Action items you logged, plus ones relate extracted for you"
+        description={escalated ? `${escalated} escalated past SLA · dependencies and delegation tracked` : "Action items you logged, delegated work and ones relate extracted for you"}
         actions={
           <>
             <div className="flex rounded-md border bg-surface p-0.5 text-[13px]">
@@ -43,6 +46,12 @@ export default function TasksPage() {
                 <button key={s} onClick={() => setStatus(s)} className={cn("rounded px-3 py-1 capitalize", status === s ? "bg-muted font-medium" : "text-muted-foreground")}>{s}</button>
               ))}
             </div>
+            <div className="flex rounded-md border bg-surface p-0.5 text-[13px]">
+              {([false, true] as const).map((m) => (
+                <button key={String(m)} onClick={() => setMine(m)} className={cn("rounded px-3 py-1", mine === m ? "bg-muted font-medium" : "text-muted-foreground")}>{m ? "Assigned to me" : "All visible"}</button>
+              ))}
+            </div>
+            <Link href="/settings" className="hidden items-center gap-1 text-[12.5px] text-muted-foreground hover:text-foreground sm:inline-flex"><CalendarDays className="h-3.5 w-3.5" />Subscribe (iCal)</Link>
             <Button size="sm" onClick={() => setCreating(true)}><Plus className="h-4 w-4" />New task</Button>
           </>
         }
@@ -57,7 +66,7 @@ export default function TasksPage() {
           : groups.map((g) => (
               <Card key={g.name}>
                 <CardHeader title={<span className="flex items-center gap-2">{g.name === "Overdue" && <span className="h-2 w-2 rounded-full" style={{ background: "var(--status-critical)" }} />}{g.name}<span className="text-[12px] font-normal text-muted-foreground">{g.tasks.length}</span></span>} />
-                <CardBody className="px-3">{g.tasks.map((t) => <TaskRow key={t.id} task={t} />)}</CardBody>
+                <CardBody className="px-3">{g.tasks.map((t) => <TaskRow key={t.id} task={t} showPeople />)}</CardBody>
               </Card>
             ))}
       </div>

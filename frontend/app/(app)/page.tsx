@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import {
-  AlertTriangle, ArrowUpRight, CalendarClock, CheckSquare, CircleDollarSign, HeartPulse, Plus, Sparkles, Target, TrendingUp,
+  AlertTriangle, ArrowUpRight, CalendarClock, CheckSquare, CircleDollarSign, HeartPulse, Plus, Siren, Sparkles, Target, TrendingUp,
 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
@@ -17,7 +17,7 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { EmptyState, Skeleton } from "@/components/ui/misc";
 import { get } from "@/lib/api";
 import { ui } from "@/lib/store";
-import type { Activity, Briefing, DashboardSummary, Deal, Task, User } from "@/lib/types";
+import type { Activity, Alert, Briefing, DashboardSummary, Deal, Task, User } from "@/lib/types";
 import { money } from "@/lib/utils";
 
 const PRIORITY_ICON = { task: CheckSquare, risk: AlertTriangle, closing: CalendarClock, health: HeartPulse };
@@ -36,6 +36,7 @@ export default function DashboardPage() {
   const tasks = useQuery({ queryKey: ["tasks", "open"], queryFn: () => get<Task[]>("/tasks", { status: "open" }) });
   const activity = useQuery({ queryKey: ["activities", "recent"], queryFn: () => get<Activity[]>("/activities", { limit: 8, include_system: false }) });
 
+  const alerts = useQuery({ queryKey: ["alerts"], queryFn: () => get<Alert[]>("/alerts") });
   const s = summary.data;
   const atRisk = (deals.data ?? []).filter((d) => d.risk_score >= 30).sort((a, b) => b.risk_score - a.risk_score || b.amount - a.amount).slice(0, 5);
   const firstName = me.data?.full_name.split(" ")[0];
@@ -80,6 +81,25 @@ export default function DashboardPage() {
           </div>
         )}
       </div>
+
+      {!!alerts.data?.length && (
+        <div className="mb-6 rounded-xl border bg-surface shadow-card">
+          <p className="flex items-center gap-2 px-4 pt-3 text-[12px] font-medium uppercase tracking-wide text-muted-foreground">
+            <Siren className="h-3.5 w-3.5" style={{ color: "var(--status-critical)" }} />Risk & slippage copilot · {alerts.data.length} open alert{alerts.data.length === 1 ? "" : "s"}
+          </p>
+          <ul className="divide-y">
+            {alerts.data.slice(0, 5).map((a) => (
+              <li key={a.id}>
+                <Link href={a.deal ? `/deals/${a.deal.id}` : "#"} className="flex items-start gap-3 px-4 py-2.5 text-[13px] hover:bg-muted/50">
+                  <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full" style={{ background: a.severity === "high" ? "var(--status-critical)" : a.severity === "medium" ? "var(--status-warning)" : "hsl(var(--subtle))" }} />
+                  <span className="min-w-0 flex-1"><span className="font-medium">{a.deal ? `${a.deal.account}: ${a.deal.title}` : a.kind}</span><span className="block text-muted-foreground">{a.message}</span></span>
+                  <span className="shrink-0 text-[11.5px] capitalize text-subtle">{a.kind.replace(/_/g, " ")}</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* KPIs */}
       <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">

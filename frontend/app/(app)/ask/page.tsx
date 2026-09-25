@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ArrowUp, Search, Sparkles } from "lucide-react";
+import { ArrowUp, Building2, Search, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
@@ -66,21 +66,22 @@ function AskInner() {
       )}
       {memory.data && memory.data.length > 0 && (
         <div className="mt-8">
-          <h2 className="mb-3 text-[13px] font-semibold text-muted-foreground">Related memories · ranked by semantic similarity</h2>
+          <h2 className="mb-3 text-[13px] font-semibold text-muted-foreground">Related records · hybrid retrieval (full-text + vector, rank-fused)</h2>
           <div className="space-y-2">
-            {memory.data.map((m) => (
+            {memory.data.map((m) => m.entity === "account" ? (
+              <Link key={`a-${m.id}`} href={`/accounts/${m.id}`} className="flex items-center gap-3 rounded-lg border bg-surface p-3.5 shadow-card transition-colors hover:border-primary/40">
+                <Building2 className="h-4 w-4 text-muted-foreground" />
+                <span className="min-w-0 flex-1"><span className="block text-[13.5px] font-medium">{m.name}</span><span className="text-[12px] text-muted-foreground">{m.summary}</span></span>
+                <MatchChips m={m} />
+              </Link>
+            ) : (
               <Link key={m.id} href={m.deal ? `/deals/${m.deal.id}` : `/accounts/${m.account?.id}`} className="block rounded-lg border bg-surface p-3.5 shadow-card transition-colors hover:border-primary/40">
                 <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
                   <span className="font-medium text-foreground">{m.account?.name}</span>
                   <span className="capitalize">· {m.type}</span>
                   <span>· {shortDate(m.date, true)}</span>
                   <SentimentIcon sentiment={m.sentiment} />
-                  {m.similarity != null && (
-                    <span className="ml-auto flex items-center gap-1.5">
-                      <span className="h-1 w-14 overflow-hidden rounded-full bg-series-track"><span className="block h-full rounded-full bg-series-1" style={{ width: `${Math.min(100, m.similarity * 100)}%` }} /></span>
-                      <span className="tabular">{Math.round(m.similarity * 100)}%</span>
-                    </span>
-                  )}
+                  <span className="ml-auto"><MatchChips m={m} /></span>
                 </div>
                 <p className="mt-1.5 text-[13.5px] leading-relaxed">{m.summary}</p>
               </Link>
@@ -90,6 +91,17 @@ function AskInner() {
       )}
     </div>
   );
+}
+
+function MatchChips({ m }: { m: Activity }) {
+  if (m.matched_by?.length) {
+    return (
+      <span className="flex shrink-0 gap-1">
+        {m.matched_by.map((k) => <span key={k} className="rounded-full border px-1.5 text-[10.5px] text-muted-foreground">{k === "vector" ? "semantic" : "keyword"}</span>)}
+      </span>
+    );
+  }
+  return m.similarity != null ? <span className="tabular text-[12px] text-subtle">{Math.round(m.similarity * 100)}%</span> : null;
 }
 
 export default function AskPage() {

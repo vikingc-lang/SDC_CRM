@@ -126,6 +126,46 @@ export function QuickLogModal() {
     onError: (e) => toast.error(errorMessage(e, "Could not save")),
   });
 
+  const [recording, setRecording] = useState(false);
+  const recorder = useRef<MediaRecorder | null>(null);
+  const transcribe = useMutation({
+    mutationFn: async (blob: Blob) => {
+      const fd = new FormData();
+      fd.append("file", blob, "quick-log.webm");
+      if (accountId) fd.append("account_id", accountId);
+      return (await api.post<QuickLogResponse>("/ai/transcribe", fd)).data;
+    },
+    onMutate: () => { setPhase("analyzing"); setStep(0); },
+    onSuccess: (data) => {
+      const transcript = (data.signals as { transcript?: string } | undefined)?.transcript ?? "";
+      setText(transcript);
+      setDraft(data);
+      setCreateDeal(!!data.deal || !!data.matched_deal_id);
+      setPhase("review");
+    },
+    onError: (e) => { toast.error(errorMessage(e, "Transcription failed")); setPhase("input"); },
+  });
+  const toggleRecording = async () => {
+    if (recording) { recorder.current?.stop(); return; }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const rec = new MediaRecorder(stream);
+      const chunks: Blob[] = [];
+      rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+      rec.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        setRecording(false);
+        if (chunks.length) transcribe.mutate(new Blob(chunks, { type: rec.mimeType || "audio/webm" }));
+      };
+      recorder.current = rec;
+      rec.start();
+      setRecording(true);
+    } catch {
+      toast.error("Microphone unavailable. Check browser permissions.");
+    }
+  };
+  useEffect(() => { if (!open && recorder.current?.state === "recording") recorder.current.stop(); }, [open]);
+
   const go = (href: string) => {
     close();
     router.push(href);
@@ -181,7 +221,10 @@ export function QuickLogModal() {
               )}
             </div>
             <div className="flex items-center gap-2 border-t bg-surface-2/60 px-4 py-2.5">
-              <span className="hidden items-center gap-1.5 text-[12px] text-subtle sm:flex"><Mic className="h-3.5 w-3.5" />Works with dictation too</span>
+              <Button variant={recording ? "outline" : "ghost"} size="sm" onClick={toggleRecording} aria-pressed={recording}
+                title="Record a voice note. Audio is transcribed on your own infrastructure (Whisper) and never stored.">
+                <Mic className={cn("h-3.5 w-3.5", recording && "animate-pulse text-[color:var(--status-critical)]")} />{recording ? "Stop & transcribe" : "Voice note"}
+              </Button>
               {isSearch && (
                 <Button variant="ghost" size="sm" className="ml-auto" onClick={() => go(`/ask?q=${encodeURIComponent(text.trim())}`)}>
                   <Search className="h-3.5 w-3.5" />Ask relate

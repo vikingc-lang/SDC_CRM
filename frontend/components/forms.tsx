@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input, Label, Select } from "@/components/ui/input";
 import { api, errorMessage, get } from "@/lib/api";
-import type { AccountListItem, PipelineFull } from "@/lib/types";
+import type { AccountListItem, PipelineFull, Task, UserBrief } from "@/lib/types";
 
 type Opener = { open: boolean; onOpenChange: (o: boolean) => void };
 
@@ -158,19 +158,40 @@ export function NewContactDialog({ open, onOpenChange, accountId }: Opener & { a
 }
 
 export function NewTaskDialog({ open, onOpenChange, accountId, dealId }: Opener & { accountId?: string; dealId?: string }) {
-  const [f, setF] = useState({ title: "", due_date: "" });
+  const EMPTY = { title: "", due_date: "", priority: "normal", assignee_id: "", depends_on_id: "" };
+  const [f, setF] = useState(EMPTY);
   const qc = useQueryClient();
+  const { data: users } = useQuery({ queryKey: ["users"], queryFn: () => get<UserBrief[]>("/users"), enabled: open });
+  const { data: openTasks } = useQuery({ queryKey: ["tasks", "open", "deps"], queryFn: () => get<Task[]>("/tasks", { status: "open" }), enabled: open });
   const m = useMutation({
-    mutationFn: async () => (await api.post("/tasks", { title: f.title, due_date: f.due_date || null, account_id: accountId ?? null, deal_id: dealId ?? null })).data,
-    onSuccess: () => { qc.invalidateQueries(); onOpenChange(false); setF({ title: "", due_date: "" }); toast.success("Task added"); },
+    mutationFn: async () => (await api.post("/tasks", {
+      title: f.title, due_date: f.due_date || null, account_id: accountId ?? null, deal_id: dealId ?? null, priority: f.priority,
+      assignee_id: f.assignee_id || null, depends_on_id: f.depends_on_id || null,
+    })).data,
+    onSuccess: () => { qc.invalidateQueries(); onOpenChange(false); setF(EMPTY); toast.success("Task added"); },
     onError: (e) => toast.error(errorMessage(e)),
   });
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent title="New task">
-        <FormShell title="New task" onSubmit={() => m.mutate()} busy={m.isPending} submitLabel="Add task">
+        <FormShell title="New task" subtitle="Overdue tasks escalate to the assignee's manager automatically." onSubmit={() => m.mutate()} busy={m.isPending} submitLabel="Add task">
           <div><Label htmlFor="t-title">What needs to happen?</Label><Input id="t-title" required value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} autoFocus /></div>
-          <div><Label htmlFor="t-due">Due date</Label><Input id="t-due" type="date" value={f.due_date} onChange={(e) => setF({ ...f, due_date: e.target.value })} /></div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><Label htmlFor="t-due">Due date</Label><Input id="t-due" type="date" value={f.due_date} onChange={(e) => setF({ ...f, due_date: e.target.value })} /></div>
+            <div><Label htmlFor="t-pri">Priority</Label><Select id="t-pri" value={f.priority} onChange={(e) => setF({ ...f, priority: e.target.value })}>{["low", "normal", "high", "urgent"].map((x) => <option key={x}>{x}</option>)}</Select></div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><Label htmlFor="t-assignee">Assign to</Label>
+              <Select id="t-assignee" value={f.assignee_id} onChange={(e) => setF({ ...f, assignee_id: e.target.value })}>
+                <option value="">Me</option>{users?.map((u) => <option key={u.id} value={u.id}>{u.full_name}</option>)}
+              </Select>
+            </div>
+            <div><Label htmlFor="t-dep">Blocked by</Label>
+              <Select id="t-dep" value={f.depends_on_id} onChange={(e) => setF({ ...f, depends_on_id: e.target.value })}>
+                <option value="">Nothing</option>{openTasks?.map((t) => <option key={t.id} value={t.id}>{t.title.slice(0, 48)}</option>)}
+              </Select>
+            </div>
+          </div>
         </FormShell>
       </DialogContent>
     </Dialog>
