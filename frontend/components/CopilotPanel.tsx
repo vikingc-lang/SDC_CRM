@@ -1,8 +1,9 @@
 "use client";
 
+import { AidenAvatar } from "@/components/Brand";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { useMutation } from "@tanstack/react-query";
-import { ArrowUp, Sparkles, X } from "lucide-react";
+import { ArrowUp, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { AnswerBlock, type AskResponse } from "@/components/AskAnswer";
 import { api, errorMessage } from "@/lib/api";
@@ -36,20 +37,20 @@ export function CopilotPanel() {
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-black/20 animate-fade-in lg:bg-transparent" />
         <DialogPrimitive.Content className="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col border-l bg-surface shadow-pop animate-slide-up focus:outline-none">
-          <DialogPrimitive.Title className="sr-only">Cirra Copilot</DialogPrimitive.Title>
+          <DialogPrimitive.Title className="sr-only">Aiden, your Cirra AI assistant</DialogPrimitive.Title>
           <DialogPrimitive.Description className="sr-only">Ask questions about your pipeline</DialogPrimitive.Description>
           <div className="flex h-14 items-center gap-2 border-b px-4">
-            <span className="ai-gradient flex h-7 w-7 items-center justify-center rounded-lg"><Sparkles className="h-3.5 w-3.5 text-white" /></span>
+            <AidenAvatar size={30} />
             <div>
-              <p className="text-sm font-semibold leading-4">Copilot</p>
-              <p className="text-[11.5px] text-muted-foreground">Grounded in your CRM memory</p>
+              <p className="text-sm font-semibold leading-4">Aiden</p>
+              <p className="text-[11.5px] text-muted-foreground">Your AI sales assistant · grounded in your CRM</p>
             </div>
             <DialogPrimitive.Close className="ml-auto rounded p-1.5 text-muted-foreground hover:bg-muted" aria-label="Close"><X className="h-4 w-4" /></DialogPrimitive.Close>
           </div>
           <div className="flex-1 space-y-5 overflow-y-auto p-4 scrollbar-thin">
             {thread.length === 0 && (
               <div className="pt-6">
-                <p className="text-[15px] font-medium">What do you want to know?</p>
+                <p className="text-[15px] font-medium">Hi, I’m Aiden. What do you want to know?</p>
                 <p className="mt-1 text-[13px] text-muted-foreground">I search every note, email and call you have logged, plus live pipeline data.</p>
                 <div className="mt-4 flex flex-col items-start gap-2">
                   {SUGGESTIONS.map((s) => (
@@ -77,7 +78,7 @@ export function CopilotPanel() {
                 onChange={(e) => setQuestion(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(question); } }}
                 rows={1}
-                placeholder="Ask about deals, accounts, people…"
+                placeholder="Ask Aiden about deals, accounts, people…"
                 className="max-h-32 min-h-[36px] flex-1 resize-none bg-transparent px-1.5 py-1.5 text-sm outline-none placeholder:text-subtle"
               />
               <button type="submit" disabled={!question.trim() || ask.isPending} className="ai-gradient flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white disabled:opacity-40" aria-label="Send">

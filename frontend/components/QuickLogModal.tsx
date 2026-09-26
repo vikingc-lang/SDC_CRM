@@ -173,7 +173,7 @@ export function QuickLogModal() {
 
   return (
     <Dialog open={open} onOpenChange={(o) => ui.set({ quickLogOpen: o })}>
-      <DialogContent title="Quick-Log" description="Paste notes and let Cirra structure them" className="max-w-2xl p-0" hideClose>
+      <DialogContent title="Quick-Log" description="Paste notes and let Aiden structure them" className="max-w-2xl p-0" hideClose>
         {phase === "input" && (
           <div>
             <div className="flex items-center gap-2 border-b px-4 py-3">
@@ -227,11 +227,11 @@ export function QuickLogModal() {
               </Button>
               {isSearch && (
                 <Button variant="ghost" size="sm" className="ml-auto" onClick={() => go(`/ask?q=${encodeURIComponent(text.trim())}`)}>
-                  <Search className="h-3.5 w-3.5" />Ask Cirra
+                  <Search className="h-3.5 w-3.5" />Ask Aiden
                 </Button>
               )}
               <Button variant="ai" size="sm" className={cn(!isSearch && "ml-auto")} disabled={text.trim().length < 3} onClick={() => extract.mutate()}>
-                <Wand2 className="h-3.5 w-3.5" />Extract with AI
+                <Wand2 className="h-3.5 w-3.5" />Extract with Aiden
                 <span className="ml-1 flex items-center gap-0.5 opacity-80"><Kbd className="border-white/30 bg-white/15 text-white">⌘</Kbd><Kbd className="border-white/30 bg-white/15 text-white"><CornerDownLeft className="h-3 w-3" /></Kbd></span>
               </Button>
             </div>
@@ -306,7 +306,7 @@ function Review({ draft, setDraft, createDeal, setCreateDeal, onBack, onCommit, 
       <div className="flex items-center gap-2 border-b px-4 py-3">
         <button onClick={onBack} className="rounded p-1 text-muted-foreground hover:bg-muted" aria-label="Back"><ArrowLeft className="h-4 w-4" /></button>
         <span className="text-sm font-medium">Review before saving</span>
-        <Badge tone="ai" className="ml-1"><Sparkles className="h-3 w-3" />{draft.engine === "heuristic" ? "Cirra engine" : draft.engine}</Badge>
+        <Badge tone="ai" className="ml-1"><Sparkles className="h-3 w-3" />{draft.engine === "heuristic" ? "Aiden · offline engine" : `Aiden · ${draft.engine}`}</Badge>
         <span className="ml-auto hidden text-[12px] text-muted-foreground sm:block">Everything is editable</span>
       </div>
 

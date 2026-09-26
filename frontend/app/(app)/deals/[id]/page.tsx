@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
-  ArrowLeft, CheckCircle2, CircleDashed, Copy, Gauge, History, Lightbulb, Mail, Plus, Sparkles, Swords, Target,
+  ArrowLeft, CheckCircle2, CircleDashed, Copy, Gauge, History, Lightbulb, Mail, Plus, Swords, Target,
 } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -17,6 +17,7 @@ import { RiskBadge, RoleBadge, riskTone } from "@/components/indicators";
 import { useStageMove } from "@/components/KanbanBoard";
 import { TaskRow } from "@/components/TaskList";
 import { Badge } from "@/components/ui/badge";
+import { AidenAvatar } from "@/components/Brand";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
@@ -172,7 +173,7 @@ export default function DealPage() {
 
           <div className="ai-border rounded-xl p-4 shadow-card">
             <div className="flex flex-wrap items-center gap-2">
-              <p className="flex items-center gap-1.5 text-[11.5px] font-medium uppercase tracking-wide text-ai"><Sparkles className="h-3.5 w-3.5" />AI insights</p>
+              <p className="flex items-center gap-1.5 text-[11.5px] font-medium uppercase tracking-wide text-ai"><AidenAvatar size={16} />Aiden’s insights</p>
               {ins.last_trigger && <span className="text-[11.5px] text-subtle">Last stage action: {ins.last_trigger.stage}, {relativeDays(ins.last_trigger.at)}</span>}
               <Button variant="outline" size="sm" className="ml-auto" loading={draftEmail.isPending} onClick={() => draftEmail.mutate()}><Mail className="h-3.5 w-3.5" />Draft follow-up</Button>
             </div>
@@ -263,9 +264,9 @@ export default function DealPage() {
       </div>
 
       <Dialog open={draft !== null} onOpenChange={(o) => !o && setDraft(null)}>
-        <DialogContent title="AI email draft" className="max-w-xl">
+        <DialogContent title="Aiden email draft" className="max-w-xl">
           <div className="p-5">
-            <p className="mb-3 flex items-center gap-1.5 text-sm font-semibold"><Sparkles className="h-4 w-4 text-ai" />Draft follow-up</p>
+            <p className="mb-3 flex items-center gap-1.5 text-sm font-semibold"><AidenAvatar size={18} />Aiden drafted this follow-up</p>
             <Textarea value={draft ?? ""} onChange={(e) => setDraft(e.target.value)} className="min-h-[280px] font-sans text-[13.5px]" />
             <div className="mt-3 flex justify-end gap-2">
               <Button variant="ghost" size="sm" onClick={() => setDraft(null)}>Close</Button>

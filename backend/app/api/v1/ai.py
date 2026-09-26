@@ -28,7 +28,7 @@ async def ai_status(_: User = Depends(get_current_user)):
             "ollama": settings.ollama_model,
             "aws_bedrock": settings.bedrock_model_id,
             "anthropic": settings.anthropic_model,
-            "heuristic": "Cirra deterministic engine",
+            "heuristic": "Aiden offline engine (deterministic)",
         }[llm.provider_name()],
         "embedding_provider": settings.embedding_provider,
         "embedding_dim": settings.embedding_dim,

@@ -1,5 +1,6 @@
 "use client";
 
+import { AidenAvatar } from "@/components/Brand";
 import { useQuery } from "@tanstack/react-query";
 import {
   AlertTriangle, ArrowUpRight, CalendarClock, CheckSquare, CircleDollarSign, HeartPulse, Plus, Siren, Sparkles, Target, TrendingUp,
@@ -54,12 +55,12 @@ export default function DashboardPage() {
         }
       />
 
-      {/* AI briefing */}
+      {/* Aiden's briefing */}
       <div className="ai-border mb-6 rounded-xl p-5 shadow-card">
         <div className="flex items-start gap-3">
-          <span className="ai-gradient flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"><Sparkles className="h-4 w-4 text-white" /></span>
+          <AidenAvatar size={34} />
           <div className="min-w-0 flex-1">
-            <p className="text-[11.5px] font-medium uppercase tracking-wide text-ai">Your AI briefing</p>
+            <p className="text-[11.5px] font-medium uppercase tracking-wide text-ai">Aiden’s morning briefing</p>
             {briefing.isLoading ? <Skeleton className="mt-2 h-5 w-2/3" /> : <p className="mt-1 text-[15px] font-medium leading-snug">{briefing.data?.headline}</p>}
           </div>
         </div>
@@ -85,7 +86,7 @@ export default function DashboardPage() {
       {!!alerts.data?.length && (
         <div className="mb-6 rounded-xl border bg-surface shadow-card">
           <p className="flex items-center gap-2 px-4 pt-3 text-[12px] font-medium uppercase tracking-wide text-muted-foreground">
-            <Siren className="h-3.5 w-3.5" style={{ color: "var(--status-critical)" }} />Risk & slippage copilot · {alerts.data.length} open alert{alerts.data.length === 1 ? "" : "s"}
+            <Siren className="h-3.5 w-3.5" style={{ color: "var(--status-critical)" }} />Aiden · risk & slippage alerts · {alerts.data.length} open alert{alerts.data.length === 1 ? "" : "s"}
           </p>
           <ul className="divide-y">
             {alerts.data.slice(0, 5).map((a) => (

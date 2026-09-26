@@ -35,3 +35,22 @@ export function CirraLogo({ height = 28, className }: { height?: number; classNa
     </svg>
   );
 }
+
+/** Aiden, Cirra's AI assistant. Round (vs. the square Cirra mark) so the assistant reads as a persona, not the product. */
+export const ASSISTANT = { name: "Aiden", role: "your Cirra AI assistant" };
+
+export function AidenAvatar({ size = 28, className }: { size?: number; className?: string }) {
+  return (
+    <svg viewBox="0 0 64 64" width={size} height={size} className={cn("shrink-0", className)} aria-hidden="true">
+      <defs>
+        <linearGradient id="aiden-bg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor={BRAND.navy} />
+          <stop offset="1" stopColor={BRAND.teal} />
+        </linearGradient>
+      </defs>
+      <circle cx="32" cy="32" r="32" fill="url(#aiden-bg)" />
+      <path d="M30 14c1.6 8.4 5.6 12.4 14 14-8.4 1.6-12.4 5.6-14 14-1.6-8.4-5.6-12.4-14-14 8.4-1.6 12.4-5.6 14-14z" fill="#fff" />
+      <circle cx="46" cy="44" r="5" fill={BRAND.aqua} />
+    </svg>
+  );
+}

@@ -9,7 +9,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
-import { CirraLogo, CirraMark } from "@/components/Brand";
+import { AidenAvatar, CirraLogo, CirraMark } from "@/components/Brand";
 import { CopilotPanel } from "@/components/CopilotPanel";
 import { QuickLogModal } from "@/components/QuickLogModal";
 import { Button } from "@/components/ui/button";
@@ -28,7 +28,7 @@ const NAV: { group: string | null; items: NavItem[] }[] = [
     { href: "/accounts", label: "Accounts", icon: Building2, resource: "accounts" },
     { href: "/contacts", label: "Contacts", icon: Users, resource: "contacts" },
     { href: "/tasks", label: "Tasks", icon: CheckSquare, resource: "tasks" },
-    { href: "/ask", label: "Ask Cirra", icon: Sparkles, resource: "activities" },
+    { href: "/ask", label: "Ask Aiden", icon: Sparkles, resource: "activities" },
   ] },
   { group: "Revenue", items: [
     { href: "/quotes", label: "Quotes", icon: FileSignature, resource: "quotes" },
@@ -230,7 +230,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </button>
           <div className="ml-auto flex items-center gap-1">
             <Button variant="outline" size="sm" onClick={() => ui.set({ copilotOpen: true })} className="hidden sm:inline-flex">
-              <Sparkles className="h-3.5 w-3.5 text-ai" />Copilot<Kbd className="ml-1">⌘J</Kbd>
+              <AidenAvatar size={18} />Aiden<Kbd className="ml-1">⌘J</Kbd>
             </Button>
             <NotificationBell />
             <ThemeToggle />

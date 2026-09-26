@@ -13,12 +13,12 @@ on the forecast call, when it's too late to act.
 
 **Why it's different.** The CRM does the data entry and flags risk while there's still time to act:
 
-- **AI briefing every morning:** overdue follow-ups, deals at risk and deals closing soon, in one view.
+- **Aiden's briefing every morning:** overdue follow-ups, deals at risk and deals closing soon, in one view.
 - **Quick-Log from meeting notes (⌘K):** paste notes, dictate or log a conversation, and Cirra files it against the right
   account and deal. You review the extraction (people and buying roles, deal value and timeline, next steps, sentiment)
   and commit it in one click.
 - **Deal risk you can see:** every deal gets a risk score with the reason: stale, no champion, sentiment drop.
-- **Ask Cirra (⌘J):** a copilot that answers questions about accounts, deals and pipeline in plain English, grounded in
+- **Aiden, your AI assistant (⌘J):** Aiden answers questions about accounts, deals and pipeline in plain English, grounded in
   hybrid keyword + semantic search (pgvector).
 - **A forecast you can explain:** weighted by stage probability and deal risk, shown by stage and by close month.
 - **Account 360 and stage gates:** the full picture of every account, and clear criteria for moving a deal forward.
@@ -137,7 +137,7 @@ all-or-nothing imports.
 | 3 | **Opportunity & revenue engine** | Four pipelines with their own stages and probabilities: Enterprise Direct, Inbound Mid-Market, Renewals & Upsells and Partner Channel. Declarative stage-gate rules, editable as JSON (min contacts, role mapped, activity logged, approved amount, signed document…) with a logged manager override. A multi-currency weighted forecast converted to USD and risk-adjusted. Win/loss taxonomy (Competitor, Budget Frozen, Feature Gap, Champion Departed, Price, No Decision…) with a required rep debrief and competitor capture. | Pipeline tabs · Reports · Admin → Pipelines & gates |
 | 4 | **CPQ / CLM** | Multi-currency price books with volume tiers, TCV/ACV and discount totals. Approval policies route by discount, payment terms, deal size and credit hold, to Sales Manager and then Finance. NDA, SOW and Order Form generated from sandboxed templates into PDF, with a content hash. **Embedded e-signature**: the customer signs through a public token link on a canvas signature pad, then the company countersigns. The countersigned PDF is attached to the timeline, and a completed Order Form creates the contract. | Deal → Quotes & Documents · Quotes · Approvals · Products · `/sign/[token]` |
 | 5 | **Omnichannel activity ledger** | Emails, calls (duration, disposition), meetings (agenda, attendance), notes, stage changes and attachments on one timeline. IMAP/SMTP mailbox sync with encrypted credentials; this works with Microsoft 365, Google Workspace and Exchange through their IMAP/SMTP endpoints. `.eml` drop-in. **Task & SLA engine**: delegation, priority, dependencies with cycle checks, and automatic escalation to the manager and then admins. A personal **iCal feed** that any CalDAV or calendar client subscribes to, plus `.ics` import that logs meetings. | Deal/Account timelines · Log activity · Tasks · Settings |
-| 6 | **Ambient AI** | Quick-Log (⌘K) from text **or voice** (local Whisper, audio never stored). **Risk & slippage copilot**: > 14 days stagnant, close-date pushbacks, sentiment drift and champion loss raise alerts. **Hybrid RAG**: Postgres full-text and pgvector results merged with reciprocal-rank fusion over activities and accounts. **Next-best-action generator**: cadence, missing buying roles and suggested messaging you can copy. | ⌘K · Home alerts · Deal page · Ask Cirra · Copilot |
+| 6 | **Ambient AI** | Quick-Log (⌘K) from text **or voice** (local Whisper, audio never stored). **Aiden's risk & slippage alerts**: > 14 days stagnant, close-date pushbacks, sentiment drift and champion loss raise alerts. **Hybrid RAG**: Postgres full-text and pgvector results merged with reciprocal-rank fusion over activities and accounts. **Next-best-action generator**: cadence, missing buying roles and suggested messaging you can copy. | ⌘K · Home alerts · Deal page · Ask Aiden · Aiden panel (⌘J) |
 | 7 | **Post-sale** | Closed-Won provisions an onboarding workspace with milestones and the full pre-sales hand-off (priorities, products, stakeholders, competitors). **Churn early warning** from adoption and utilisation trends, critical/high ticket load and champion turnover. **Renewal opportunities are created 90–120 days before expiry**, carrying the original contract terms. | Customer success · Account → Success |
 | 8 | **ERP fabric** | Customer master sync (legal name, tax ID, billing address, credit limit) through `demo`, `file` (JSON drop folder) or `rest` connectors. Invoice-level **A/R aging**; **credit holds** set from 90+ day balances or over-limit exposure block quotes behind finance approval. An outbound event outbox (`quote.approved`, `deal.closed_won`, `contract.created`, `invoice.overdue`…) feeds **promo, Yield, deduct and nexora** through a cursor feed or optional webhooks. | Finance & ERP · Account → Contracts & finance |
 | 9 | **PRM** | Partner **deal-registration portal**, where registrations are checked for existing accounts and overlapping registrations. Approval grants **90-day territory exclusivity** and creates the deal in the Partner pipeline. **Co-sell and commission attribution** by partner split and rate. **Collateral repository** gated by partner tier and email domain, with every download logged. | Partners · Partner portal (`/portal`) · Deal → Partners |
@@ -165,7 +165,7 @@ all-or-nothing imports.
 │       │   ├── embeddings.py        # 1536-d embeddings (hash / Ollama / Titan)
 │       │   ├── scoring.py           # spec §6 health & risk engine
 │       │   ├── pipeline_service.py  # spec §5 stage gates, §7 forecasting, Kanban
-│       │   ├── insights.py          # stage-trigger AI actions, briefing, Copilot, drafts
+│       │   ├── insights.py          # Aiden: stage-trigger AI actions, briefing, Q&A, drafts
 │       │   ├── dedup.py · hierarchy.py · custom_fields.py · privacy.py   # pillars 1–2
 │       │   ├── cpq.py · clm.py · fx.py · pipeline_templates.py          # pillars 3–4
 │       │   ├── mail.py · calendar.py · sla.py · voice.py · search.py    # pillars 5–6
@@ -209,7 +209,7 @@ engine**, so logging never breaks.
 | `heuristic` | In-process | Deterministic extractor, keyword signals, templated drafts. No model needed. |
 
 `EMBEDDING_PROVIDER` (`hash` | `ollama` | `aws_bedrock`) fills the 1536-dimension pgvector column behind semantic search
-and the Copilot. Vectors from different providers aren't comparable, so re-embed if you switch.
+and Aiden. Vectors from different providers aren't comparable, so re-embed if you switch.
 
 ### Roles
 

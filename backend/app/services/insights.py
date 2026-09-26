@@ -1,4 +1,4 @@
-"""AI copilot: stage-gate triggers, next-best-actions, briefings, Q&A and drafts.
+"""Aiden, the AI assistant: stage-gate triggers, next-best-actions, briefings, Q&A and drafts.
 
 Each capability uses the private LLM when one is configured and falls back to
 a deterministic, explainable implementation otherwise.
@@ -17,8 +17,10 @@ from app.services import embeddings, llm
 from app.services.ai_extractor import detect_signals
 from app.services.serializers import activity_out, days_between
 
+ASSISTANT_NAME = "Aiden"
+
 COPILOT_SYSTEM = (
-    "You are Cirra Copilot, an assistant embedded in a private B2B CRM. Answer using only the CRM context "
+    "You are Aiden, the AI sales assistant built into Cirra, a private B2B CRM. Answer using only the CRM context "
     "provided. Be concise and specific: name accounts, people, amounts and dates. If the context does not contain "
     "the answer, say so plainly. Use short paragraphs or bullets; no preamble."
 )

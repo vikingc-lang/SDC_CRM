@@ -1,7 +1,8 @@
 "use client";
 
+import { AidenAvatar } from "@/components/Brand";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ArrowUp, Building2, Search, Sparkles } from "lucide-react";
+import { ArrowUp, Building2, Search } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
@@ -42,9 +43,9 @@ function AskInner() {
   return (
     <div className="mx-auto max-w-3xl">
       <div className="pb-6 pt-4 text-center">
-        <span className="ai-gradient mx-auto flex h-11 w-11 items-center justify-center rounded-2xl shadow-pop"><Sparkles className="h-5 w-5 text-white" /></span>
-        <h1 className="mt-4 text-[26px] font-semibold tracking-tight">Ask <span className="ai-gradient-text">Cirra</span></h1>
-        <p className="mt-1 text-sm text-muted-foreground">Semantic search across every note, call and email, grounded in live pipeline data.</p>
+        <AidenAvatar size={48} className="mx-auto shadow-pop rounded-full" />
+        <h1 className="mt-4 text-[26px] font-semibold tracking-tight">Ask <span className="ai-gradient-text">Aiden</span></h1>
+        <p className="mt-1 text-sm text-muted-foreground">Aiden searches every note, call and email, and answers from live pipeline data.</p>
       </div>
       <form onSubmit={(e) => { e.preventDefault(); run(q); }} className="flex items-center gap-2 rounded-2xl border bg-surface p-2 shadow-pop focus-within:border-ring">
         <Search className="ml-2 h-4 w-4 shrink-0 text-subtle" />
@@ -60,7 +61,7 @@ function AskInner() {
       {ask.isError && <p className="mt-6 text-sm text-destructive">{errorMessage(ask.error)}</p>}
       {ask.data && (
         <Card className="mt-6 p-5">
-          <p className="mb-2 flex items-center gap-1.5 text-[11.5px] font-medium uppercase tracking-wide text-ai"><Sparkles className="h-3.5 w-3.5" />Answer</p>
+          <p className="mb-2 flex items-center gap-1.5 text-[11.5px] font-medium uppercase tracking-wide text-ai"><AidenAvatar size={16} />Aiden</p>
           <AnswerBlock answer={{ ...ask.data, sources: [] }} />
         </Card>
       )}

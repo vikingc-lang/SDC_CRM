@@ -1,10 +1,11 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AudioLines, Brain, CalendarDays, Copy, Cpu, Database, Inbox, Landmark, Mail, RefreshCw, Server, ShieldCheck, Trash2, Upload } from "lucide-react";
+import { AudioLines, Brain, CalendarDays, Copy, Cpu, Database, Inbox, Landmark, Mail, RefreshCw, ShieldCheck, Trash2, Upload } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/AppShell";
+import { AidenAvatar } from "@/components/Brand";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
@@ -22,7 +23,7 @@ const PROVIDER_LABEL: Record<string, string> = {
   ollama: "Ollama (local, on-prem)",
   aws_bedrock: "Claude on AWS Bedrock (your VPC)",
   anthropic: "Claude API",
-  heuristic: "Cirra deterministic engine (offline)",
+  heuristic: "Aiden offline engine (deterministic, no model needed)",
 };
 const ASR_LABEL: Record<string, string> = { disabled: "Disabled (type or paste notes)", whisper_asr: "Local Whisper ASR service", faster_whisper: "faster-whisper in the API container" };
 
@@ -52,7 +53,7 @@ export default function SettingsPage() {
         <MailCard />
         <CalendarCard />
         <Card>
-          <CardHeader title="Intelligence layer" icon={<Server className="h-4 w-4 text-muted-foreground" />} description="Configured with environment variables at deploy time." />
+          <CardHeader title="Aiden · intelligence layer" icon={<AidenAvatar size={18} />} description="The models behind Aiden, your AI assistant. Configured with environment variables at deploy time." />
           <CardBody className="divide-y">
             {status.isLoading && <Skeleton className="h-32 w-full" />}
             {rows.map(({ icon: Icon, label, value, sub }) => (
