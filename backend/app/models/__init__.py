@@ -29,7 +29,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.config import settings
 from app.core.database import Base
 
-USER_ROLES = ("super_admin", "sales_manager", "account_executive", "sdr", "auditor", "partner")
+USER_ROLES = ("super_admin", "sales_manager", "account_executive", "sdr", "auditor", "partner", "support_agent")
 ACCOUNT_TIERS = ("SMB", "Mid-Market", "Enterprise")
 BUYING_ROLES = ("Champion", "Decision Maker", "Economic Buyer", "Blocker", "Evaluator", "Influencer")
 ACTIVITY_TYPES = ("meeting", "call", "note", "email", "system", "file", "document")

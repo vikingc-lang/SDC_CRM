@@ -25,6 +25,7 @@ celery_app.conf.beat_schedule = {
     "auto-dedup": _every("auto_dedup", crontab(hour=3, minute=30)),            # pillar 1: autonomous dedup
     "reindex": _every("reindex", crontab(hour=4, minute=0)),                   # pillar 6: vector memory hygiene
     "workflows": _every("workflows", crontab(minute=5)),                       # scheduled workflow rules, hourly
+    "case-sla": _every("case_sla", crontab(minute="*/10")),                   # service: SLA breach alerts
 }
 
 

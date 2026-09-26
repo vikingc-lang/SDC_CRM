@@ -8,12 +8,13 @@ import { DataPanel } from "@/components/admin/data";
 import { AuditPanel, CompliancePanel, DedupPanel } from "@/components/admin/governance";
 import { JobsPanel } from "@/components/admin/integrations";
 import { ApprovalChainPanel, LeadManagementPanel, StagesPanel } from "@/components/admin/leadtoorder";
+import { ServicePanel } from "@/components/admin/service";
 import { WorkflowsPanel } from "@/components/admin/workflows";
 import { SecurityPanel } from "@/components/security";
 import { Tabs } from "@/components/ui/extra";
 import { useMe } from "@/lib/me";
 
-type Tab = "users" | "security" | "rbac" | "audit" | "privacy" | "dedup" | "fields" | "leads" | "workflows" | "chain" | "stages" | "gates" | "data" | "jobs";
+type Tab = "users" | "security" | "rbac" | "audit" | "privacy" | "dedup" | "fields" | "leads" | "workflows" | "service" | "chain" | "stages" | "gates" | "data" | "jobs";
 
 export default function AdminPage() {
   const { can } = useMe();
@@ -27,6 +28,7 @@ export default function AdminPage() {
     { value: "fields", label: "Custom fields", show: can("admin", "create") },
     { value: "leads", label: "Lead management", show: can("admin", "update") },
     { value: "workflows", label: "Workflows", show: can("admin", "read") },
+    { value: "service", label: "Service", show: can("admin", "update") },
     { value: "chain", label: "Approval chain", show: can("admin", "update") },
     { value: "stages", label: "Stages", show: can("admin", "update") },
     { value: "gates", label: "Stage gates", show: can("admin", "update") },
@@ -50,6 +52,7 @@ export default function AdminPage() {
       {current === "fields" && <CustomFieldsPanel />}
       {current === "leads" && <LeadManagementPanel />}
       {current === "workflows" && <WorkflowsPanel />}
+      {current === "service" && <ServicePanel />}
       {current === "chain" && <ApprovalChainPanel />}
       {current === "stages" && <StagesPanel />}
       {current === "gates" && <GatesPanel />}

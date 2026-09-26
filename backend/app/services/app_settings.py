@@ -33,6 +33,13 @@ DEFAULTS: dict[str, dict] = {
     },
     "approval_chain": {"order": ["sales_manager", "deal_desk", "vp_sales", "finance", "legal"]},
     "esign": {"provider": "builtin"},
+    # Customer service SLA targets per case priority
+    "case_sla": {
+        "critical": {"first_response_hours": 1, "resolve_hours": 8},
+        "high": {"first_response_hours": 4, "resolve_hours": 24},
+        "medium": {"first_response_hours": 8, "resolve_hours": 72},
+        "low": {"first_response_hours": 24, "resolve_hours": 120},
+    },
     # Sign-in policy. SSO is OpenID Connect; with "enforce" on, only Super Admins keep password sign-in (break-glass).
     "security": {
         "mfa_required_roles": [],

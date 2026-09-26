@@ -20,7 +20,7 @@ from sqlalchemy.orm import aliased
 
 from app.core.rbac import Principal
 from app.models import (
-    Account, Activity, Contact, Deal, FxRate, Lead, Order, Pipeline, PipelineStage, Quote, Task, User,
+    Account, Activity, Contact, Deal, FxRate, Lead, Order, Pipeline, PipelineStage, Quote, SupportQueue, SupportTicket, Task, User,
 )
 
 MAX_ROWS = 2000
@@ -274,7 +274,39 @@ def _orders() -> Source:
                   fields, base, lambda p, s: p.scope_accounts(s, "orders", Order.account_id), ["order_number", "account", "status", "total_usd", "created"], id_col=Order.id)
 
 
-SOURCES: dict[str, Source] = {s.key: s for s in (_deals(), _accounts(), _contacts(), _leads(), _activities(), _tasks(), _quotes(), _orders())}
+def _cases() -> Source:
+    acct, owner, queue = aliased(Account), aliased(User), aliased(SupportQueue)
+    first_resp_h = func.round(func.extract("epoch", SupportTicket.first_responded_at - SupportTicket.opened_at) / 3600.0, 1)
+    resolve_h = func.round(func.extract("epoch", SupportTicket.resolved_at - SupportTicket.opened_at) / 3600.0, 1)
+    fields = {
+        "case_number": F("Case #", "text", SupportTicket.case_number, groupable=False),
+        "subject": F("Subject", "text", SupportTicket.subject, groupable=False),
+        "account": F("Account", "text", acct.name),
+        "owner": F("Owner", "text", owner.full_name),
+        "queue": F("Queue", "text", queue.name),
+        "status": F("Status", "enum", SupportTicket.status, ["open", "pending", "resolved", "closed"]),
+        "priority": F("Priority", "enum", SupportTicket.severity, ["critical", "high", "medium", "low"]),
+        "channel": F("Channel", "enum", SupportTicket.channel, ["email", "phone", "web", "portal", "chat"]),
+        "category": F("Category", "text", SupportTicket.category),
+        "sla_breached": F("SLA breached", "bool", SupportTicket.sla_breached),
+        "csat": F("CSAT (1-5)", "number", SupportTicket.csat_score),
+        "first_response_hours": F("Hours to first response", "number", first_resp_h, groupable=False),
+        "resolution_hours": F("Hours to resolve", "number", resolve_h, groupable=False),
+        "opened": F("Opened", "date", SupportTicket.opened_at),
+        "resolved": F("Resolved", "date", SupportTicket.resolved_at),
+    }
+    base = lambda: (select().select_from(SupportTicket).join(acct, acct.id == SupportTicket.account_id)  # noqa: E731
+                    .outerjoin(owner, owner.id == SupportTicket.owner_id).outerjoin(queue, queue.id == SupportTicket.queue_id))
+
+    def scope(p: Principal, s):
+        if not p.is_own_scope("cases"):
+            return s
+        return s.where(or_(SupportTicket.owner_id == p.id, SupportTicket.account_id.in_(p.owned_account_ids())))
+    return Source("cases", "Cases", "cases", "Customer service cases with priority, SLA, response times and CSAT.",
+                  fields, base, scope, ["case_number", "subject", "account", "priority", "status", "owner"], id_col=SupportTicket.id)
+
+
+SOURCES: dict[str, Source] = {s.key: s for s in (_deals(), _accounts(), _contacts(), _leads(), _activities(), _tasks(), _quotes(), _orders(), _cases())}
 
 
 def catalogue(p: Principal) -> list[dict]:

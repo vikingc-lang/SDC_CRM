@@ -3,13 +3,13 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Date, DateTime, ForeignKey, Integer, Numeric, String, func
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import Boolean, Computed, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, func
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 
-__all__ = ["OnboardingProject", "OnboardingMilestone", "SupportTicket", "ProductUsage", "Invoice"]
+__all__ = ["OnboardingProject", "OnboardingMilestone", "SupportTicket", "SupportQueue", "CaseComment", "KbArticle", "ProductUsage", "Invoice"]
 
 
 def _pk() -> Mapped[uuid.UUID]:
@@ -61,6 +61,70 @@ class SupportTicket(Base):
     status: Mapped[str] = mapped_column(String(10), default="open")
     opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # case management (services/cases.py)
+    case_number: Mapped[str | None] = mapped_column(String(20), unique=True)
+    description: Mapped[str | None] = mapped_column(Text)
+    contact_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("contacts.id", ondelete="SET NULL"))
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    queue_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("support_queues.id", ondelete="SET NULL"))
+    channel: Mapped[str] = mapped_column(String(10), default="web")
+    category: Mapped[str | None] = mapped_column(String(60))
+    first_response_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resolve_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    first_responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sla_breached: Mapped[bool] = mapped_column(Boolean, default=False)
+    breach_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    csat_token: Mapped[str | None] = mapped_column(String(64), unique=True)
+    csat_score: Mapped[int | None] = mapped_column(Integer)
+    csat_comment: Mapped[str | None] = mapped_column(Text)
+    csat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class SupportQueue(Base):
+    __tablename__ = "support_queues"
+
+    id: Mapped[uuid.UUID] = _pk()
+    name: Mapped[str] = mapped_column(String(100), unique=True)
+    description: Mapped[str | None] = mapped_column(Text)
+    member_ids: Mapped[list] = mapped_column(JSONB, default=list)
+    auto_assign: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CaseComment(Base):
+    """A public reply (visible to the customer) or an internal note on a case."""
+    __tablename__ = "case_comments"
+
+    id: Mapped[uuid.UUID] = _pk()
+    case_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("support_tickets.id", ondelete="CASCADE"))
+    author_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    body: Mapped[str] = mapped_column(Text)
+    internal: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class KbArticle(Base):
+    __tablename__ = "kb_articles"
+
+    id: Mapped[uuid.UUID] = _pk()
+    title: Mapped[str] = mapped_column(String(200))
+    body: Mapped[str] = mapped_column(Text)
+    category: Mapped[str | None] = mapped_column(String(60))
+    status: Mapped[str] = mapped_column(String(10), default="draft")
+    tags: Mapped[list] = mapped_column(JSONB, default=list)
+    author_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    views: Mapped[int] = mapped_column(Integer, default=0)
+    helpful: Mapped[int] = mapped_column(Integer, default=0)
+    not_helpful: Mapped[int] = mapped_column(Integer, default=0)
+    search_tsv = mapped_column(
+        TSVECTOR,
+        Computed("setweight(to_tsvector('english', coalesce(title, '')), 'A') || setweight(to_tsvector('english', coalesce(body, '')), 'B')", persisted=True),
+        deferred=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
 class ProductUsage(Base):

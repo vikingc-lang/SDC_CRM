@@ -12,5 +12,5 @@ export function useMe() {
 
 export const ROLE_LABELS: Record<string, string> = {
   super_admin: "Super Admin", sales_manager: "Sales Manager", account_executive: "Account Executive", sdr: "SDR",
-  auditor: "Auditor", partner: "Partner",
+  auditor: "Auditor", partner: "Partner", support_agent: "Support Agent",
 };

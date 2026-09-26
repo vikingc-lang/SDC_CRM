@@ -282,11 +282,11 @@ class TicketCreate(BaseModel):
 @router.post("/{account_id}/tickets", status_code=201)
 async def create_ticket(account_id: uuid.UUID, body: TicketCreate, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("success", "create"))):
     await _get(db, p, account_id, "success")
-    db.add(SupportTicket(account_id=account_id, **body.model_dump()))
-    await db.flush()
-    await scoring.rescore_account(db, account_id)
+    from app.services import cases
+
+    case = await cases.create(db, {"account_id": account_id, **body.model_dump()}, p.user)
     await db.commit()
-    return {"status": "created"}
+    return {"status": "created", "id": case.id, "case_number": case.case_number}
 
 
 @router.patch("/{account_id}/tickets/{ticket_id}")
@@ -296,12 +296,9 @@ async def update_ticket(account_id: uuid.UUID, ticket_id: uuid.UUID, status: Lit
     if t is None or t.account_id != account_id:
         raise HTTPException(404, "Ticket not found")
     await p.ensure_account(db, account_id, "success")
-    t.status = status
-    if status in ("resolved", "closed"):
-        from datetime import datetime, timezone
-        t.resolved_at = datetime.now(timezone.utc)
-    await db.flush()
-    await scoring.rescore_account(db, account_id)
+    from app.services import cases
+
+    await cases.update(db, t, {"status": status})
     await db.commit()
     return {"status": t.status}
 

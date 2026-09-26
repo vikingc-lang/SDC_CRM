@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 from app.core.database import SessionLocal
 from app.core.rbac import ROLES
 from app.models import (
-    Account, Activity, Contact, Deal, Lead, Order, Quote, Task, User, WorkflowRule, WorkflowRun,
+    Account, Activity, Contact, Deal, Lead, Order, Quote, SupportTicket, Task, User, WorkflowRule, WorkflowRun,
 )
 from app.services import reporting
 from app.services.notify import emit, notify
@@ -94,6 +94,10 @@ ENTITIES: dict[str, Entity] = {
                      deal_id=lambda o: o.deal_id),
     "orders": Entity(Order, "Order", {"status": "status"}, lambda db, o: _account_owner(db, o.account_id), lambda o: f"/orders/{o.id}",
                      lambda o: o.account_id, lambda o: o.deal_id),
+    "cases": Entity(SupportTicket, "Case", {"status": "status", "priority": "severity", "owner": "owner_id", "queue": "queue_id",
+                                            "sla_breached": "sla_breached", "csat": "csat_score"},
+                    lambda db, o: _attr(o, "owner_id"), lambda o: f"/cases/{o.id}", lambda o: o.account_id,
+                    settable={"owner": ("owner_id", "user", None), "priority": ("severity", "enum", ["critical", "high", "medium", "low"])}),
 }
 _MODEL_KEY = {e.model: k for k, e in ENTITIES.items()}
 

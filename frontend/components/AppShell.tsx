@@ -1,10 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import {
-  BarChart3, Bell, Building2, CheckSquare, ChevronsUpDown, Columns3, FileSignature, Handshake, HeartHandshake, Home, Magnet, PackageCheck, Landmark, LogOut, Menu,
-  Monitor, Moon, Package, Search, Settings, ShieldCheck, Sparkles, Stamp, Sun, Users, X,
-} from "lucide-react";
+import { BarChart3, Bell, BookOpen, Building2, CheckSquare, ChevronsUpDown, Columns3, FileSignature, Handshake, HeartHandshake, Home, Landmark, LifeBuoy, LogOut, Magnet, Menu, Monitor, Moon, Package, PackageCheck, Search, Settings, ShieldCheck, Sparkles, Stamp, Sun, Users, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
@@ -23,7 +20,7 @@ import { cn, relativeDays } from "@/lib/utils";
 type NavItem = { href: string; label: string; icon: typeof Home; resource?: string; action?: "read" | "update" };
 const NAV: { group: string | null; items: NavItem[] }[] = [
   { group: null, items: [
-    { href: "/", label: "Home", icon: Home },
+    { href: "/", label: "Home", icon: Home, resource: "deals" },
     { href: "/leads", label: "Leads", icon: Magnet, resource: "leads" },
     { href: "/pipeline", label: "Pipeline", icon: Columns3, resource: "deals" },
     { href: "/accounts", label: "Accounts", icon: Building2, resource: "accounts" },
@@ -39,6 +36,8 @@ const NAV: { group: string | null; items: NavItem[] }[] = [
     { href: "/reports", label: "Reports", icon: BarChart3, resource: "reports" },
   ] },
   { group: "Customers", items: [
+    { href: "/cases", label: "Service", icon: LifeBuoy, resource: "cases" },
+    { href: "/knowledge", label: "Knowledge", icon: BookOpen, resource: "knowledge" },
     { href: "/success", label: "Customer success", icon: HeartHandshake, resource: "success" },
     { href: "/finance", label: "Finance & ERP", icon: Landmark, resource: "finance" },
     { href: "/partners", label: "Partners", icon: Handshake, resource: "partners" },
@@ -183,7 +182,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (user?.role === "partner") router.replace("/portal");
-  }, [user, router]);
+    if (user?.role === "support_agent" && pathname === "/") router.replace("/cases");  // Home is built from pipeline data
+  }, [user, router, pathname]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -203,7 +203,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   useEffect(() => setMobileOpen(false), [pathname]);
 
   // Hold rendering until the role is known, so partner users never fire internal CRM queries.
-  if (!ready || !user || user.role === "partner") return <div className="min-h-screen bg-background" />;
+  if (!ready || !user || user.role === "partner" || (user.role === "support_agent" && pathname === "/")) return <div className="min-h-screen bg-background" />;
 
   return (
     <div className="flex min-h-screen bg-background">

@@ -123,7 +123,7 @@ export interface QuickLogResponse {
 }
 
 // ---- enterprise pillars -------------------------------------------------------------
-export type Role = "super_admin" | "sales_manager" | "account_executive" | "sdr" | "auditor" | "partner";
+export type Role = "super_admin" | "sales_manager" | "account_executive" | "sdr" | "auditor" | "partner" | "support_agent";
 export type Action = "create" | "read" | "update" | "delete" | "export";
 export type Perm = Record<Action, boolean> & { scope: "all" | "own" };
 export interface Me {
