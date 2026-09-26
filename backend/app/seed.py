@@ -402,6 +402,7 @@ async def seed(minimal: bool = False, reset: bool = False) -> None:
 
         if not minimal:
             await _enterprise(db, users, accounts, deals, contacts_by_email, stages, pipelines, products, now, today)
+            await _lead_to_order(db, users, accounts, stages, pipelines, products, now, today)
 
         await db.flush()
         for account in (await db.execute(select(Account))).scalars().unique().all():
@@ -624,6 +625,151 @@ async def _enterprise(db, users, accounts, deals, contacts, stages, pipelines, p
                    amount=66000, balance=66000, status="open", currency="USD"))
     await db.flush()
     await erp.sync_inbound(db)  # demo ERP: customer master + invoices + credit holds
+
+
+# public demo intake keys (hashed at rest; the raw values are printed so the hosted form and webhook can be tried)
+DEMO_FORM_KEY = "cf_demo_webform_cirra"
+DEMO_WEBHOOK_KEY = "ck_demo_webhook_cirra"
+COUNTRY_BY_CODE = {"US": "United States", "NL": "Netherlands", "DE": "Germany", "GB": "United Kingdom"}
+
+# (first, last, email, title, company, domain, industry, employees, revenue, country, source, campaign, events[(type, days_ago, detail)], status)
+LEADS = [
+    ("Jonas", "Becker", "jonas.becker@kraftwerk-tools-demo.de", "VP Operations", "Kraftwerk Tools GmbH", "kraftwerk-tools-demo.de", "Manufacturing", 850, 120_000_000,
+     "Germany", "web_form", "Q4 ERP webinar", [("form_submit", 2, "Demo request"), ("pricing_page_visit", 1, "/pricing"), ("webinar_attended", 6, "ERP-native CRM")], None),
+    ("Liam", "O'Connor", "liam.oconnor@shamrock-foods-demo.ie", "Head of Sales Ops", "Shamrock Foods", "shamrock-foods-demo.ie", "Food & Beverage", 400,
+     60_000_000, "Ireland", "campaign", "EMEA nurture", [("email_click", 3, "Forecasting e-book"), ("content_download", 3, "Forecasting e-book")], None),
+    ("Aisha", "Khan", "aisha.khan@meridian-health-demo.com", "COO", "Meridian Health Partners", "meridian-health-demo.com", "Healthcare", 3200,
+     540_000_000, "United States", "trade_show", "SaaStr 2026", [("trade_show_scan", 12, "Booth scan"), ("meeting_booked", 4, "Discovery call")], "sql"),
+    ("Ravi", "Menon", "ravi.menon@lotus-textiles-demo.in", "Director IT", "Lotus Textiles", "lotus-textiles-demo.in", "Manufacturing", 1500, 90_000_000,
+     "India", "partner", "Northstar referral", [("form_submit", 20, "Partner referral form")], None),
+    ("Chloe", "Martin", "chloe.martin@gmail.com", "Consultant", "", None, None, None, None, "France", "web_form", "Website",
+     [("form_submit", 40, "Newsletter signup")], "disqualified"),
+    ("Ben", "Carter", "ben.carter@granite-build-demo.com", "CFO", "Granite Build Co", "granite-build-demo.com", "Construction", 700, 150_000_000,
+     "United States", "outbound", "Q3 outbound: construction", [("email_open", 9, "Sequence step 2"), ("email_click", 8, "Case study")], None),
+    ("Sofia", "Rossi", "sofia.rossi@alpina-energy-demo.it", "Head of Commercial", "Alpina Energy", "alpina-energy-demo.it", "Energy", 2100, 700_000_000,
+     "Italy", "web_form", "Q4 ERP webinar", [("form_submit", 1, "Contact sales"), ("pricing_page_visit", 1, "/pricing/enterprise"),
+                                             ("webinar_attended", 6, "ERP-native CRM")], None),
+]
+
+
+async def _lead_to_order(db, users, accounts, stages, pipelines, products, now, today) -> None:
+    """Lead-to-order demo: intake keys, routing, leads with engagement, regional / customer price books, a solution sale taken
+    from lead to an ERP-acknowledged order, and a second one waiting in the approval chain."""
+    import hashlib
+
+    from app.services import enrichment, leads as lead_svc, orders, pipeline_service
+    from app.services.clm import generate, send_for_signature, sign
+
+    marcus, priya, diego, sam = (users[e] for e in ("marcus@cirra.demo", "priya@cirra.demo", "diego@cirra.demo", "sam@cirra.demo"))
+    for name, account in accounts.items():  # geography drives regional price books and routing
+        code = next((l.get("country") for l in (FIRMO.get(name, {}).get("locations") or []) if l.get("type") == "HQ"), "US")
+        account.country = COUNTRY_BY_CODE.get(code, code)
+        account.region = enrichment.region_for(account.country)
+
+    db.add_all([
+        IntakeKey(name="Website demo form", kind="web_form", key_hash=hashlib.sha256(DEMO_FORM_KEY.encode()).hexdigest(), key_prefix=DEMO_FORM_KEY[:10],
+                  source="web_form", campaign="Website", created_by=users["admin@cirra.demo"].id),
+        IntakeKey(name="Marketing automation webhook", kind="webhook", key_hash=hashlib.sha256(DEMO_WEBHOOK_KEY.encode()).hexdigest(),
+                  key_prefix=DEMO_WEBHOOK_KEY[:10], source="campaign", created_by=users["admin@cirra.demo"].id),
+        AssignmentRule(name="Named accounts stay with the account owner", priority=10, method="account_owner", criteria={"existing_account": True}),
+        AssignmentRule(name="EMEA inbound round robin", priority=20, method="round_robin", criteria={"regions": ["EMEA"]},
+                       assignee_ids=[str(priya.id), str(diego.id)]),
+        AssignmentRule(name="Enterprise (1,000+ employees) to Marcus", priority=30, method="specific", criteria={"min_employees": 1000},
+                       assignee_ids=[str(marcus.id)]),
+        PriceBook(name="EMEA 2026 regional", kind="regional", region="EMEA", valid_from=today - timedelta(days=90),
+                  entries=[PriceBookEntry(product_id=products["CIR-PLAT"].id, currency="EUR", tiers=[{"min_qty": 1, "unit_price": 56}, {"min_qty": 100, "unit_price": 50}])]),
+        PriceBook(name="Apex framework agreement", kind="customer", account_id=accounts["Apex Industrial Supply"].id,
+                  entries=[PriceBookEntry(product_id=products["CIR-PLAT"].id, currency="USD", tiers=[{"min_qty": 1, "unit_price": 58}])]),
+    ])
+    await db.flush()
+
+    cfg = await lead_svc.app_settings.get(db, "lead_scoring")
+    for first, last, email, title, company, domain, industry, emp, rev, country, source, campaign, events, status in LEADS:
+        lead, _ = await lead_svc.capture(db, {"first_name": first, "last_name": last, "email": email, "job_title": title, "company_name": company,
+                                              "domain": domain, "industry": industry, "employee_count": emp, "annual_revenue": rev, "country": country,
+                                              "consent": "granted" if source == "web_form" else None}, source=source, campaign=campaign)
+        lead.created_at = now - timedelta(days=max(d for _, d, _ in events))
+        for kind, days_ago, detail in events:
+            await lead_svc.add_event(db, lead, kind, detail, source=source, occurred_at=now - timedelta(days=days_ago, hours=2), cfg=cfg)
+        await lead_svc.rescore(db, lead, cfg)
+        if status == "sql":
+            lead.qualification_framework, lead.status = "meddpicc", "sql"
+            lead.qualification = {k: {"met": True, "note": n} for k, n in (
+                ("metrics", "Cut claim-to-cash by 20 days"), ("economic_buyer", "COO owns budget"), ("decision_criteria", "HL7 + ERP integration"),
+                ("decision_process", "Security review then board"), ("identify_pain", "Manual renewals"), ("champion", "RevOps lead"))}
+        if status == "disqualified":
+            lead.status, lead.disqualified_reason, lead.disqualify_note = "disqualified", "not_a_fit", "Individual consultant, free-mail address"
+
+    # ---- a solution sale from lead to ERP sales order -------------------------------------------------------------
+    solution = pipelines["solution"]
+    lead, _ = await lead_svc.capture(db, {"first_name": "Mei", "last_name": "Tanaka", "email": "mei.tanaka@harborline-demo.com", "job_title": "CIO",
+                                          "company_name": "Harborline Freight", "domain": "harborline-demo.com", "industry": "Transportation",
+                                          "employee_count": 2400, "annual_revenue": 800_000_000, "country": "United States", "consent": "granted"},
+                                     source="trade_show", campaign="SaaStr 2026", owner_id=sam.id)
+    lead.created_at = now - timedelta(days=45)
+    for kind, d in (("trade_show_scan", 45), ("meeting_booked", 40)):
+        await lead_svc.add_event(db, lead, kind, "SaaStr booth, then discovery call", source="trade_show", occurred_at=now - timedelta(days=d), cfg=cfg)
+    lead.qualification = {k: {"met": True} for k in ("budget", "authority", "need", "timeline")}
+    lead.status = "sql"
+    out = await lead_svc.convert(db, lead, sam, deal_title="Harborline Freight: Revenue platform", amount=108_000, pipeline_id=solution.id,
+                                 owner_id=priya.id, buying_role="Economic Buyer", target_close_date=today)
+    deal = await db.get(Deal, out["deal_id"])
+    acc = await db.get(Account, out["account_id"])
+    for first, last, role, title in (("Kenji", "Mori", "Champion", "VP Revenue Operations"), ("Ava", "Brooks", "Evaluator", "Enterprise Architect"),
+                                     ("Lucas", "Grant", "Legal Counsel", "Associate General Counsel")):
+        db.add(Contact(account_id=acc.id, first_name=first, last_name=last, email=f"{first.lower()}.{last.lower()}@harborline-demo.com",
+                       job_title=title, buying_role=role))
+    for days, kind, text_ in ((32, "meeting", "Solution design workshop: pain is manual quote-to-cash and a forecast bottleneck across 3 regions."),
+                              (21, "meeting", "PoC scope agreed: SAP S/4 integration and Ambient AI on 40 reps; architecture review passed."),
+                              (12, "call", "Business case signed off by the CIO: 14-month payback, budget approved for FY27.")):
+        db.add(Activity(account_id=acc.id, deal_id=deal.id, user_id=priya.id, activity_type=kind, sentiment="positive", summary=text_,
+                        occurred_at=now - timedelta(days=days), attendance="attended" if kind == "meeting" else None))
+    await db.flush()
+    for name in ("Solution Design / Demo", "Technical Evaluation / PoC", "Business Case Validation"):
+        await pipeline_service.change_stage(db, deal, stages[("solution", name)], priya)
+
+    quote = Quote(deal_id=deal.id, quote_number=await cpq.next_quote_number(db), name="Harborline Freight: 120 users", currency="USD", term_months=12,
+                  payment_terms="NET30", billing_frequency="quarterly", created_by=priya.id, status="draft", is_primary=True)
+    db.add(quote)
+    await db.flush()
+    await cpq.rebuild(db, quote, [{"product_id": products["CIR-GROWTH"].id, "quantity": 120, "discount_pct": 0},
+                                  {"product_id": products["CIR-IMPL"].id, "quantity": 1, "discount_pct": 0}])
+    await cpq.submit(db, quote)
+    await pipeline_service.change_stage(db, deal, stages[("solution", "Negotiation & Legal")], priya)
+    doc = await generate(db, "order_form", acc, deal, quote, priya.id)
+    doc = await send_for_signature(db, doc, [{"name": "Mei Tanaka", "email": "mei.tanaka@harborline-demo.com", "party": "customer"},
+                                             {"name": "Marcus Vance", "email": "marcus@cirra.demo", "party": "company"}])
+    for req in sorted(doc.signers, key=lambda r: r.sign_order):
+        await sign(db, req, req.signer_name, None, "203.0.113.10", "seed")
+    hq = {"line1": "400 Pier 91 Way", "city": "Seattle", "region": "WA", "postal_code": "98119", "country": "US"}
+    deal.po_number, deal.bill_to, deal.ship_to, deal.incoterms = "PO-HF-778812", hq, {**hq, "attention": "Revenue Operations"}, "DAP"
+    deal.requested_delivery_date = today + timedelta(days=14)
+    await pipeline_service.change_stage(db, deal, stages[("solution", "Closed-Won")], priya,
+                                        win_debrief="Won on ERP-native quote-to-cash and the Ambient AI PoC; SAP add-on lost on integration effort.")
+    order = (await db.execute(select(orders.Order).where(orders.Order.deal_id == deal.id))).scalars().first()
+    if order:
+        await orders.push(db, order)
+
+    # ---- a second solution sale waiting in the approval chain ------------------------------------------------------------
+    lead, _ = await lead_svc.capture(db, {"first_name": "Omar", "last_name": "Haddad", "email": "omar.haddad@crescent-retail-demo.ae",
+                                          "job_title": "Chief Digital Officer", "company_name": "Crescent Retail", "domain": "crescent-retail-demo.ae",
+                                          "industry": "Retail", "employee_count": 5200, "country": "United Arab Emirates", "consent": "granted"},
+                                     source="partner", campaign="Northstar referral", owner_id=diego.id)
+    lead.qualification = {k: {"met": True} for k in ("budget", "authority", "need")}
+    lead.status = "sql"
+    out = await lead_svc.convert(db, lead, diego, deal_title="Crescent Retail: CRM + AI", amount=240_000, pipeline_id=solution.id, owner_id=diego.id,
+                                 buying_role="Champion", target_close_date=today + timedelta(days=40))
+    deal2 = await db.get(Deal, out["deal_id"])
+    q2 = Quote(deal_id=deal2.id, quote_number=await cpq.next_quote_number(db), name="Crescent Retail: 300 users, 3 years", currency="USD",
+               term_months=36, payment_terms="NET60", billing_frequency="annual", created_by=diego.id, status="draft", is_primary=True,
+               custom_terms="Liability cap raised to 2x annual fees; 60-day termination for convenience in year 1")
+    db.add(q2)
+    await db.flush()
+    await cpq.rebuild(db, q2, [{"product_id": products["CIR-PLAT"].id, "quantity": 300, "discount_pct": 28},
+                               {"product_id": products["CIR-AI"].id, "quantity": 300, "discount_pct": 10}])
+    await cpq.submit(db, q2)
+    await db.flush()
+    print(f"Lead intake: hosted form /forms/{DEMO_FORM_KEY}  |  webhook key {DEMO_WEBHOOK_KEY}")
 
 
 if __name__ == "__main__":

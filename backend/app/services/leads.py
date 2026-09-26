@@ -24,7 +24,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
-    Account, Activity, AppSetting, AssignmentRule, Contact, Deal, DealStageHistory, EngagementEvent, Lead, Pipeline, User,
+    Account, Activity, AppSetting, AssignmentRule, Contact, Deal, DealStageHistory, EngagementEvent, Lead, Pipeline, PipelineStage, User,
 )
 from app.services import app_settings, enrichment, privacy, scoring
 from app.services.dedup import find_account_duplicate, registrable_domain
@@ -416,7 +416,8 @@ async def convert(db: AsyncSession, lead: Lead, user: User, *, account_id: uuid.
         if pipeline is None:
             from app.services.pipeline_service import default_pipeline
             pipeline = await default_pipeline(db)
-        stage = next(s for s in sorted(pipeline.stages, key=lambda s: s.stage_order) if not s.is_closed_won and not s.is_closed_lost)
+        stages = (await db.execute(select(PipelineStage).where(PipelineStage.pipeline_id == pipeline.id).order_by(PipelineStage.stage_order))).scalars().all()
+        stage = next(s for s in stages if not s.is_closed_won and not s.is_closed_lost)
         deal = Deal(title=(deal_title or f"{account.name}: new opportunity").strip(), account_id=account.id, pipeline_id=pipeline.id,
                     stage_id=stage.id, amount=Decimal(str(amount or 0)), currency=(currency or "USD").upper(), primary_contact_id=contact.id,
                     target_close_date=target_close_date, original_close_date=target_close_date, owner_id=owner_id, source="lead",

@@ -24,9 +24,9 @@ async def test_price_book_resolution_customer_then_regional_then_list(client):
     products = await _products(client)
     plat = products["CIR-PLAT"]["id"]
     acc, deal = await _deal(client, "Rhein Logistik", country="Germany")
-    other, other_deal = await _deal(client, "Donau Foods", country="Austria")
+    other, other_deal = await _deal(client, "Harbour Foods", country="Australia")
     async with login_as("admin@cirra.demo") as admin:
-        r = await admin.post("/api/v1/price-books", json={"name": "EMEA 2027", "kind": "regional", "region": "EMEA",
+        r = await admin.post("/api/v1/price-books", json={"name": "APAC 2027", "kind": "regional", "region": "APAC",
                                                         "entries": [{"product_id": plat, "currency": "EUR", "tiers": [{"min_qty": 1, "unit_price": 55}]}]})
         assert r.status_code == 201
         r = await admin.post("/api/v1/price-books", json={"name": "Rhein framework agreement", "kind": "customer", "account_id": acc["id"],
@@ -36,7 +36,7 @@ async def test_price_book_resolution_customer_then_regional_then_list(client):
     q = (await client.post(f"/api/v1/deals/{deal['id']}/quotes", json={"currency": "EUR", "lines": [{"product_id": plat, "quantity": 10}]})).json()
     assert q["lines"][0]["list_unit_price"] == 47 and q["lines"][0]["price_source"] == "customer:Rhein framework agreement"
     q = (await client.post(f"/api/v1/deals/{other_deal['id']}/quotes", json={"currency": "EUR", "lines": [{"product_id": plat, "quantity": 10}]})).json()
-    assert q["lines"][0]["list_unit_price"] == 55 and q["lines"][0]["price_source"] == "regional:EMEA 2027"
+    assert q["lines"][0]["list_unit_price"] == 55 and q["lines"][0]["price_source"] == "regional:APAC 2027"
     _, us_deal = await _deal(client, "Prairie Grain", country="US")
     q = (await client.post(f"/api/v1/deals/{us_deal['id']}/quotes", json={"currency": "EUR", "lines": [{"product_id": plat, "quantity": 10}]})).json()
     assert q["lines"][0]["list_unit_price"] == 60 and q["lines"][0]["price_source"] == "list"

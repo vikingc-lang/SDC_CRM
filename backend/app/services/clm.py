@@ -256,7 +256,7 @@ async def build_context(db: AsyncSession, account: Account, deal: Deal | None, q
                   "promo_code": quote.promo_code, "valid_until": quote.valid_until.strftime("%B %d, %Y") if quote.valid_until else None} if quote else {},
         "custom_terms": quote.custom_terms if quote else None,
         "lines": [{"name": l.product.name, "unit": l.product.unit, "quantity": f"{float(l.quantity):g}", "included": l.is_included,
-                   "net_unit_price": _fmt_money(l.net_unit_price, cur), "discount_pct": f"{float(1 - (1 - l.discount_pct / 100) * (1 - l.promo_discount_pct / 100)) * 100:g}",
+                   "net_unit_price": _fmt_money(l.net_unit_price, cur), "discount_pct": f"{(1 - (1 - float(l.discount_pct or 0) / 100) * (1 - float(l.promo_discount_pct or 0) / 100)) * 100:g}",
                    "line_total": _fmt_money(l.line_total, cur)} for l in (quote.lines if quote else [])],
     }
 
