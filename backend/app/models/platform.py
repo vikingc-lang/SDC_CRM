@@ -11,7 +11,7 @@ from app.core.database import Base
 __all__ = [
     "RolePermission", "AuditLog", "CustomFieldDefinition", "MergeLog", "DedupDismissal", "SubjectKey",
     "ConsentEvent", "ErasureLog", "Notification", "Attachment", "MailboxConnection", "DealAlert", "FxRate",
-    "IntegrationEvent", "ErpSyncRun", "SsoLoginState", "SavedReport", "Dashboard",
+    "IntegrationEvent", "ErpSyncRun", "SsoLoginState", "SavedReport", "Dashboard", "WorkflowRule", "WorkflowRun",
 ]
 
 
@@ -265,3 +265,34 @@ class Dashboard(Base):
     tiles: Mapped[list] = mapped_column(JSONB, default=list)
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class WorkflowRule(Base):
+    """No-code automation: trigger + conditions (reporting filter syntax) + actions. See services/workflows.py."""
+    __tablename__ = "workflow_rules"
+
+    id: Mapped[uuid.UUID] = _pk()
+    name: Mapped[str] = mapped_column(String(150))
+    description: Mapped[str | None] = mapped_column(Text)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    source: Mapped[str] = mapped_column(String(30))
+    trigger: Mapped[dict] = mapped_column(JSONB)
+    conditions: Mapped[list] = mapped_column(JSONB, default=list)
+    actions: Mapped[list] = mapped_column(JSONB, default=list)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    run_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class WorkflowRun(Base):
+    __tablename__ = "workflow_runs"
+
+    id: Mapped[uuid.UUID] = _pk()
+    rule_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workflow_rules.id", ondelete="CASCADE"))
+    record_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    trigger: Mapped[str] = mapped_column(String(20))
+    status: Mapped[str] = mapped_column(String(10))
+    detail: Mapped[list] = mapped_column(JSONB, default=list)
+    created_at: Mapped[datetime] = _ts()

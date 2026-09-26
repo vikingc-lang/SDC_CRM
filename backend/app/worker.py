@@ -24,11 +24,17 @@ celery_app.conf.beat_schedule = {
     "renewals": _every("renewals", crontab(hour=3, minute=0)),                 # pillar 7: 120-day renewal engine
     "auto-dedup": _every("auto_dedup", crontab(hour=3, minute=30)),            # pillar 1: autonomous dedup
     "reindex": _every("reindex", crontab(hour=4, minute=0)),                   # pillar 6: vector memory hygiene
+    "workflows": _every("workflows", crontab(minute=5)),                       # scheduled workflow rules, hourly
 }
 
 
 @celery_app.task(name="app.worker.run_job")
 def run_job(name: str, *args):
+    from app.services import workflows
     from app.services.jobs import JOBS
 
-    asyncio.run(JOBS[name](*args))
+    async def _run():
+        await JOBS[name](*args)
+        await workflows.drain()  # finish automation triggered by this job before the loop closes
+
+    asyncio.run(_run())

@@ -14,7 +14,7 @@ from fastapi import BackgroundTasks
 
 from app.core.config import settings
 from app.core.database import SessionLocal
-from app.services import insights, scoring
+from app.services import insights, scoring, workflows
 
 log = logging.getLogger(__name__)
 
@@ -106,6 +106,11 @@ async def job_reindex() -> None:
         await insights.reindex(db)
 
 
+async def job_workflows() -> None:
+    async with SessionLocal() as db:
+        await workflows.run_scheduled(db)
+
+
 JOBS = {
     "embed_activity": job_embed_activity,
     "rescore_account": job_rescore_account,
@@ -121,12 +126,14 @@ JOBS = {
     "erp_orders": job_erp_orders,
     "lead_rescore": job_lead_rescore,
     "reindex": job_reindex,
+    "workflows": job_workflows,
 }
 
 
 async def _run_safely(name: str, *args: str | None) -> None:
     try:
         await JOBS[name](*args)
+        await workflows.drain()  # automation the job's changes triggered
     except Exception:  # background work must never crash the API process
         log.exception("Background job %s failed", name)
 

@@ -30,7 +30,7 @@ _SKIP_FIELDS = {"embedding", "search_tsv", "updated_at", "created_at", "password
                 "mfa_secret", "mfa_recovery_hashes", "mfa_last_step", "session_version", "last_login_at"}
 _UNAUDITED = {
     "AuditLog", "ConsentEvent", "ErasureLog", "Notification", "SubjectKey", "IntegrationEvent", "ErpSyncRun",
-    "CollateralDownload", "SsoLoginState",
+    "CollateralDownload", "SsoLoginState", "WorkflowRun",
 }
 _MAX = 4000
 
