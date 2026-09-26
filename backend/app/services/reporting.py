@@ -1,0 +1,594 @@
+"""Self-service reporting: a whitelisted field catalogue per data source, compiled to SQL.
+
+A report definition never carries SQL. It names a source, fields from that source's catalogue,
+filters with typed operators, up to two groupings (dates bucketed by week/month/quarter/year)
+and aggregate measures. Every source applies the viewer's row-level scope and requires read
+permission on the underlying resource, so a shared report shows each viewer only their records.
+"""
+from __future__ import annotations
+
+import csv
+import io
+from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
+from typing import Any, Callable
+
+from sqlalchemy import Date, and_, case, cast, func, literal, not_, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
+
+from app.core.rbac import Principal
+from app.models import (
+    Account, Activity, Contact, Deal, FxRate, Lead, Order, Pipeline, PipelineStage, Quote, Task, User,
+)
+
+MAX_ROWS = 2000
+MAX_GROUPS = 2
+BUCKETS = ("day", "week", "month", "quarter", "year")
+AGGS = ("count", "sum", "avg", "min", "max")
+OPS = {
+    "text": ("eq", "neq", "in", "not_in", "contains", "is_empty", "not_empty"),
+    "enum": ("eq", "neq", "in", "not_in", "is_empty", "not_empty"),
+    "number": ("eq", "neq", "gt", "gte", "lt", "lte", "between", "is_empty", "not_empty"),
+    "money": ("eq", "neq", "gt", "gte", "lt", "lte", "between", "is_empty", "not_empty"),
+    "date": ("on", "before", "after", "between", "within", "is_empty", "not_empty"),
+    "bool": ("is_true", "is_false"),
+}
+RELATIVE = ("today", "yesterday", "this_week", "last_week", "this_month", "last_month", "this_quarter", "last_quarter",
+            "next_quarter", "this_year", "last_year", "last_7_days", "last_30_days", "last_90_days", "next_30_days", "next_90_days")
+
+
+class ReportError(ValueError):
+    pass
+
+
+@dataclass
+class F:
+    label: str
+    type: str  # text | enum | number | money | date | bool
+    expr: Any
+    options: list[str] | None = None  # enum values offered in the filter picker
+    groupable: bool = True
+
+
+@dataclass
+class Source:
+    key: str
+    label: str
+    resource: str
+    description: str
+    fields: dict[str, F]
+    base: Callable[[], Any]           # -> Select with FROM/JOINs, no columns yet
+    scope: Callable[[Principal, Any], Any]
+    default_columns: list[str] = field(default_factory=list)
+    id_col: Any = None  # primary key of the source's base table (workflows match single records by it)
+
+
+# ---- sources -------------------------------------------------------------------------------------
+
+def _deals() -> Source:
+    owner, stage, pipe, acct, fx = aliased(User), aliased(PipelineStage), aliased(Pipeline), aliased(Account), aliased(FxRate)
+    usd = Deal.amount * func.coalesce(fx.rate_to_usd, 1)
+    status = case((stage.is_closed_won, literal("Won")), (stage.is_closed_lost, literal("Lost")), else_=literal("Open"))
+    open_weight = case((or_(stage.is_closed_won, stage.is_closed_lost), 0), else_=stage.default_probability)
+    fields = {
+        "title": F("Opportunity", "text", Deal.title, groupable=False),
+        "account": F("Account", "text", acct.name),
+        "industry": F("Industry", "text", acct.industry),
+        "region": F("Region", "enum", acct.region, ["NA", "EMEA", "APAC", "LATAM"]),
+        "tier": F("Account tier", "enum", acct.tier, ["SMB", "Mid-Market", "Enterprise"]),
+        "pipeline": F("Pipeline", "text", pipe.name),
+        "stage": F("Stage", "text", stage.name),
+        "status": F("Status", "enum", status, ["Open", "Won", "Lost"]),
+        "owner": F("Owner", "text", owner.full_name),
+        "deal_type": F("Type", "enum", Deal.deal_type, ["new_business", "renewal", "upsell", "partner"]),
+        "source": F("Source", "text", Deal.source),
+        "currency": F("Currency", "enum", Deal.currency, ["USD", "EUR", "GBP", "CAD", "AUD", "INR"]),
+        "amount": F("Amount (deal currency)", "number", Deal.amount, groupable=False),
+        "amount_usd": F("Amount (USD)", "money", usd, groupable=False),
+        "weighted_usd": F("Weighted (USD)", "money", usd * open_weight / 100, groupable=False),
+        "probability": F("Stage probability %", "number", stage.default_probability),
+        "risk_score": F("Risk score", "number", Deal.risk_score),
+        "close_date": F("Target close", "date", Deal.target_close_date),
+        "created": F("Created", "date", Deal.created_at),
+        "closed": F("Closed", "date", Deal.closed_at),
+        "close_date_pushes": F("Close-date pushes", "number", Deal.close_date_pushes),
+        "loss_reason": F("Loss reason", "text", Deal.loss_reason),
+        "competitor": F("Competitor", "text", Deal.loss_competitor),
+    }
+    base = lambda: (select().select_from(Deal).join(acct, acct.id == Deal.account_id).join(stage, stage.id == Deal.stage_id)  # noqa: E731
+                    .join(pipe, pipe.id == Deal.pipeline_id).outerjoin(owner, owner.id == Deal.owner_id)
+                    .outerjoin(fx, fx.currency == Deal.currency))
+    return Source("deals", "Opportunities", "deals", "Deals in every pipeline, with stage, owner, amounts in USD and dates.",
+                  fields, base, lambda p, s: p.scope_deals(s), ["title", "account", "stage", "owner", "amount_usd", "close_date"], id_col=Deal.id)
+
+
+def _accounts() -> Source:
+    owner = aliased(User)
+    fields = {
+        "name": F("Account", "text", Account.name, groupable=False),
+        "industry": F("Industry", "text", Account.industry),
+        "tier": F("Tier", "enum", Account.tier, ["SMB", "Mid-Market", "Enterprise"]),
+        "region": F("Region", "enum", Account.region, ["NA", "EMEA", "APAC", "LATAM"]),
+        "country": F("Country", "text", Account.country),
+        "lifecycle": F("Lifecycle stage", "enum", Account.lifecycle_stage, ["prospect", "customer", "churned", "partner"]),
+        "owner": F("Owner", "text", owner.full_name),
+        "health": F("Health score", "number", Account.health_score),
+        "churn_risk": F("Churn risk", "number", Account.churn_risk),
+        "annual_revenue": F("Annual revenue", "money", Account.annual_revenue, groupable=False),
+        "employees": F("Employees", "number", Account.employee_count, groupable=False),
+        "credit_hold": F("Credit hold", "bool", Account.credit_hold),
+        "created": F("Created", "date", Account.created_at),
+    }
+    base = lambda: select().select_from(Account).outerjoin(owner, owner.id == Account.owner_id)  # noqa: E731
+    return Source("accounts", "Accounts", "accounts", "Customer and prospect accounts with health, churn risk and firmographics.",
+                  fields, base, lambda p, s: p.scope_accounts(s), ["name", "industry", "tier", "owner", "health"], id_col=Account.id)
+
+
+def _contacts() -> Source:
+    acct = aliased(Account)
+    fields = {
+        "name": F("Contact", "text", Contact.first_name + " " + Contact.last_name, groupable=False),
+        "account": F("Account", "text", acct.name),
+        "job_title": F("Job title", "text", Contact.job_title),
+        "department": F("Department", "text", Contact.department),
+        "buying_role": F("Buying role", "enum", Contact.buying_role,
+                         ["Champion", "Decision Maker", "Economic Buyer", "Blocker", "Evaluator", "Influencer", "Legal Counsel", "Procurement"]),
+        "status": F("Status", "enum", Contact.status, ["active", "departed", "erased"]),
+        "consent_email": F("Email consent", "enum", Contact.consent_email, ["granted", "denied", "unknown"]),
+        "relationship": F("Relationship strength", "number", Contact.relationship_strength),
+        "created": F("Created", "date", Contact.created_at),
+    }
+    base = lambda: select().select_from(Contact).join(acct, acct.id == Contact.account_id)  # noqa: E731
+    return Source("contacts", "Contacts", "contacts", "People at your accounts with buying roles and consent.",
+                  fields, base, lambda p, s: p.scope_accounts(s, "contacts", Contact.account_id), ["name", "account", "job_title", "buying_role"], id_col=Contact.id)
+
+
+def _leads() -> Source:
+    owner = aliased(User)
+    fields = {
+        "name": F("Lead", "text", func.concat_ws(" ", Lead.first_name, Lead.last_name), groupable=False),
+        "company": F("Company", "text", Lead.company_name),
+        "source": F("Source", "text", Lead.source),
+        "campaign": F("Campaign", "text", Lead.campaign),
+        "status": F("Status", "enum", Lead.status, ["new", "working", "mql", "sql", "converted", "disqualified", "recycled"]),
+        "owner": F("Owner", "text", owner.full_name),
+        "industry": F("Industry", "text", Lead.industry),
+        "region": F("Region", "enum", Lead.region, ["NA", "EMEA", "APAC", "LATAM"]),
+        "country": F("Country", "text", Lead.country),
+        "score": F("Score", "number", Lead.score),
+        "fit_score": F("Fit score", "number", Lead.fit_score),
+        "engagement_score": F("Engagement score", "number", Lead.engagement_score),
+        "disqualified_reason": F("Disqualify reason", "text", Lead.disqualified_reason),
+        "created": F("Created", "date", Lead.created_at),
+        "mql_at": F("Became MQL", "date", Lead.mql_at),
+        "converted_at": F("Converted", "date", Lead.converted_at),
+    }
+    base = lambda: select().select_from(Lead).outerjoin(owner, owner.id == Lead.owner_id)  # noqa: E731
+
+    def scope(p: Principal, s):
+        return s.where(or_(Lead.owner_id == p.id, Lead.owner_id.is_(None))) if p.is_own_scope("leads") else s
+    return Source("leads", "Leads", "leads", "Inbound and imported leads with scores, status and conversion dates.",
+                  fields, base, scope, ["name", "company", "source", "status", "score", "owner"], id_col=Lead.id)
+
+
+def _activities() -> Source:
+    user, acct = aliased(User), aliased(Account)
+    fields = {
+        "type": F("Type", "enum", Activity.activity_type, ["meeting", "call", "note", "email", "system", "file", "document"]),
+        "subject": F("Summary", "text", Activity.summary, groupable=False),
+        "account": F("Account", "text", acct.name),
+        "user": F("Logged by", "text", user.full_name),
+        "sentiment": F("Sentiment", "enum", Activity.sentiment, ["positive", "neutral", "negative"]),
+        "direction": F("Direction", "enum", Activity.direction, ["inbound", "outbound", "internal"]),
+        "disposition": F("Call outcome", "text", Activity.disposition),
+        "source": F("Source", "text", Activity.source),
+        "duration_min": F("Duration (min)", "number", func.round(Activity.duration_seconds / 60.0, 1), groupable=False),
+        "occurred": F("Occurred", "date", Activity.occurred_at),
+    }
+    base = lambda: (select().select_from(Activity).join(acct, acct.id == Activity.account_id)  # noqa: E731
+                    .outerjoin(user, user.id == Activity.user_id))
+    return Source("activities", "Activities", "activities", "Emails, calls, meetings and notes on the timeline.",
+                  fields, base, lambda p, s: p.scope_accounts(s, "activities", Activity.account_id), ["occurred", "type", "account", "user", "subject"], id_col=Activity.id)
+
+
+def _tasks() -> Source:
+    owner, assignee, acct = aliased(User), aliased(User), aliased(Account)
+    overdue = and_(Task.completed.is_(False), Task.due_date < func.current_date())
+    fields = {
+        "title": F("Task", "text", Task.title, groupable=False),
+        "priority": F("Priority", "enum", Task.priority, ["low", "normal", "high", "urgent"]),
+        "completed": F("Completed", "bool", Task.completed),
+        "overdue": F("Overdue", "bool", overdue),
+        "owner": F("Owner", "text", owner.full_name),
+        "assignee": F("Assignee", "text", assignee.full_name),
+        "account": F("Account", "text", acct.name),
+        "escalation_level": F("Escalation level", "number", Task.escalation_level),
+        "due": F("Due", "date", Task.due_date),
+        "created": F("Created", "date", Task.created_at),
+        "completed_at": F("Completed on", "date", Task.completed_at),
+    }
+    base = lambda: (select().select_from(Task).outerjoin(owner, owner.id == Task.owner_id)  # noqa: E731
+                    .outerjoin(assignee, assignee.id == Task.assignee_id).outerjoin(acct, acct.id == Task.account_id))
+
+    def scope(p: Principal, s):
+        if not p.is_own_scope("tasks"):
+            return s
+        return s.where(or_(Task.owner_id == p.id, Task.assignee_id == p.id, Task.account_id.in_(p.owned_account_ids())))
+    return Source("tasks", "Tasks", "tasks", "Follow-ups and to-dos with owners, due dates and SLA escalation.",
+                  fields, base, scope, ["title", "priority", "owner", "due", "completed"], id_col=Task.id)
+
+
+def _quotes() -> Source:
+    acct, fx = aliased(Account), aliased(FxRate)
+    deal = aliased(Deal)
+    fields = {
+        "quote_number": F("Quote #", "text", Quote.quote_number, groupable=False),
+        "name": F("Quote", "text", Quote.name, groupable=False),
+        "deal": F("Opportunity", "text", deal.title),
+        "account": F("Account", "text", acct.name),
+        "status": F("Status", "enum", Quote.status, ["draft", "pending_approval", "approved", "rejected", "sent", "accepted", "expired"]),
+        "is_primary": F("Primary quote", "bool", Quote.is_primary),
+        "currency": F("Currency", "enum", Quote.currency, ["USD", "EUR", "GBP", "CAD", "AUD", "INR"]),
+        "acv_usd": F("ACV (USD)", "money", Quote.acv * func.coalesce(fx.rate_to_usd, 1), groupable=False),
+        "tcv_usd": F("TCV (USD)", "money", Quote.tcv * func.coalesce(fx.rate_to_usd, 1), groupable=False),
+        "discount_usd": F("Discount (USD)", "money", Quote.discount_total * func.coalesce(fx.rate_to_usd, 1), groupable=False),
+        "max_discount_pct": F("Max line discount %", "number", Quote.max_discount_pct),
+        "term_months": F("Term (months)", "number", Quote.term_months),
+        "created": F("Created", "date", Quote.created_at),
+        "approved": F("Approved", "date", Quote.approved_at),
+    }
+    base = lambda: (select().select_from(Quote).join(deal, deal.id == Quote.deal_id).join(acct, acct.id == deal.account_id)  # noqa: E731
+                    .outerjoin(fx, fx.currency == Quote.currency))
+
+    def scope(p: Principal, s):
+        if not p.is_own_scope("quotes"):
+            return s
+        return s.where(or_(deal.owner_id == p.id, deal.account_id.in_(p.owned_account_ids())))
+    return Source("quotes", "Quotes", "quotes", "CPQ quotes with ACV, TCV, discounts and approval status.",
+                  fields, base, scope, ["quote_number", "account", "status", "acv_usd", "created"], id_col=Quote.id)
+
+
+def _orders() -> Source:
+    acct, fx = aliased(Account), aliased(FxRate)
+    fields = {
+        "order_number": F("Order #", "text", Order.order_number, groupable=False),
+        "account": F("Account", "text", acct.name),
+        "status": F("Status", "enum", Order.status, ["draft", "submitted", "sent_to_erp", "acknowledged", "failed", "cancelled"]),
+        "erp_status": F("ERP status", "text", Order.erp_status),
+        "billing_frequency": F("Billing", "enum", Order.billing_frequency, ["annual", "quarterly", "monthly"]),
+        "currency": F("Currency", "enum", Order.currency, ["USD", "EUR", "GBP", "CAD", "AUD", "INR"]),
+        "total_usd": F("Total (USD)", "money", Order.total * func.coalesce(fx.rate_to_usd, 1), groupable=False),
+        "term_months": F("Term (months)", "number", Order.term_months),
+        "created": F("Created", "date", Order.created_at),
+        "submitted": F("Submitted", "date", Order.submitted_at),
+    }
+    base = lambda: (select().select_from(Order).join(acct, acct.id == Order.account_id)  # noqa: E731
+                    .outerjoin(fx, fx.currency == Order.currency))
+    return Source("orders", "Orders", "orders", "Sales orders raised at Closed-Won and their ERP hand-off.",
+                  fields, base, lambda p, s: p.scope_accounts(s, "orders", Order.account_id), ["order_number", "account", "status", "total_usd", "created"], id_col=Order.id)
+
+
+SOURCES: dict[str, Source] = {s.key: s for s in (_deals(), _accounts(), _contacts(), _leads(), _activities(), _tasks(), _quotes(), _orders())}
+
+
+def catalogue(p: Principal) -> list[dict]:
+    out = []
+    for s in SOURCES.values():
+        if not p.can(s.resource, "read"):
+            continue
+        out.append({"key": s.key, "label": s.label, "description": s.description, "default_columns": s.default_columns,
+                    "fields": [{"key": k, "label": f.label, "type": f.type, "options": f.options, "groupable": f.groupable,
+                                "ops": list(OPS[f.type])} for k, f in s.fields.items()]})
+    return out
+
+
+# ---- compile & run ------------------------------------------------------------------------------
+
+def _period(name: str, today: date) -> tuple[date, date]:
+    """Inclusive start, exclusive end."""
+    q_start = date(today.year, 3 * ((today.month - 1) // 3) + 1, 1)
+
+    def add_months(d: date, n: int) -> date:
+        m = d.month - 1 + n
+        return date(d.year + m // 12, m % 12 + 1, 1)
+    week = today - timedelta(days=today.weekday())
+    month = today.replace(day=1)
+    table = {
+        "today": (today, today + timedelta(days=1)),
+        "yesterday": (today - timedelta(days=1), today),
+        "this_week": (week, week + timedelta(days=7)),
+        "last_week": (week - timedelta(days=7), week),
+        "this_month": (month, add_months(month, 1)),
+        "last_month": (add_months(month, -1), month),
+        "this_quarter": (q_start, add_months(q_start, 3)),
+        "last_quarter": (add_months(q_start, -3), q_start),
+        "next_quarter": (add_months(q_start, 3), add_months(q_start, 6)),
+        "this_year": (date(today.year, 1, 1), date(today.year + 1, 1, 1)),
+        "last_year": (date(today.year - 1, 1, 1), date(today.year, 1, 1)),
+        "last_7_days": (today - timedelta(days=6), today + timedelta(days=1)),
+        "last_30_days": (today - timedelta(days=29), today + timedelta(days=1)),
+        "last_90_days": (today - timedelta(days=89), today + timedelta(days=1)),
+        "next_30_days": (today, today + timedelta(days=30)),
+        "next_90_days": (today, today + timedelta(days=90)),
+    }
+    if name not in table:
+        raise ReportError(f"Unknown period '{name}'")
+    return table[name]
+
+
+def _as_date(v) -> date:
+    try:
+        return v if isinstance(v, date) else date.fromisoformat(str(v)[:10])
+    except ValueError as e:
+        raise ReportError(f"'{v}' is not a date (use YYYY-MM-DD)") from e
+
+
+def _as_num(v) -> float:
+    try:
+        return float(v)
+    except (TypeError, ValueError) as e:
+        raise ReportError(f"'{v}' is not a number") from e
+
+
+def _condition(f: F, op: str, value):
+    if op not in OPS[f.type]:
+        raise ReportError(f"'{op}' doesn't apply to {f.label}")
+    e = f.expr
+    if op == "is_empty":
+        return or_(e.is_(None), e == "") if f.type == "text" else e.is_(None)
+    if op == "not_empty":
+        return and_(e.isnot(None), e != "") if f.type == "text" else e.isnot(None)
+    if op == "is_true":
+        return e.is_(True)
+    if op == "is_false":
+        return or_(e.is_(False), e.is_(None))
+    if f.type == "date":
+        d = cast(e, Date)
+        if op == "within":
+            start, end = _period(str(value), date.today())
+            return and_(d >= start, d < end)
+        if op == "between":
+            if not isinstance(value, (list, tuple)) or len(value) != 2:
+                raise ReportError("'between' needs a start and end date")
+            return and_(d >= _as_date(value[0]), d <= _as_date(value[1]))
+        v = _as_date(value)
+        return {"on": d == v, "before": d < v, "after": d > v}[op]
+    if f.type in ("number", "money"):
+        if op == "between":
+            if not isinstance(value, (list, tuple)) or len(value) != 2:
+                raise ReportError("'between' needs a low and high value")
+            return and_(e >= _as_num(value[0]), e <= _as_num(value[1]))
+        v = _as_num(value)
+        return {"eq": e == v, "neq": e != v, "gt": e > v, "gte": e >= v, "lt": e < v, "lte": e <= v}[op]
+    # text / enum
+    if op in ("in", "not_in"):
+        vals = [str(x) for x in (value if isinstance(value, (list, tuple)) else str(value).split(","))]
+        cond = e.in_(vals)
+        return cond if op == "in" else or_(not_(cond), e.is_(None))
+    if op == "contains":
+        return e.ilike(f"%{str(value).replace('%', '').replace('_', ' ')}%")
+    return e == str(value) if op == "eq" else or_(e != str(value), e.is_(None))
+
+
+def _bucketed(f: F, bucket: str | None):
+    if f.type != "date":
+        return f.expr
+    b = bucket or "month"
+    if b not in BUCKETS:
+        raise ReportError(f"Unknown date grouping '{b}'")
+    return cast(func.date_trunc(b, f.expr), Date)
+
+
+def validate(defn: dict) -> dict:
+    src = SOURCES.get(defn.get("source") or "")
+    if src is None:
+        raise ReportError("Choose a data source")
+    groups = defn.get("group_by") or []
+    if len(groups) > MAX_GROUPS:
+        raise ReportError(f"Group by at most {MAX_GROUPS} fields")
+    for g in groups:
+        f = src.fields.get(g.get("field"))
+        if f is None or not f.groupable:
+            raise ReportError(f"Can't group by '{g.get('field')}'")
+    for m in defn.get("measures") or []:
+        if m.get("agg") not in AGGS:
+            raise ReportError(f"Unknown summary '{m.get('agg')}'")
+        if m["agg"] != "count":
+            f = src.fields.get(m.get("field"))
+            if f is None or f.type not in ("number", "money"):
+                raise ReportError(f"{m['agg'].title()} needs a number field")
+    for c in defn.get("columns") or []:
+        if c not in src.fields:
+            raise ReportError(f"Unknown column '{c}'")
+    for flt in defn.get("filters") or []:
+        if flt.get("field") not in src.fields:
+            raise ReportError(f"Unknown filter field '{flt.get('field')}'")
+    return defn
+
+
+def _measure_key(m: dict) -> str:
+    return "count" if m["agg"] == "count" else f"{m['agg']}_{m['field']}"
+
+
+def _measure_label(src: Source, m: dict) -> str:
+    if m["agg"] == "count":
+        return f"Number of {src.label.lower()}"
+    names = {"sum": "Total", "avg": "Average", "min": "Lowest", "max": "Highest"}
+    return f"{names[m['agg']]} {src.fields[m['field']].label}"
+
+
+def _json(v):
+    if isinstance(v, Decimal):
+        return float(v)
+    if isinstance(v, (date, datetime)):
+        return v.isoformat()
+    return v
+
+
+async def run(db: AsyncSession, p: Principal, defn: dict) -> dict:
+    validate(defn)
+    src = SOURCES[defn["source"]]
+    if not p.can(src.resource, "read"):
+        raise ReportError(f"Your role can't read {src.label.lower()}")
+    stmt = src.scope(p, src.base())
+    for flt in defn.get("filters") or []:
+        stmt = stmt.where(_condition(src.fields[flt["field"]], flt.get("op", "eq"), flt.get("value")))
+    limit = min(int(defn.get("limit") or 500), MAX_ROWS)
+    groups = defn.get("group_by") or []
+    measures = defn.get("measures") or ([{"agg": "count"}] if groups else [])
+    sort = defn.get("sort") or {}
+    desc = sort.get("dir", "desc") == "desc"
+
+    if groups or measures:
+        dims = [(g["field"], _bucketed(src.fields[g["field"]], g.get("bucket")).label(g["field"])) for g in groups]
+        meas = []
+        for m in measures:
+            expr = func.count() if m["agg"] == "count" else getattr(func, m["agg"])(src.fields[m["field"]].expr)
+            meas.append((_measure_key(m), expr.label(_measure_key(m))))
+        stmt = stmt.add_columns(*[d for _, d in dims], *[e for _, e in meas])
+        if dims:
+            stmt = stmt.group_by(*[d for _, d in dims])
+        keys = {k: e for k, e in dims + meas}
+        by = sort.get("by")
+        if by in keys:
+            order = keys[by].desc().nullslast() if desc else keys[by].asc().nullsfirst()
+            stmt = stmt.order_by(order)
+        elif dims and any(src.fields[g["field"]].type == "date" for g in groups):
+            stmt = stmt.order_by(*[d.asc() for _, d in dims])
+        elif meas:
+            stmt = stmt.order_by(meas[0][1].desc().nullslast())
+        cols = ([{"key": g["field"], "label": src.fields[g["field"]].label + (f" ({g.get('bucket') or 'month'})" if src.fields[g["field"]].type == "date" else ""),
+                  "type": "date" if src.fields[g["field"]].type == "date" else src.fields[g["field"]].type, "role": "dimension",
+                  "bucket": (g.get("bucket") or "month") if src.fields[g["field"]].type == "date" else None} for g in groups]
+                + [{"key": _measure_key(m), "label": _measure_label(src, m),
+                    "type": "number" if m["agg"] == "count" else src.fields[m["field"]].type, "role": "measure"} for m in measures])
+    else:
+        columns = defn.get("columns") or src.default_columns
+        stmt = stmt.add_columns(*[src.fields[c].expr.label(c) for c in columns])
+        by = sort.get("by")
+        if by in src.fields:
+            e = src.fields[by].expr
+            stmt = stmt.order_by(e.desc().nullslast() if desc else e.asc().nullsfirst())
+        cols = [{"key": c, "label": src.fields[c].label, "type": src.fields[c].type, "role": "column"} for c in columns]
+
+    rows = (await db.execute(stmt.limit(limit + 1))).all()
+    truncated = len(rows) > limit
+    data = [[_json(v) for v in r] for r in rows[:limit]]
+    return {"source": src.key, "source_label": src.label, "columns": cols, "rows": data, "truncated": truncated,
+            "row_count": len(data), "generated_at": datetime.now(timezone.utc).isoformat()}
+
+
+# ---- system-side helpers (workflows): no user scope, single records -----------------------------
+
+def validate_filters(source: str, filters: list[dict]) -> None:
+    src = SOURCES.get(source)
+    if src is None:
+        raise ReportError("Choose a record type")
+    for flt in filters or []:
+        f = src.fields.get(flt.get("field"))
+        if f is None:
+            raise ReportError(f"Unknown condition field '{flt.get('field')}'")
+        _condition(f, flt.get("op", "eq"), flt.get("value"))  # raises on a bad operator or value
+
+
+async def match_ids(db: AsyncSession, source: str, filters: list[dict], ids: list | None = None, limit: int = 500) -> list:
+    """Ids of records that satisfy every filter (optionally only among ``ids``). Not scoped to a user."""
+    src = SOURCES[source]
+    stmt = src.base().add_columns(src.id_col)
+    for flt in filters or []:
+        stmt = stmt.where(_condition(src.fields[flt["field"]], flt.get("op", "eq"), flt.get("value")))
+    if ids is not None:
+        if not ids:
+            return []
+        stmt = stmt.where(src.id_col.in_(ids))
+    return [r[0] for r in (await db.execute(stmt.limit(limit)))]
+
+
+def _plain(v, f: F) -> str:
+    if v is None or v == "":
+        return ""
+    if f.type == "money":
+        return f"${float(v):,.0f}"
+    if f.type == "number":
+        return f"{float(v):,.1f}".rstrip("0").rstrip(".")
+    if f.type == "bool":
+        return "Yes" if v else "No"
+    if isinstance(v, (date, datetime)):
+        return v.date().isoformat() if isinstance(v, datetime) else v.isoformat()
+    return str(v)
+
+
+async def record_values(db: AsyncSession, source: str, record_id) -> dict[str, str]:
+    """Every catalogue field of one record, formatted as text (for message templates)."""
+    src = SOURCES[source]
+    keys = list(src.fields)
+    stmt = src.base().add_columns(*[src.fields[k].expr.label(k) for k in keys]).where(src.id_col == record_id)
+    row = (await db.execute(stmt)).first()
+    return {k: _plain(v, src.fields[k]) for k, v in zip(keys, row)} if row else {}
+
+
+def to_csv(result: dict) -> str:
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow([c["label"] for c in result["columns"]])
+    for r in result["rows"]:
+        w.writerow(["" if v is None else v for v in r])
+    return buf.getvalue()
+
+
+# ---- starter content ----------------------------------------------------------------------------
+
+STARTER_REPORTS = [
+    ("Won this quarter", "Closed-Won revenue in the current quarter.",
+     {"source": "deals", "filters": [{"field": "status", "op": "eq", "value": "Won"}, {"field": "closed", "op": "within", "value": "this_quarter"}],
+      "measures": [{"agg": "sum", "field": "amount_usd"}], "chart": {"type": "number"}}),
+    ("Open pipeline", "Total value of open opportunities.",
+     {"source": "deals", "filters": [{"field": "status", "op": "eq", "value": "Open"}],
+      "measures": [{"agg": "sum", "field": "amount_usd"}], "chart": {"type": "number"}}),
+    ("Weighted pipeline", "Open value weighted by stage probability.",
+     {"source": "deals", "filters": [{"field": "status", "op": "eq", "value": "Open"}],
+      "measures": [{"agg": "sum", "field": "weighted_usd"}], "chart": {"type": "number"}}),
+    ("Open pipeline by stage", "Where open value sits in the funnel.",
+     {"source": "deals", "filters": [{"field": "status", "op": "eq", "value": "Open"}], "group_by": [{"field": "stage"}],
+      "measures": [{"agg": "sum", "field": "amount_usd"}, {"agg": "count"}], "chart": {"type": "bar"}}),
+    ("Weighted pipeline by close month", "Risk-free view of what should land when.",
+     {"source": "deals", "filters": [{"field": "status", "op": "eq", "value": "Open"}], "group_by": [{"field": "close_date", "bucket": "month"}],
+      "measures": [{"agg": "sum", "field": "weighted_usd"}], "chart": {"type": "column"}}),
+    ("Pipeline by owner and stage", "Each rep's open pipeline, split by stage.",
+     {"source": "deals", "filters": [{"field": "status", "op": "eq", "value": "Open"}], "group_by": [{"field": "owner"}, {"field": "stage"}],
+      "measures": [{"agg": "sum", "field": "amount_usd"}], "chart": {"type": "stacked"}}),
+    ("Leads by source (90 days)", "Where new leads came from in the last 90 days.",
+     {"source": "leads", "filters": [{"field": "created", "op": "within", "value": "last_90_days"}], "group_by": [{"field": "source"}],
+      "measures": [{"agg": "count"}], "chart": {"type": "bar"}}),
+    ("Activity by week", "Logged emails, calls, meetings and notes per week.",
+     {"source": "activities", "filters": [{"field": "occurred", "op": "within", "value": "last_90_days"}],
+      "group_by": [{"field": "occurred", "bucket": "week"}], "measures": [{"agg": "count"}], "chart": {"type": "line"}}),
+    ("At-risk open deals", "Open opportunities with a risk score of 60 or more.",
+     {"source": "deals", "filters": [{"field": "status", "op": "eq", "value": "Open"}, {"field": "risk_score", "op": "gte", "value": 60}],
+      "columns": ["title", "account", "owner", "stage", "amount_usd", "risk_score", "close_date"],
+      "sort": {"by": "risk_score", "dir": "desc"}, "chart": {"type": "table"}}),
+]
+STARTER_LAYOUT = [("Won this quarter", "third"), ("Open pipeline", "third"), ("Weighted pipeline", "third"),
+                  ("Open pipeline by stage", "half"), ("Weighted pipeline by close month", "half"),
+                  ("Pipeline by owner and stage", "full"), ("Leads by source (90 days)", "half"), ("Activity by week", "half"),
+                  ("At-risk open deals", "full")]
+
+
+async def ensure_starter_content(db: AsyncSession, owner_id) -> bool:
+    """Create the shared 'Sales overview' dashboard and its reports once (idempotent)."""
+    from app.models import Dashboard, SavedReport
+
+    if (await db.execute(select(Dashboard.id).where(Dashboard.name == "Sales overview"))).first():
+        return False
+    by_name = {}
+    for name, desc, defn in STARTER_REPORTS:
+        validate(defn)
+        r = SavedReport(name=name, description=desc, owner_id=owner_id, source=defn["source"], definition=defn, visibility="shared")
+        db.add(r)
+        by_name[name] = r
+    await db.flush()
+    db.add(Dashboard(name="Sales overview", description="Pipeline, bookings, lead flow and activity at a glance.", owner_id=owner_id,
+                     visibility="shared", tiles=[{"report_id": str(by_name[n].id), "size": s} for n, s in STARTER_LAYOUT]))
+    return True

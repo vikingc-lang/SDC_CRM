@@ -11,7 +11,7 @@ from app.core.database import Base
 __all__ = [
     "RolePermission", "AuditLog", "CustomFieldDefinition", "MergeLog", "DedupDismissal", "SubjectKey",
     "ConsentEvent", "ErasureLog", "Notification", "Attachment", "MailboxConnection", "DealAlert", "FxRate",
-    "IntegrationEvent", "ErpSyncRun", "SsoLoginState",
+    "IntegrationEvent", "ErpSyncRun", "SsoLoginState", "SavedReport", "Dashboard",
 ]
 
 
@@ -236,3 +236,32 @@ class SsoLoginState(Base):
     code_verifier: Mapped[str] = mapped_column(String(128))
     return_to: Mapped[str | None] = mapped_column(String(500))
     created_at: Mapped[datetime] = _ts()
+
+
+class SavedReport(Base):
+    """A self-service report definition (see services/reporting.py); never raw SQL."""
+    __tablename__ = "saved_reports"
+
+    id: Mapped[uuid.UUID] = _pk()
+    name: Mapped[str] = mapped_column(String(150))
+    description: Mapped[str | None] = mapped_column(Text)
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    source: Mapped[str] = mapped_column(String(30))
+    definition: Mapped[dict] = mapped_column(JSONB)
+    visibility: Mapped[str] = mapped_column(String(10), default="private")
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class Dashboard(Base):
+    """A grid of saved reports; tiles = [{"report_id": str, "size": "third" | "half" | "full"}]."""
+    __tablename__ = "dashboards"
+
+    id: Mapped[uuid.UUID] = _pk()
+    name: Mapped[str] = mapped_column(String(150))
+    description: Mapped[str | None] = mapped_column(Text)
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    visibility: Mapped[str] = mapped_column(String(10), default="private")
+    tiles: Mapped[list] = mapped_column(JSONB, default=list)
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

@@ -27,7 +27,7 @@ from app.models import (
     PriceBookEntry, Product, ProductRule, ProductUsage, Promotion, Quote,
     SupportTicket, Task, User,
 )
-from app.services import clm, cpq, embeddings, erp, fx, insights, prm, scoring, sla, storage
+from app.services import clm, cpq, embeddings, erp, fx, insights, prm, reporting, scoring, sla, storage
 from app.services.cpq import LEVEL_LABELS
 from app.services.pipeline_templates import PIPELINES
 from app.services.search import account_document
@@ -404,6 +404,7 @@ async def seed(minimal: bool = False, reset: bool = False) -> None:
             await _enterprise(db, users, accounts, deals, contacts_by_email, stages, pipelines, products, now, today)
             await _lead_to_order(db, users, accounts, stages, pipelines, products, now, today)
 
+        await reporting.ensure_starter_content(db, users["marcus@cirra.demo"].id)
         await db.flush()
         for account in (await db.execute(select(Account))).scalars().unique().all():
             account.embedding = await embeddings.embed(account_document(account))

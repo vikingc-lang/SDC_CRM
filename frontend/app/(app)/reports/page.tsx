@@ -3,8 +3,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { Download, MessageSquareQuote, Swords, Target, Trophy, TrendingDown } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { DashboardsList, SavedReportsList } from "@/components/analytics";
 import { PageHeader } from "@/components/AppShell";
 import { ForecastByMonth, ForecastByStage, StatTile } from "@/components/charts";
 import { Button } from "@/components/ui/button";
@@ -30,7 +31,12 @@ interface Forecast {
 }
 
 export default function ReportsPage() {
-  const [tab, setTab] = useState<"forecast" | "winloss">("forecast");
+  type Tab = "dashboards" | "reports" | "forecast" | "winloss";
+  const [tab, setTab] = useState<Tab>("dashboards");
+  useEffect(() => {
+    const t = new URLSearchParams(window.location.search).get("tab") as Tab | null;
+    if (t && ["dashboards", "reports", "forecast", "winloss"].includes(t)) setTab(t);
+  }, []);
   const [pipelineId, setPipelineId] = useState("");
   const { can } = useMe();
   const pipelines = useQuery({ queryKey: ["pipelines"], queryFn: () => get<PipelineFull[]>("/pipelines") });
@@ -39,9 +45,11 @@ export default function ReportsPage() {
   const exportDeals = () => downloadFile("/admin/export/deals", `deals-${new Date().toISOString().slice(0, 10)}.csv`, { format: "csv" }).catch((e) => toast.error(errorMessage(e)));
   return (
     <div className="mx-auto max-w-6xl">
-      <PageHeader title="Reports" description="Risk-adjusted forecast across every pipeline, plus a structured win/loss taxonomy with rep debriefs."
+      <PageHeader title="Reports" description="Dashboards and self-service reports, the risk-adjusted forecast, and win/loss analysis."
         actions={can("deals", "export") && <Button size="sm" variant="outline" onClick={exportDeals}><Download className="h-3.5 w-3.5" />Export deals</Button>} />
-      <Tabs value={tab} onChange={setTab} tabs={[{ value: "forecast", label: "Forecast" }, { value: "winloss", label: "Win / loss" }]} />
+      <Tabs value={tab} onChange={setTab} tabs={[{ value: "dashboards", label: "Dashboards" }, { value: "reports", label: "Saved reports" }, { value: "forecast", label: "Forecast" }, { value: "winloss", label: "Win / loss" }]} />
+      {tab === "dashboards" && <DashboardsList />}
+      {tab === "reports" && <SavedReportsList />}
       {tab === "forecast" && (
         <>
           <div className="mb-4 flex items-center gap-2">
