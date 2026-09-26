@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, Crown, Minus, OctagonAlert, ShieldAlert, Star, TrendingDown, TrendingUp, User, Users, Wallet } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Crown, Gavel, Minus, OctagonAlert, ShieldAlert, ShoppingCart, Star, TrendingDown, TrendingUp, User, Users, Wallet } from "lucide-react";
 import type { BuyingRole, Sentiment } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -81,6 +81,8 @@ const ROLE_META: Record<BuyingRole, { icon: typeof Star; cls: string }> = {
   Blocker: { icon: ShieldAlert, cls: "bg-rose-100 text-rose-800 dark:bg-rose-500/15 dark:text-rose-300" },
   Influencer: { icon: Users, cls: "bg-amber-100 text-amber-900 dark:bg-amber-500/15 dark:text-amber-300" },
   Evaluator: { icon: User, cls: "bg-muted text-muted-foreground" },
+  "Legal Counsel": { icon: Gavel, cls: "bg-violet-100 text-violet-800 dark:bg-violet-500/15 dark:text-violet-300" },
+  Procurement: { icon: ShoppingCart, cls: "bg-orange-100 text-orange-900 dark:bg-orange-500/15 dark:text-orange-300" },
 };
 
 export function RoleBadge({ role, className }: { role: BuyingRole; className?: string }) {
@@ -93,4 +95,4 @@ export function RoleBadge({ role, className }: { role: BuyingRole; className?: s
   );
 }
 
-export const BUYING_ROLES: BuyingRole[] = ["Champion", "Decision Maker", "Economic Buyer", "Influencer", "Evaluator", "Blocker"];
+export const BUYING_ROLES: BuyingRole[] = ["Champion", "Decision Maker", "Economic Buyer", "Influencer", "Evaluator", "Blocker", "Legal Counsel", "Procurement"];

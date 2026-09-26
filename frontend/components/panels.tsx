@@ -49,7 +49,7 @@ export function QuotesCard({ dealId, quotes, canCreate }: { dealId: string; quot
         {quotes.map((q) => (
           <Link key={q.id} href={`/quotes/${q.id}`} className="flex items-center gap-3 rounded-md border px-3 py-2.5 transition-colors hover:border-primary/40">
             <div className="min-w-0 flex-1">
-              <p className="truncate text-[13.5px] font-medium">{q.quote_number} · {q.name}</p>
+              <p className="truncate text-[13.5px] font-medium">{q.quote_number} · {q.name}{q.is_primary && <span className="ml-1.5 text-[11px] font-normal text-primary">primary</span>}</p>
               <p className="text-[12px] text-muted-foreground">{q.lines.length} lines · {q.term_months} months · {q.payment_terms}{q.max_discount_pct ? ` · up to ${q.max_discount_pct}% off` : ""}</p>
             </div>
             <div className="text-right">
@@ -64,7 +64,8 @@ export function QuotesCard({ dealId, quotes, canCreate }: { dealId: string; quot
   );
 }
 
-const DOC_LABEL = { nda: "NDA", sow: "Statement of Work", order_form: "Order Form" } as const;
+const DOC_LABEL = { nda: "NDA", proposal: "Proposal / SOW", msa: "MSA", sla: "SLA", dpa: "DPA", sow: "SOW", order_form: "Order Form" } as const;
+const NEEDS_QUOTE = new Set(["order_form", "proposal"]);
 
 export function DocumentsCard({ dealId, documents, canCreate, hasApprovedQuote }: { dealId: string; documents: DocumentSummary[]; canCreate: boolean; hasApprovedQuote: boolean }) {
   const router = useRouter();
@@ -80,8 +81,8 @@ export function DocumentsCard({ dealId, documents, canCreate, hasApprovedQuote }
         {canCreate && (
           <div className="flex flex-wrap gap-2">
             {(Object.keys(DOC_LABEL) as (keyof typeof DOC_LABEL)[]).map((t) => (
-              <Button key={t} size="sm" variant="outline" disabled={gen.isPending || (t === "order_form" && !hasApprovedQuote)}
-                title={t === "order_form" && !hasApprovedQuote ? "Needs an approved quote" : undefined} onClick={() => gen.mutate(t)}>
+              <Button key={t} size="sm" variant="outline" disabled={gen.isPending || (NEEDS_QUOTE.has(t) && !hasApprovedQuote)}
+                title={NEEDS_QUOTE.has(t) && !hasApprovedQuote ? "Needs an approved quote" : undefined} onClick={() => gen.mutate(t)}>
                 <Plus className="h-3.5 w-3.5" />{DOC_LABEL[t]}
               </Button>
             ))}
@@ -90,7 +91,7 @@ export function DocumentsCard({ dealId, documents, canCreate, hasApprovedQuote }
         {documents.map((d) => (
           <Link key={d.id} href={`/documents/${d.id}`} className="flex items-center gap-3 rounded-md border px-3 py-2.5 transition-colors hover:border-primary/40">
             <div className="min-w-0 flex-1">
-              <p className="truncate text-[13.5px] font-medium">{d.title}</p>
+              <p className="truncate text-[13.5px] font-medium">{d.title}{(d.current_version ?? 1) > 1 && <span className="ml-1.5 text-[11.5px] font-normal text-muted-foreground">v{d.current_version}</span>}</p>
               <p className="text-[12px] text-muted-foreground">
                 {d.signers.length ? d.signers.map((s) => `${s.name} (${s.status})`).join(" · ") : `Created ${relativeDays(d.created_at)}`}
               </p>

@@ -6,10 +6,11 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
+import { NegotiationPanel } from "@/components/negotiation";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { StatusPill } from "@/components/ui/extra";
-import { Input, Label } from "@/components/ui/input";
+import { Input, Label, Select } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/misc";
 import { API_URL, api, errorMessage, get, getToken } from "@/lib/api";
 import { useMe } from "@/lib/me";
@@ -35,10 +36,11 @@ export default function DocumentPage() {
   const { data: contacts } = useQuery({ queryKey: ["contacts", doc?.account.id], queryFn: () => get<Contact[]>("/contacts", { account_id: doc?.account.id }), enabled: !!doc });
   const [customer, setCustomer] = useState({ name: "", email: "" });
   const [company, setCompany] = useState<{ name: string; email: string } | null>(null);
+  const [provider, setProvider] = useState("builtin");
   const send = useMutation({
     mutationFn: async () => (await api.post(`/documents/${id}/send`, { signers: [
-      { ...customer, party: "customer" }, { ...(company ?? { name: me?.full_name ?? "", email: me?.email ?? "" }), party: "company" }] })).data,
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["document", id] }); toast.success("Sent for signature. Share the signing links."); },
+      { ...customer, party: "customer" }, { ...(company ?? { name: me?.full_name ?? "", email: me?.email ?? "" }), party: "company" }], provider })).data,
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["document", id] }); toast.success(provider === "builtin" ? "Sent for signature. Share the signing links." : `Envelope created in ${provider === "docusign" ? "DocuSign" : "Adobe Sign"}`); },
     onError: (e) => toast.error(errorMessage(e)),
   });
   if (isLoading || !doc) return <div className="mx-auto max-w-6xl space-y-4"><Skeleton className="h-16 w-full" /><Skeleton className="h-96 w-full" /></div>;
@@ -52,6 +54,8 @@ export default function DocumentPage() {
       <div className="mb-5 flex flex-wrap items-center gap-3">
         <h1 className="min-w-0 flex-1 text-[22px] font-semibold tracking-tight">{doc.title}</h1>
         <StatusPill status={doc.status} />
+        {!!doc.current_version && <span className="text-[12.5px] text-muted-foreground">v{doc.current_version}</span>}
+        {doc.esign_provider && doc.esign_provider !== "builtin" && <span className="text-[12.5px] text-muted-foreground">via {doc.esign_provider === "docusign" ? "DocuSign" : "Adobe Sign"} · {doc.envelope_id}</span>}
         <Button variant="outline" size="sm" onClick={() => openPdf(doc.id, doc.title)}><Download className="h-4 w-4" />{doc.status === "completed" ? "Signed PDF" : "Preview PDF"}</Button>
       </div>
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -82,7 +86,7 @@ export default function DocumentPage() {
                   )}
                 </div>
               ))}
-              {doc.status === "draft" && can("documents", "update") && (
+              {["draft", "in_negotiation"].includes(doc.status) && can("documents", "update") && (
                 <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); send.mutate(); }}>
                   <div>
                     <Label>Customer signer</Label>
@@ -105,11 +109,20 @@ export default function DocumentPage() {
                       <Input required type="email" value={counter.email} onChange={(e) => setCompany({ ...counter, email: e.target.value })} />
                     </div>
                   </div>
+                  <div>
+                    <Label>E-signature</Label>
+                    <Select value={provider} onChange={(e) => setProvider(e.target.value)}>
+                      <option value="builtin">Cirra e-sign (built in)</option>
+                      <option value="docusign">DocuSign</option>
+                      <option value="adobe_sign">Adobe Sign</option>
+                    </Select>
+                  </div>
                   <Button size="sm" type="submit" loading={send.isPending} className="w-full"><Send className="h-4 w-4" />Send for e-signature</Button>
                 </form>
               )}
             </CardBody>
           </Card>
+          <NegotiationPanel doc={doc} canEdit={can("documents", "update")} />
           <Card>
             <CardHeader title="Integrity" icon={<Fingerprint className="h-4 w-4 text-muted-foreground" />} />
             <CardBody className="space-y-1 text-[12px] text-muted-foreground">

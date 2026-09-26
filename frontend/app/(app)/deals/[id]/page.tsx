@@ -13,6 +13,7 @@ import { AlertsBanner, DocumentsCard, PartnersCard, QuotesCard } from "@/compone
 import { fmtMoney } from "@/components/ui/extra";
 import { useMe } from "@/lib/me";
 import { NewTaskDialog } from "@/components/forms";
+import { OrderPanel } from "@/components/orders";
 import { RiskBadge, RoleBadge, riskTone } from "@/components/indicators";
 import { useStageMove } from "@/components/KanbanBoard";
 import { TaskRow } from "@/components/TaskList";
@@ -68,6 +69,11 @@ export default function DealPage() {
             {deal.stage === "Closed-Won" && <Badge tone="good">Closed-Won</Badge>}
             {deal.stage === "Closed-Lost" && <Badge tone="critical">Closed-Lost · {deal.loss_reason?.replace(/_/g, " ")}</Badge>}
             <Badge tone="outline">{deal.pipeline.name}</Badge>
+            {deal.credit_risk?.band && deal.credit_risk.band !== "low" && (
+              <Badge tone={deal.credit_risk.band === "high" ? "critical" : "warning"} title="ERP credit risk: utilisation, overdue share, 90+ days, hold">
+                Credit risk {deal.credit_risk.band} · {deal.credit_risk.score}
+              </Badge>
+            )}
             {deal.deal_type && deal.deal_type !== "new_business" && <Badge tone="primary" className="capitalize">{deal.deal_type.replace("_", " ")}</Badge>}
           </div>
           <p className="mt-1 text-[13.5px] text-muted-foreground">
@@ -208,6 +214,9 @@ export default function DealPage() {
               <CardHeader title="Loss debrief" description={`${deal.loss_taxonomy[deal.loss_reason ?? "other"] ?? deal.loss_reason}${deal.loss_competitor ? ` · ${deal.loss_competitor}` : ""}`} />
               <CardBody><p className="text-[13.5px] leading-relaxed">{deal.loss_debrief ?? "No debrief recorded."}</p></CardBody>
             </Card>
+          )}
+          {(deal.pipeline.name === "Enterprise Solution Sale" || (deal.orders?.length ?? 0) > 0) && (
+            <OrderPanel deal={deal} canEdit={can("deals", "update")} canOrder={can("orders", "create")} />
           )}
           <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
             <QuotesCard dealId={deal.id} quotes={deal.quotes} canCreate={can("quotes", "create") && !closed} />

@@ -58,7 +58,8 @@ export function StatusPill({ status }: { status: string }) {
     approved: "good", accepted: "good", completed: "good", active: "good", done: "good", signed: "good", earned: "good", succeeded: "good", resolved: "good",
     pending_approval: "warning", pending: "warning", sent: "info", partially_signed: "info", submitted: "warning", in_progress: "info", open: "warning",
     rejected: "critical", voided: "critical", declined: "critical", failed: "critical", expired: "muted", draft: "muted", renewed: "info",
-    at_risk: "critical", blocked: "critical", overdue: "critical", departed: "muted", erased: "muted", not_started: "muted", lost: "critical", pipeline: "info", superseded: "muted",
+    at_risk: "critical", blocked: "critical", new: "info", working: "info", mql: "warning", sql: "good", converted: "good", disqualified: "muted",
+    recycled: "muted", sent_to_erp: "info", acknowledged: "good", cancelled: "muted", in_negotiation: "warning", overdue: "critical", departed: "muted", erased: "muted", not_started: "muted", lost: "critical", pipeline: "info", superseded: "muted",
   };
   const t = tone[status] ?? "muted";
   const color = t === "good" ? "var(--status-good)" : t === "warning" ? "var(--status-warning)" : t === "critical" ? "var(--status-critical)" : t === "info" ? "var(--series-1)" : "hsl(var(--subtle))";
@@ -66,7 +67,7 @@ export function StatusPill({ status }: { status: string }) {
     <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11.5px] font-medium capitalize"
       style={{ borderColor: `color-mix(in srgb, ${color} 40%, transparent)`, background: `color-mix(in srgb, ${color} 10%, transparent)` }}>
       <span className="h-1.5 w-1.5 rounded-full" style={{ background: color }} />
-      {status.replace(/_/g, " ")}
+      {status === "mql" || status === "sql" ? status.toUpperCase() : status.replace(/_/g, " ")}
     </span>
   );
 }

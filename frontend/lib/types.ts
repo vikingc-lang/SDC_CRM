@@ -1,5 +1,5 @@
 export type UUID = string;
-export type BuyingRole = "Champion" | "Decision Maker" | "Economic Buyer" | "Blocker" | "Evaluator" | "Influencer";
+export type BuyingRole = "Champion" | "Decision Maker" | "Economic Buyer" | "Blocker" | "Evaluator" | "Influencer" | "Legal Counsel" | "Procurement";
 export type Sentiment = "positive" | "neutral" | "negative";
 export type ActivityType = "meeting" | "call" | "note" | "email" | "system";
 export type LossReason = "competitor" | "budget_frozen" | "feature_gap" | "champion_departed" | "price" | "no_decision" | "timing" | "other";
@@ -73,6 +73,8 @@ export interface DealDetail extends Deal {
   pipeline: { id: UUID; name: string; kind: string };
   quotes: Quote[]; documents: DocumentSummary[]; alerts: Alert[]; loss_taxonomy: Record<string, string>;
   partners: { id: UUID; partner: { id: UUID; name: string; tier: string }; role: string; split_pct: number; commission_rate: number | null }[];
+  order_details?: OrderDetails; order_readiness?: ReadinessCheck[]; orders?: Order[];
+  credit_risk?: { score: number | null; band: string | null; credit_hold: boolean };
 }
 
 export interface Account360 {
@@ -135,22 +137,25 @@ export interface PipelineFull { id: UUID; name: string; kind: "direct" | "inboun
   stages: (Stage & { gate_rules: GateRule[] })[] }
 
 export interface QuoteLine { id: UUID; product_id: UUID; sku: string; name: string; description: string | null; billing_type: "recurring" | "one_time"; unit: string;
-  quantity: number; list_unit_price: number; discount_pct: number; net_unit_price: number; line_total: number }
-export interface ApprovalReq { id: UUID; required_role: "sales_manager" | "finance"; reason: string; status: string; comment: string | null;
-  decided_by: UserBrief | null; decided_at: string | null; created_at: string }
+  quantity: number; list_unit_price: number; discount_pct: number; net_unit_price: number; line_total: number;
+  parent_line_id?: UUID | null; is_included?: boolean; promo_discount_pct?: number; price_source?: string | null }
+export interface ApprovalReq { id: UUID; required_role: string; reason: string; status: string; comment: string | null;
+  decided_by: UserBrief | null; decided_at: string | null; created_at: string; level?: number; label?: string }
 export interface Quote { id: UUID; deal_id: UUID; quote_number: string; name: string; currency: string; term_months: number; payment_terms: string;
   status: "draft" | "pending_approval" | "approved" | "rejected" | "sent" | "accepted" | "expired"; valid_until: string | null;
   list_total: number; discount_total: number; max_discount_pct: number; one_time_total: number; acv: number; tcv: number; notes: string | null;
   approved_at: string | null; created_at: string; deal: { id: UUID; title: string; account: { id: UUID; name: string; credit_hold: boolean } } | null;
-  lines: QuoteLine[]; approvals: ApprovalReq[]; required_approvals?: { required_role: string; reason: string }[]; documents?: DocumentSummary[] }
+  lines: QuoteLine[]; approvals: ApprovalReq[]; required_approvals?: { required_role: string; reason: string; level?: number }[]; documents?: DocumentSummary[];
+  is_primary?: boolean; locked_at?: string | null; promo_code?: string | null; promo_discount_total?: number; custom_terms?: string | null;
+  billing_frequency?: "annual" | "quarterly" | "monthly"; price_book_id?: UUID | null; current_level?: number | null }
 export interface Product { id: UUID; sku: string; name: string; description: string | null; family: string | null; billing_type: "recurring" | "one_time";
-  unit: string; active: boolean; prices: { currency: string; tiers: { min_qty: number; unit_price: number }[] }[] }
+  unit: string; active: boolean; product_type?: "standard" | "bundle"; prices: { currency: string; tiers: { min_qty: number; unit_price: number }[] }[] }
 
 export interface Signer { id: UUID; name: string; email: string; party: "customer" | "company"; order: number; status: string; signed_at: string | null;
   signed_ip: string | null; signature_text: string | null; sign_url: string | null }
-export interface DocumentSummary { id: UUID; doc_type: "nda" | "sow" | "order_form"; title: string; status: string; account: { id: UUID; name: string };
+export interface DocumentSummary { id: UUID; doc_type: "nda" | "sow" | "order_form" | "proposal" | "msa" | "sla" | "dpa"; title: string; status: string; account: { id: UUID; name: string };
   deal_id: UUID | null; quote_id: UUID | null; content_sha256: string; pdf_attachment_id: UUID | null; created_at: string; completed_at: string | null;
-  signers: Signer[]; body_html?: string | null; body?: string | null }
+  signers: Signer[]; body_html?: string | null; body?: string | null; current_version?: number; esign_provider?: string | null; envelope_id?: string | null }
 export interface Contract { id: UUID; contract_number: string; name: string; account: { id: UUID; name: string }; deal_id: UUID | null; start_date: string;
   end_date: string; days_to_expiry: number; currency: string; acv: number; tcv: number; payment_terms: string; auto_renew: boolean; status: string;
   terms: Record<string, unknown>; renewal_deal_id: UUID | null }
@@ -173,3 +178,36 @@ export interface Registration { id: UUID; partner: { id: UUID; name: string; tie
   decision_note: string | null; deal_id: UUID | null; created_at: string }
 export interface Notification { id: UUID; kind: string; title: string; body: string | null; link: string | null; read: boolean; created_at: string }
 export interface CustomFieldDef { id?: UUID; entity?: string; key: string; label: string; field_type: "text" | "number" | "date" | "select" | "boolean" | "url"; options: string[]; required?: boolean }
+
+// ---- lead-to-order ------------------------------------------------------------------------------------------
+export type LeadStatus = "new" | "working" | "mql" | "sql" | "recycled" | "converted" | "disqualified";
+export interface QualificationItem { key: string; label: string; met: boolean; note: string | null }
+export interface Lead { id: UUID; first_name: string | null; last_name: string | null; full_name: string; email: string | null; phone: string | null;
+  job_title: string | null; company_name: string | null; domain: string | null; industry: string | null; employee_count: number | null;
+  annual_revenue: number | null; country: string | null; region: string | null; source: string; campaign: string | null; status: LeadStatus;
+  owner: UserBrief | null; score: number; fit_score: number; engagement_score: number; consent_email: string; privacy_regime: string | null;
+  duplicates: number; account_match: { type: string; id: UUID; name: string; reason?: string } | null;
+  qualification: { framework: "bant" | "meddpicc"; items: QualificationItem[]; met: number; total: number };
+  mql_at: string | null; converted_at: string | null; created_at: string; updated_at: string }
+export interface LeadDetail extends Lead {
+  score_breakdown: { fit?: Record<string, { value: unknown; points: number }>; engagement?: Record<string, number>; weights?: { fit: number; engagement: number };
+    mql_threshold?: number };
+  duplicate_matches: { type: "lead" | "contact" | "account"; id: UUID; name: string; reason?: string }[];
+  enrichment: Record<string, unknown>; enriched_at: string | null; consent_source: string | null; consent_at: string | null; assigned_at: string | null;
+  disqualified_reason: string | null; disqualify_note: string | null;
+  converted: { account_id: UUID | null; contact_id: UUID | null; deal_id: UUID | null };
+  frameworks: Record<"bant" | "meddpicc", { key: string; label: string }[]>;
+  events: { id: UUID; event_type: string; detail: string | null; points: number; source: string | null; occurred_at: string }[] }
+export interface ReadinessCheck { criterion: string; type: string; met: boolean }
+export interface Address { line1?: string; line2?: string; city?: string; region?: string; postal_code?: string; country?: string; attention?: string }
+export interface OrderDetails { po_number: string | null; bill_to: Address; ship_to: Address; tax_exempt: boolean; tax_exempt_cert_id: UUID | null;
+  requested_delivery_date: string | null; incoterms: string | null; lead_id: UUID | null }
+export interface OrderLine { line_no: number; parent_line_no: number | null; sku: string; name: string; quantity: number; unit_list_price: number;
+  discount_pct: number; net_unit_price: number; line_total: number; billing_type: string;
+  billing_schedule: { invoice_date: string; period: string; amount: number }[] }
+export interface Order { id: UUID; order_number: string; status: "submitted" | "sent_to_erp" | "acknowledged" | "failed" | "cancelled";
+  account: { id: UUID; name: string; erp_customer_id: string | null }; deal_id: UUID | null; quote_id: UUID | null; contract_id: UUID | null;
+  currency: string; po_number: string | null; payment_terms: string; billing_frequency: string; term_months: number; start_date: string | null;
+  requested_delivery_date: string | null; incoterms: string | null; bill_to: Address; ship_to: Address; tax_exempt: boolean; total: number;
+  erp_order_id: string | null; erp_status: string | null; erp_message: string | null; erp_attempts: number; submitted_at: string | null;
+  erp_sent_at: string | null; erp_acknowledged_at: string | null; created_at: string; lines: OrderLine[]; erp_payload?: Record<string, unknown> }

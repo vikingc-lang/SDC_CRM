@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import {
-  BarChart3, Bell, Building2, CheckSquare, ChevronsUpDown, Columns3, FileSignature, Handshake, HeartHandshake, Home, Landmark, LogOut, Menu,
+  BarChart3, Bell, Building2, CheckSquare, ChevronsUpDown, Columns3, FileSignature, Handshake, HeartHandshake, Home, Magnet, PackageCheck, Landmark, LogOut, Menu,
   Monitor, Moon, Package, Search, Settings, ShieldCheck, Sparkles, Stamp, Sun, Users, X,
 } from "lucide-react";
 import Link from "next/link";
@@ -24,6 +24,7 @@ type NavItem = { href: string; label: string; icon: typeof Home; resource?: stri
 const NAV: { group: string | null; items: NavItem[] }[] = [
   { group: null, items: [
     { href: "/", label: "Home", icon: Home },
+    { href: "/leads", label: "Leads", icon: Magnet, resource: "leads" },
     { href: "/pipeline", label: "Pipeline", icon: Columns3, resource: "deals" },
     { href: "/accounts", label: "Accounts", icon: Building2, resource: "accounts" },
     { href: "/contacts", label: "Contacts", icon: Users, resource: "contacts" },
@@ -33,6 +34,7 @@ const NAV: { group: string | null; items: NavItem[] }[] = [
   { group: "Revenue", items: [
     { href: "/quotes", label: "Quotes", icon: FileSignature, resource: "quotes" },
     { href: "/approvals", label: "Approvals", icon: Stamp, resource: "approvals" },
+    { href: "/orders", label: "Orders", icon: PackageCheck, resource: "orders" },
     { href: "/products", label: "Products", icon: Package, resource: "products" },
     { href: "/reports", label: "Reports", icon: BarChart3, resource: "reports" },
   ] },

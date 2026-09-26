@@ -14,6 +14,8 @@ const JOBS = [
   { key: "rescore", icon: RefreshCw, label: "Re-score all accounts", when: "Nightly", desc: "Recomputes health, relationship strength and churn risk (recency decays daily)." },
   { key: "auto_dedup", icon: GitMerge, label: "Autonomous de-duplication", when: "Nightly", desc: "Merges high-confidence duplicate accounts and contacts with full merge logs." },
   { key: "erp_sync", icon: Landmark, label: "ERP sync", when: "Every 4 hours", desc: "Pulls customer masters, invoices and credit status; pushes new customers." },
+  { key: "erp_orders", icon: Landmark, label: "ERP sales-order push", when: "Every 2 minutes", desc: "Pushes queued orders to the ERP, retries failures (max 5) and reads acknowledgements." },
+  { key: "lead_rescore", icon: RefreshCw, label: "Lead re-scoring", when: "Nightly", desc: "Applies engagement decay to open leads and promotes new MQLs." },
   { key: "reindex", icon: Search, label: "Rebuild search index", when: "Nightly", desc: "Re-embeds activity for hybrid (keyword + vector) retrieval." },
 ];
 

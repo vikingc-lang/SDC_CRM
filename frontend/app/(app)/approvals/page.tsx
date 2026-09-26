@@ -16,7 +16,7 @@ import { relativeDays } from "@/lib/utils";
 
 interface ApprovalItem {
   id: string; required_role: string; reason: string; status: string; comment: string | null; created_at: string; decided_at: string | null;
-  decided_by: { full_name: string } | null; can_decide: boolean;
+  decided_by: { full_name: string } | null; can_decide: boolean; level: number; label: string; waiting: boolean;
   quote: { id: string; quote_number: string; name: string; currency: string; tcv: number; acv: number; max_discount_pct: number; payment_terms: string;
     deal: { id: string; title: string; account: string } };
 }
@@ -33,7 +33,7 @@ export default function ApprovalsPage() {
   });
   return (
     <div className="mx-auto max-w-5xl">
-      <PageHeader title="Approvals" description="Discounts, non-standard payment terms, credit holds and large deals route here automatically." />
+      <PageHeader title="Approvals" description="Deal desk chain: Sales Manager → Deal Desk → VP Sales → Finance → Legal. Each level decides only after the one before it approves." />
       <Tabs value={tab} onChange={setTab} tabs={[{ value: "pending", label: "Waiting" }, { value: "decided", label: "Decided" }]} />
       {isLoading && <Skeleton className="h-40 w-full" />}
       {data && !data.length && <Card><EmptyState icon={<Stamp className="h-4 w-4" />} title={tab === "pending" ? "Nothing waiting on approval" : "No decisions yet"} /></Card>}
@@ -48,7 +48,7 @@ export default function ApprovalsPage() {
                   <Link href={`/deals/${a.quote.deal.id}`} className="text-[13.5px] hover:underline">{a.quote.deal.account}: {a.quote.deal.title}</Link>
                   <StatusPill status={a.status} />
                 </div>
-                <p className="mt-1 text-[13px]"><span className="font-medium capitalize">{a.required_role.replace("_", " ")} approval:</span> {a.reason}</p>
+                <p className="mt-1 text-[13px]"><span className="font-medium">Level {a.level} · {a.label}:</span> {a.reason}</p>
                 <p className="mt-1 text-[12px] text-muted-foreground">
                   TCV {fmtMoney(a.quote.tcv, a.quote.currency)} · ACV {fmtMoney(a.quote.acv, a.quote.currency)} · max discount {a.quote.max_discount_pct}% · {a.quote.payment_terms} · requested {relativeDays(a.created_at)}
                 </p>
@@ -60,7 +60,7 @@ export default function ApprovalsPage() {
                   <Button size="sm" variant="outline" onClick={() => decide.mutate({ id: a.id, approve: false })} disabled={decide.isPending}><X className="h-3.5 w-3.5" />Reject</Button>
                   <Button size="sm" onClick={() => decide.mutate({ id: a.id, approve: true })} disabled={decide.isPending}><Check className="h-3.5 w-3.5" />Approve</Button>
                 </div>
-              ) : <span className="text-[12px] text-muted-foreground">Needs a {a.required_role === "finance" ? "finance (Super Admin)" : "sales manager"} approver</span>)}
+              ) : <span className="text-[12px] text-muted-foreground">{a.waiting ? "Waiting for an earlier level" : `Needs a ${a.label} approver`}</span>)}
             </div>
           </Card>
         ))}

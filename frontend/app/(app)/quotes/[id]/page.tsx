@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, CheckCircle2, FilePlus2, Plus, Save, Send, Stamp, Trash2, XCircle } from "lucide-react";
+import { ArrowLeft, CheckCircle2, FilePlus2, Lock, Plus, Save, Send, Stamp, Star, Trash2, XCircle } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -33,14 +33,15 @@ export default function QuotePage() {
   const { can } = useMe();
   const { data: quote, isLoading } = useQuery({ queryKey: ["quote", id], queryFn: () => get<Quote>(`/quotes/${id}`) });
   const { data: products } = useQuery({ queryKey: ["products"], queryFn: () => get<Product[]>("/products") });
-  const [form, setForm] = useState({ name: "", currency: "USD", term_months: 12, payment_terms: "NET30", notes: "" });
+  const [form, setForm] = useState({ name: "", currency: "USD", term_months: 12, payment_terms: "NET30", notes: "", promo_code: "", custom_terms: "", billing_frequency: "annual" });
   const [lines, setLines] = useState<Line[]>([]);
   const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
     if (quote && !dirty) {
-      setForm({ name: quote.name, currency: quote.currency, term_months: quote.term_months, payment_terms: quote.payment_terms, notes: quote.notes ?? "" });
-      setLines(quote.lines.map((l) => ({ product_id: l.product_id, quantity: l.quantity, discount_pct: l.discount_pct })));
+      setForm({ name: quote.name, currency: quote.currency, term_months: quote.term_months, payment_terms: quote.payment_terms, notes: quote.notes ?? "",
+        promo_code: quote.promo_code ?? "", custom_terms: quote.custom_terms ?? "", billing_frequency: quote.billing_frequency ?? "annual" });
+      setLines(quote.lines.filter((l) => !l.is_included).map((l) => ({ product_id: l.product_id, quantity: l.quantity, discount_pct: l.discount_pct })));
     }
   }, [quote, dirty]);
 
@@ -63,15 +64,16 @@ export default function QuotePage() {
     return { rows, tcv, list, acv: monthly * 12, discount: list - tcv };
   }, [lines, byId, form]);
 
-  const editable = quote && !["sent", "accepted"].includes(quote.status) && can("quotes", "update");
+  const editable = quote && !quote.locked_at && !["sent", "accepted"].includes(quote.status) && can("quotes", "update");
+  const payload = () => ({ ...form, promo_code: form.promo_code || null, custom_terms: form.custom_terms || null, lines });
   const save = useMutation({
-    mutationFn: async () => (await api.put<Quote>(`/quotes/${id}`, { ...form, lines })).data,
+    mutationFn: async () => (await api.put<Quote>(`/quotes/${id}`, payload())).data,
     onSuccess: (q) => { qc.setQueryData(["quote", id], q); qc.invalidateQueries({ queryKey: ["quote", id] }); setDirty(false); toast.success("Quote saved"); },
     onError: (e) => toast.error(errorMessage(e)),
   });
   const submit = useMutation({
     mutationFn: async () => {
-      if (dirty) await api.put(`/quotes/${id}`, { ...form, lines });
+      if (dirty) await api.put(`/quotes/${id}`, payload());
       return (await api.post<Quote>(`/quotes/${id}/submit`)).data;
     },
     onSuccess: (q) => {
@@ -83,8 +85,13 @@ export default function QuotePage() {
     },
     onError: (e) => toast.error(errorMessage(e)),
   });
+  const primary = useMutation({
+    mutationFn: async () => (await api.post<Quote>(`/quotes/${id}/primary`)).data,
+    onSuccess: () => { qc.invalidateQueries(); toast.success("Primary quote for this deal"); },
+    onError: (e) => toast.error(errorMessage(e)),
+  });
   const orderForm = useMutation({
-    mutationFn: async () => (await api.post<DocumentSummary>("/documents", { doc_type: "order_form", deal_id: quote?.deal_id, quote_id: id })).data,
+    mutationFn: async (doc_type: "order_form" | "proposal") => (await api.post<DocumentSummary>("/documents", { doc_type, deal_id: quote?.deal_id, quote_id: id })).data,
     onSuccess: (d) => router.push(`/documents/${d.id}`),
     onError: (e) => toast.error(errorMessage(e)),
   });
@@ -101,6 +108,8 @@ export default function QuotePage() {
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-[22px] font-semibold tracking-tight">{quote.quote_number}</h1>
             <StatusPill status={quote.status} />
+            {quote.is_primary && <Badge tone="primary"><Star className="h-3 w-3" />Primary</Badge>}
+            {quote.locked_at && <Badge tone="outline"><Lock className="h-3 w-3" />Locked {shortDate(quote.locked_at, true)}</Badge>}
             {quote.deal?.account.credit_hold && <Badge tone="critical">Account on credit hold</Badge>}
           </div>
           <p className="mt-1 text-[13px] text-muted-foreground">{quote.deal?.account.name}{quote.valid_until && ` · valid until ${shortDate(quote.valid_until, true)}`}</p>
@@ -110,9 +119,13 @@ export default function QuotePage() {
           {editable && ["draft", "rejected"].includes(quote.status) && (
             <Button size="sm" loading={submit.isPending} disabled={!lines.length} onClick={() => submit.mutate()}><Send className="h-4 w-4" />Submit for approval</Button>
           )}
-          {["approved", "sent"].includes(quote.status) && can("documents", "create") && (
-            <Button variant="ai" size="sm" loading={orderForm.isPending} onClick={() => orderForm.mutate()}><FilePlus2 className="h-4 w-4" />Generate Order Form</Button>
+          {!quote.is_primary && !quote.locked_at && can("quotes", "update") && (
+            <Button variant="outline" size="sm" loading={primary.isPending} onClick={() => primary.mutate()}><Star className="h-4 w-4" />Make primary</Button>
           )}
+          {["approved", "sent"].includes(quote.status) && can("documents", "create") && (<>
+            <Button variant="outline" size="sm" loading={orderForm.isPending} onClick={() => orderForm.mutate("proposal")}><FilePlus2 className="h-4 w-4" />Proposal / SOW</Button>
+            <Button variant="ai" size="sm" loading={orderForm.isPending} onClick={() => orderForm.mutate("order_form")}><FilePlus2 className="h-4 w-4" />Generate Order Form</Button>
+          </>)}
         </div>
       </div>
 
@@ -128,6 +141,19 @@ export default function QuotePage() {
                 <Select disabled={!editable} value={form.payment_terms} onChange={(e) => { setForm({ ...form, payment_terms: e.target.value }); setDirty(true); }}>
                   {["NET15", "NET30", "NET45", "NET60", "NET90"].map((t) => <option key={t} value={t}>{t}{["NET60", "NET90"].includes(t) ? " (non-standard)" : ""}</option>)}
                 </Select>
+              </div>
+              <div><Label>Billing</Label>
+                <Select disabled={!editable} value={form.billing_frequency} onChange={(e) => { setForm({ ...form, billing_frequency: e.target.value }); setDirty(true); }}>
+                  {["annual", "quarterly", "monthly"].map((t) => <option key={t} value={t}>{t}</option>)}
+                </Select>
+              </div>
+              <div><Label>Promo code</Label><Input disabled={!editable} placeholder="e.g. LAUNCH-AI" value={form.promo_code} onChange={(e) => { setForm({ ...form, promo_code: e.target.value.toUpperCase() }); setDirty(true); }} /></div>
+              <div className="sm:col-span-2 text-[12px] text-muted-foreground self-end pb-2">
+                {quote.promo_code && !dirty ? `${quote.promo_code}: ${fmtMoney(quote.promo_discount_total ?? 0, quote.currency)} pre-approved promotional discount` : "Prices resolve customer → regional → list price book."}
+              </div>
+              <div className="sm:col-span-4"><Label>Non-standard terms (routes to Legal)</Label>
+                <Textarea disabled={!editable} className="min-h-[52px]" placeholder="e.g. liability cap 2x fees, termination for convenience" value={form.custom_terms}
+                  onChange={(e) => { setForm({ ...form, custom_terms: e.target.value }); setDirty(true); }} />
               </div>
             </CardBody>
           </Card>
@@ -155,6 +181,21 @@ export default function QuotePage() {
                 );
               })}
               {!lines.length && <p className="py-4 text-center text-[13px] text-muted-foreground">Add products from the catalog.</p>}
+              {!dirty && quote.lines.length > 0 && (
+                <div className="mt-2 rounded-md border bg-surface-2/40 p-2.5">
+                  <p className="mb-1.5 text-[11.5px] font-medium text-muted-foreground">Priced by the server</p>
+                  <ul className="space-y-1 text-[12.5px]">
+                    {quote.lines.map((l) => (
+                      <li key={l.id} className={`flex flex-wrap gap-x-3 ${l.is_included ? "pl-4 text-muted-foreground" : ""}`}>
+                        <span className="min-w-0 flex-1">{l.is_included ? "↳ " : ""}{l.name} × {l.quantity}</span>
+                        <span className="text-subtle">{l.is_included ? "included in bundle" : l.price_source ?? "list"}</span>
+                        {!!l.promo_discount_pct && <span className="text-primary">promo −{l.promo_discount_pct}%</span>}
+                        <span className="tabular">{l.is_included ? "—" : fmtMoney(l.line_total, quote.currency)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               {editable && products?.length ? (
                 <Button variant="ghost" size="sm" onClick={() => { setLines([...lines, { product_id: products[0].id, quantity: 10, discount_pct: 0 }]); setDirty(true); }}>
                   <Plus className="h-3.5 w-3.5" />Add line
@@ -182,12 +223,13 @@ export default function QuotePage() {
           <Card>
             <CardHeader title="Approval routing" icon={<Stamp className="h-4 w-4 text-muted-foreground" />} />
             <CardBody className="space-y-2.5">
-              {quote.approvals.filter((a) => a.status !== "superseded").map((a) => (
+              {quote.approvals.filter((a) => a.status !== "superseded").sort((a, b) => (a.level ?? 0) - (b.level ?? 0)).map((a) => (
                 <div key={a.id} className="rounded-md border p-2.5 text-[13px]">
                   <div className="flex items-center gap-2">
                     {a.status === "approved" ? <CheckCircle2 className="h-4 w-4" style={{ color: "var(--status-good)" }} /> : a.status === "rejected" ? <XCircle className="h-4 w-4" style={{ color: "var(--status-critical)" }} /> : <Stamp className="h-4 w-4 text-muted-foreground" />}
-                    <span className="font-medium capitalize">{a.required_role.replace("_", " ")}</span>
-                    <span className="ml-auto"><StatusPill status={a.status} /></span>
+                    <span className="font-medium">{a.level ? `${a.level}. ` : ""}{a.label ?? a.required_role.replace("_", " ")}</span>
+                    <span className="ml-auto">{a.status === "pending" && quote.current_level != null && a.level !== quote.current_level
+                      ? <span className="text-[11.5px] text-subtle">queued</span> : <StatusPill status={a.status} />}</span>
                   </div>
                   <p className="mt-1 text-[12px] text-muted-foreground">{a.reason}</p>
                   {a.decided_by && <p className="mt-1 text-[12px]">{a.decided_by.full_name}{a.comment && `: "${a.comment}"`}</p>}
@@ -195,7 +237,8 @@ export default function QuotePage() {
               ))}
               {quote.status === "draft" && (quote.required_approvals?.length ? (
                 <div className="text-[12.5px] text-muted-foreground">On submit this will need:
-                  <ul className="mt-1 list-disc pl-4">{quote.required_approvals.map((r) => <li key={r.required_role}><span className="capitalize">{r.required_role.replace("_", " ")}</span>: {r.reason}</li>)}</ul>
+                  <ol className="mt-1 list-decimal pl-4">{quote.required_approvals.map((r) => <li key={r.required_role}><span className="capitalize">{r.required_role.replace("_", " ")}</span>: {r.reason}</li>)}</ol>
+                  <p className="mt-1">Approvals run in sequence; each level is notified when the previous one approves.</p>
                 </div>
               ) : <p className="text-[12.5px] text-muted-foreground">Within policy: submitting auto-approves.</p>)}
               {quote.status === "approved" && <p className="text-[12.5px] text-muted-foreground">Approved {shortDate(quote.approved_at, true)}. The deal amount now reflects this TCV.</p>}

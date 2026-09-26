@@ -1,15 +1,16 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Package, Pencil, Plus, Trash2 } from "lucide-react";
+import { Boxes, Package, Pencil, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/AppShell";
+import { ConfigureDialog, PriceBooksPanel, PromotionsPanel } from "@/components/dealdesk";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { Table, Td, fmtMoney } from "@/components/ui/extra";
+import { Table, Tabs, Td, fmtMoney } from "@/components/ui/extra";
 import { Input, Label, Select } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/misc";
 import { api, errorMessage, get } from "@/lib/api";
@@ -24,6 +25,8 @@ export default function ProductsPage() {
   const qc = useQueryClient();
   const { can } = useMe();
   const [draft, setDraft] = useState<Draft | null>(null);
+  const [tab, setTab] = useState<"catalog" | "books" | "promos">("catalog");
+  const [configure, setConfigure] = useState<Product | null>(null);
   const { data } = useQuery({ queryKey: ["products", "all"], queryFn: () => get<Product[]>("/products", { include_inactive: true }) });
   const save = useMutation({
     mutationFn: async (d: Draft) => (d.id ? api.put(`/products/${d.id}`, d) : api.post("/products", d)),
@@ -37,13 +40,16 @@ export default function ProductsPage() {
     <div className="mx-auto max-w-7xl">
       <PageHeader title="Product catalog" description="Multi-currency SKUs with volume-tiered rate cards"
         actions={can("products", "create") && <Button size="sm" onClick={() => setDraft(structuredClone(EMPTY))}><Plus className="h-4 w-4" />New product</Button>} />
-      <Card className="overflow-hidden">
+      <Tabs value={tab} onChange={setTab} tabs={[{ value: "catalog", label: "Catalog" }, { value: "books", label: "Price books" }, { value: "promos", label: "Promotions" }]} />
+      {tab === "books" && <PriceBooksPanel products={data ?? []} canEdit={can("products", "update")} />}
+      {tab === "promos" && <PromotionsPanel products={data ?? []} canEdit={can("products", "update")} />}
+      {tab === "catalog" && <Card className="overflow-hidden">
         {!data?.length ? <EmptyState icon={<Package className="h-4 w-4" />} title="No products yet" /> : (
           <Table head={["SKU", "Product", "Billing", "Rate cards (volume tiers)", ""]} minWidth={820}>
             {data.map((p) => (
               <tr key={p.id} className={p.active ? "" : "opacity-60"}>
                 <Td className="font-mono text-[12.5px]">{p.sku}</Td>
-                <Td><span className="font-medium">{p.name}</span><p className="text-[12px] text-muted-foreground">{p.family} · {p.description}</p></Td>
+                <Td><span className="font-medium">{p.name}</span>{p.product_type === "bundle" && <Badge tone="primary" className="ml-1.5">Bundle</Badge>}<p className="text-[12px] text-muted-foreground">{p.family} · {p.description}</p></Td>
                 <Td><Badge tone={p.billing_type === "recurring" ? "primary" : "neutral"}>{p.billing_type === "recurring" ? "Recurring" : "One-time"}</Badge><p className="mt-1 text-[12px] text-muted-foreground">per {p.unit}</p></Td>
                 <Td>
                   <div className="space-y-1">
@@ -55,12 +61,16 @@ export default function ProductsPage() {
                     ))}
                   </div>
                 </Td>
-                <Td>{can("products", "update") && <Button size="icon" variant="ghost" aria-label={`Edit ${p.name}`} onClick={() => setDraft(structuredClone(p))}><Pencil className="h-3.5 w-3.5" /></Button>}</Td>
+                <Td className="whitespace-nowrap">
+                  <Button size="icon" variant="ghost" aria-label={`Bundle and rules for ${p.name}`} title="Bundle components and rules" onClick={() => setConfigure(p)}><Boxes className="h-3.5 w-3.5" /></Button>
+                  {can("products", "update") && <Button size="icon" variant="ghost" aria-label={`Edit ${p.name}`} onClick={() => setDraft(structuredClone(p))}><Pencil className="h-3.5 w-3.5" /></Button>}
+                </Td>
               </tr>
             ))}
           </Table>
         )}
-      </Card>
+      </Card>}
+      <ConfigureDialog product={configure} products={data ?? []} onClose={() => setConfigure(null)} canEdit={can("products", "update")} />
 
       <Dialog open={!!draft} onOpenChange={(o) => !o && setDraft(null)}>
         <DialogContent title="Product" className="max-w-2xl">

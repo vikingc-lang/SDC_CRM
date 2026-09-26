@@ -698,7 +698,7 @@ async def _lead_to_order(db, users, accounts, stages, pipelines, products, now, 
                 ("metrics", "Cut claim-to-cash by 20 days"), ("economic_buyer", "COO owns budget"), ("decision_criteria", "HL7 + ERP integration"),
                 ("decision_process", "Security review then board"), ("identify_pain", "Manual renewals"), ("champion", "RevOps lead"))}
         if status == "disqualified":
-            lead.status, lead.disqualified_reason, lead.disqualify_note = "disqualified", "not_a_fit", "Individual consultant, free-mail address"
+            lead.status, lead.disqualified_reason, lead.disqualify_note = "disqualified", "not_icp", "Individual consultant, free-mail address"
 
     # ---- a solution sale from lead to ERP sales order -------------------------------------------------------------
     solution = pipelines["solution"]

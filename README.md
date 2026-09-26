@@ -120,9 +120,11 @@ cd backend && TEST_DATABASE_URL=postgresql+asyncpg://cirra_user:cirra_secure_pas
 cd frontend && npm run typecheck && npm run lint && npm run build
 ```
 
-The backend suite (53 tests) covers the scoring formulas, the extractor and LLM fallback, and every pillar end to end:
+The backend suite (68 tests) covers the scoring formulas, the extractor and LLM fallback, and every pillar end to end:
 RBAC and row-level scope, the append-only audit trail, crypto-shredding erasure, dedup and merge, hierarchy rollups,
-all four pipelines' gates, CPQ pricing and two-level approvals, document generation and e-signature, renewals, email
+all pipelines' gates, CPQ pricing, price books, promotions, bundles and the sequential approval chain, document generation,
+redlining and e-signature (built-in and provider webhooks), lead capture, scoring, routing and conversion, order generation
+and the ERP sales-order hand-off, renewals, email
 and calendar ingest, SLA escalation, ERP sync and credit holds, partner registration conflicts and commissions, and
 all-or-nothing imports.
 
@@ -142,6 +144,27 @@ all-or-nothing imports.
 | 8 | **ERP fabric** | Customer master sync (legal name, tax ID, billing address, credit limit) through `demo`, `file` (JSON drop folder) or `rest` connectors. Invoice-level **A/R aging**; **credit holds** set from 90+ day balances or over-limit exposure block quotes behind finance approval. An outbound event outbox (`quote.approved`, `deal.closed_won`, `contract.created`, `invoice.overdue`…) feeds **promo, Yield, deduct and nexora** through a cursor feed or optional webhooks. | Finance & ERP · Account → Contracts & finance |
 | 9 | **PRM** | Partner **deal-registration portal**, where registrations are checked for existing accounts and overlapping registrations. Approval grants **90-day territory exclusivity** and creates the deal in the Partner pipeline. **Co-sell and commission attribution** by partner split and rate. **Collateral repository** gated by partner tier and email domain, with every download logged. | Partners · Partner portal (`/portal`) · Deal → Partners |
 | 10 | **Platform** | **RBAC** with CRUD + Export per resource for Super Admin, Sales Manager, Account Executive, SDR, Auditor and Partner, editable in the UI. **Row-level ownership**: out-of-scope records return 404. **Immutable audit trail** (user_id, record_id, field_name, old_value, new_value, timestamp), made append-only by a database trigger that rejects UPDATE, DELETE and TRUNCATE. CSV/JSON **import with auto-mapping, validation and all-or-nothing rollback**; scoped, audited **export**. docker-compose and **Helm with a zero-egress NetworkPolicy**. | Admin · `helm/cirra` · `docker-compose.yml` |
+
+---
+
+## Lead-to-order: the end-to-end flow
+
+Cirra runs the full commercial process, from first touch to an ERP sales order. Every step is in the product and
+covered by `tests/test_leads.py`, `tests/test_deal_desk.py` and `tests/test_orders.py`. The seed walks one deal
+(**Harborline Freight**) through the whole flow.
+
+| # | Step | What Cirra does | Where |
+|---|---|---|---|
+| 1 | **Lead capture & hygiene** | Hosted web forms (`/forms/<key>`), HTML form posts, marketing-automation webhooks (engagement events), manual entry and import, authenticated by hashed intake keys and rate limited, with a spam honeypot. Input is normalised. Duplicates are checked against open leads (merged), contacts and accounts (flagged, and linked on conversion). Enrichment runs through the `internal` provider (existing accounts and peer leads) or `rest`. Region comes from country, the privacy regime from region, and consent is recorded with its source and timestamp. | Leads · Admin → Lead management → Web forms & webhooks |
+| 2 | **Qualification & scoring** | **Fit** against the ICP (industry 30, size 25, revenue 20, geography 15, seniority 10), plus **engagement** points that halve every 30 days. Score = 50/50 blend (configurable); at 60 or above the lead becomes an **MQL**. BANT or MEDDPICC with evidence per criterion; reaching the minimum (3/4 or 5/8) makes it an **SQL**. Priority-ordered **assignment rules** use round robin, a named owner or the existing account owner, with a round-robin fallback across SDRs. A nightly job applies the decay. | Lead page · Admin → Lead management |
+| 3 | **Conversion** | One step creates or links the **Account**, **Contact** (role, consent and engagement carried over) and **Opportunity** in the chosen pipeline and owner. The qualification gate can be overridden only by a manager. | Lead → Convert |
+| 4 | **Opportunity management** | The **Enterprise Solution Sale** pipeline runs Discovery → Solution Design / Demo → Technical Evaluation / PoC → Business Case Validation → Negotiation & Legal → Closed-Won, with evidence gates at each stage. The buying committee includes **Legal Counsel** and **Procurement**. Admins can add, rename, reorder and remove stages. | Deal page · Admin → Stages / Stage gates |
+| 5 | **CPQ & deal desk** | Price books resolve **customer → regional → list** price. **Promotions** are pre-approved discounts. **Bundles** expand into included lines, and **requires/excludes** rules are enforced. Billing frequency, non-standard terms and one **primary quote** per deal. A **sequential approval chain** runs Sales Manager → Deal Desk → VP Sales → Finance → Legal, driven by policies and approval groups. **Proposal/SOW, MSA, SLA and DPA** templates. | Quote builder · Approvals · Products → Price books / Promotions · Admin → Approval chain |
+| 6 | **Negotiation & e-signature** | Numbered document **versions** with line-level **redlines**. Clause **comments** from both sides; customers comment from their signing link, which pauses signing. A new version voids outstanding signatures, and open comments block sending. A **credit & risk check** runs before an Order Form goes out: credit hold or a high risk score needs Finance approval. Signing uses the built-in e-sign, **DocuSign** or **Adobe Sign**, with a completion webhook. | Document page · `/sign/<token>` |
+| 7 | **Closed-Won → Order → ERP** | Closed-Won validation requires a signed Order Form, an approved primary quote, a PO number, bill-to and ship-to addresses, and a tax-exemption certificate when the customer is exempt. Closing **locks the primary quote** and raises the **order**: a header plus lines with **billing schedules**. The `erp_orders` job pushes it **asynchronously** as a sales order (demo, file drop or REST), retries up to 5 times, reads acknowledgements, and emits `order.created` / `order.acknowledged`. | Deal → Order readiness · Orders |
+
+Demo intake keys are printed by the seed: the hosted form is `/forms/cf_demo_webform_cirra`, and the webhook key is
+`ck_demo_webhook_cirra`.
 
 ---
 

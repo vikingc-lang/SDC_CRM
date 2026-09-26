@@ -7,10 +7,11 @@ import { CustomFieldsPanel, GatesPanel } from "@/components/admin/config";
 import { DataPanel } from "@/components/admin/data";
 import { AuditPanel, CompliancePanel, DedupPanel } from "@/components/admin/governance";
 import { JobsPanel } from "@/components/admin/integrations";
+import { ApprovalChainPanel, LeadManagementPanel, StagesPanel } from "@/components/admin/leadtoorder";
 import { Tabs } from "@/components/ui/extra";
 import { useMe } from "@/lib/me";
 
-type Tab = "users" | "rbac" | "audit" | "privacy" | "dedup" | "fields" | "gates" | "data" | "jobs";
+type Tab = "users" | "rbac" | "audit" | "privacy" | "dedup" | "fields" | "leads" | "chain" | "stages" | "gates" | "data" | "jobs";
 
 export default function AdminPage() {
   const { can } = useMe();
@@ -21,7 +22,10 @@ export default function AdminPage() {
     { value: "privacy", label: "Privacy & consent", show: can("audit", "read") },
     { value: "dedup", label: "Duplicates", show: can("accounts", "update") },
     { value: "fields", label: "Custom fields", show: can("admin", "create") },
-    { value: "gates", label: "Pipelines & gates", show: can("admin", "update") },
+    { value: "leads", label: "Lead management", show: can("admin", "update") },
+    { value: "chain", label: "Approval chain", show: can("admin", "update") },
+    { value: "stages", label: "Stages", show: can("admin", "update") },
+    { value: "gates", label: "Stage gates", show: can("admin", "update") },
     { value: "data", label: "Import / export", show: can("data", "create") || can("data", "export") },
     { value: "jobs", label: "Jobs", show: can("admin", "update") },
   ];
@@ -38,6 +42,9 @@ export default function AdminPage() {
       {current === "privacy" && <CompliancePanel />}
       {current === "dedup" && <DedupPanel />}
       {current === "fields" && <CustomFieldsPanel />}
+      {current === "leads" && <LeadManagementPanel />}
+      {current === "chain" && <ApprovalChainPanel />}
+      {current === "stages" && <StagesPanel />}
       {current === "gates" && <GatesPanel />}
       {current === "data" && <DataPanel />}
       {current === "jobs" && <JobsPanel />}

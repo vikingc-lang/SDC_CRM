@@ -2,12 +2,12 @@
 
 import { useMutation, useQuery } from "@tanstack/react-query";
 import axios from "axios";
-import { CheckCircle2, Eraser, PenLine, ShieldCheck } from "lucide-react";
+import { CheckCircle2, Eraser, MessageSquarePlus, PenLine, ShieldCheck } from "lucide-react";
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Logo } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
-import { Input, Label } from "@/components/ui/input";
+import { Input, Label, Textarea } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/misc";
 import { API_URL, errorMessage } from "@/lib/api";
 
@@ -16,6 +16,8 @@ interface SignView {
   signer: { name: string; email: string; party: string; status: string };
   your_turn: boolean;
   signers: { name: string; party: string; status: string; signed_at: string | null }[];
+  comments?: { id: string; clause: string | null; body: string; party: string; author_name: string; resolved: boolean; version: number; created_at: string }[];
+  can_comment?: boolean; version?: number;
 }
 
 const pub = axios.create({ baseURL: `${API_URL}/api/v1` });
@@ -68,6 +70,12 @@ export default function SignPage() {
     mutationFn: async (decline: boolean) => (await pub.post(`/sign/${token}`, { signature_text: name, signature_image: image, agree, decline })).data,
     onSuccess: () => refetch(),
   });
+  const [clause, setClause] = useState("");
+  const [comment, setComment] = useState("");
+  const addComment = useMutation({
+    mutationFn: async () => (await pub.post(`/sign/${token}/comments`, { clause: clause || null, body: comment })).data,
+    onSuccess: () => { setClause(""); setComment(""); refetch(); },
+  });
 
   return (
     <div className="min-h-screen bg-background">
@@ -97,6 +105,8 @@ export default function SignPage() {
               </div>
             ) : data.document.status === "voided" ? (
               <p className="rounded-xl border p-5 text-sm">This document was declined and is no longer open for signature.</p>
+            ) : data.document.status === "in_negotiation" ? (
+              <p className="rounded-xl border p-5 text-sm">Changes were requested on this version. Your account team will send a revised version for signature.</p>
             ) : !data.your_turn ? (
               <p className="rounded-xl border p-5 text-sm">Waiting for an earlier signer. You will receive this link again when it is your turn.</p>
             ) : (
@@ -114,6 +124,30 @@ export default function SignPage() {
                   <Button type="button" variant="ghost" onClick={() => confirm("Decline to sign this document?") && sign.mutate(true)}>Decline</Button>
                 </div>
                 <p className="break-all font-mono text-[10.5px] text-subtle">Document fingerprint (SHA-256): {data.document.content_sha256}</p>
+              </form>
+            )}
+            {!!data.comments?.length && (
+              <section className="rounded-xl border bg-surface p-5 shadow-card">
+                <h2 className="font-semibold">Requested changes</h2>
+                <ul className="mt-3 space-y-3">
+                  {data.comments.map((c) => (
+                    <li key={c.id} className="text-[13.5px]">
+                      <p><span className="font-medium">{c.author_name}</span>{c.clause && <span className="text-muted-foreground"> on {c.clause}</span>}
+                        <span className="text-[12px] text-subtle"> · v{c.version}{c.resolved ? " · resolved" : ""}</span></p>
+                      <p className="mt-0.5">{c.body}</p>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+            {data.can_comment && (
+              <form className="space-y-3 rounded-xl border bg-surface p-5 shadow-card" onSubmit={(e) => { e.preventDefault(); addComment.mutate(); }}>
+                <h2 className="flex items-center gap-2 font-semibold"><MessageSquarePlus className="h-4 w-4" />Request a change</h2>
+                <p className="text-[13px] text-muted-foreground">Propose a redline or ask a question on a clause. Signing pauses until a revised version is issued.</p>
+                <div><Label htmlFor="c-clause">Clause (optional)</Label><Input id="c-clause" placeholder="e.g. 6. Limitation of liability" value={clause} onChange={(e) => setClause(e.target.value)} /></div>
+                <div><Label htmlFor="c-body">Your comment or proposed wording</Label><Textarea id="c-body" required value={comment} onChange={(e) => setComment(e.target.value)} /></div>
+                {addComment.isError && <p className="text-sm text-destructive">{errorMessage(addComment.error)}</p>}
+                <Button type="submit" variant="outline" disabled={comment.trim().length < 3} loading={addComment.isPending}>Send to account team</Button>
               </form>
             )}
           </div>
