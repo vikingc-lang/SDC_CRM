@@ -25,7 +25,7 @@ async def get_current_user(
         user = await db.get(User, uuid.UUID(payload["sub"]))
     except (jwt.PyJWTError, KeyError, ValueError):
         raise unauthorized
-    if user is None or not user.is_active:
+    if user is None or not user.is_active or payload.get("sv", 0) != (user.session_version or 0):
         raise unauthorized
     current_user_id.set(user.id)  # attributes audit-trail entries to this user
     return user

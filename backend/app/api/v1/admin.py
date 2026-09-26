@@ -16,7 +16,7 @@ from app.core.security import hash_password
 from app.models import (
     Account, AuditLog, ConsentEvent, Contact, CustomFieldDefinition, DedupDismissal, ErasureLog, MergeLog, RolePermission, User,
 )
-from app.services import data_io, dedup, privacy
+from app.services import data_io, dedup, identity, privacy
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -106,7 +106,8 @@ async def set_permissions(rows: list[PermissionIn], db: AsyncSession = Depends(g
 async def list_users(db: AsyncSession = Depends(get_db), _: Principal = Depends(authorize("admin", "read"))):
     users = (await db.execute(select(User).order_by(User.full_name))).scalars().all()
     return [{"id": u.id, "email": u.email, "full_name": u.full_name, "role": u.role, "manager_id": u.manager_id, "partner_id": u.partner_id,
-             "is_active": u.is_active, "created_at": u.created_at} for u in users]
+             "is_active": u.is_active, "created_at": u.created_at, "mfa_enabled": u.mfa_enabled, "sso_linked": bool(u.sso_subject),
+             "last_login_at": u.last_login_at} for u in users]
 
 
 @router.post("/users", status_code=201)
@@ -143,10 +144,58 @@ async def update_user(user_id: uuid.UUID, body: UserUpdate, db: AsyncSession = D
         pw = data.pop("password")
         if pw:
             user.password_hash = hash_password(pw)
+    if data.get("is_active") is False:
+        user.session_version = (user.session_version or 0) + 1  # sign them out everywhere
     for k, v in data.items():
         setattr(user, k, v)
     await db.commit()
     return {"status": "ok"}
+
+
+@router.post("/users/{user_id}/reset-mfa")
+async def reset_mfa(user_id: uuid.UUID, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("admin", "update"))):
+    """Lost-device recovery: clears the user's authenticator and signs them out; they re-enrol at next sign-in."""
+    user = await db.get(User, user_id)
+    if user is None:
+        raise HTTPException(404, "User not found")
+    identity.disable_mfa(user)
+    log_action(db, "mfa_reset", "users", user.id)
+    await db.commit()
+    return {"status": "ok"}
+
+
+# ---- sign-in security (MFA policy, single sign-on) ----------------------------------------------
+
+@router.get("/security")
+async def get_security(db: AsyncSession = Depends(get_db), _: Principal = Depends(authorize("admin", "read"))):
+    return identity.admin_view(await identity.policy(db))
+
+
+@router.put("/security")
+async def put_security(body: dict, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("admin", "update"))):
+    try:
+        out = await identity.save_policy(db, body)
+    except identity.IdentityError as e:
+        raise HTTPException(422, str(e))
+    log_action(db, "security_policy", "app_settings", None, json.dumps({"mfa_required_roles": out["mfa_required_roles"],
+                                                                          "sso_enabled": out["sso"].get("enabled"),
+                                                                          "sso_enforce": out["sso"].get("enforce")}))
+    await db.commit()
+    return out
+
+
+@router.post("/security/sso/test")
+async def test_sso(body: dict, _: Principal = Depends(authorize("admin", "update"))):
+    """Reads the IdP's discovery document so an admin can check the issuer URL before turning SSO on."""
+    issuer = (body.get("issuer") or "").strip().rstrip("/")
+    if not issuer:
+        raise HTTPException(422, "Enter the issuer URL first")
+    try:
+        doc = await identity.discover(issuer)
+    except identity.IdentityError as e:
+        raise HTTPException(422, str(e))
+    return {"issuer": doc.get("issuer"), "authorization_endpoint": doc["authorization_endpoint"],
+            "scopes_supported": doc.get("scopes_supported", []), "pkce": "S256" in doc.get("code_challenge_methods_supported", ["S256"])}
 
 
 # ---- audit & compliance -----------------------------------------------------------------------------

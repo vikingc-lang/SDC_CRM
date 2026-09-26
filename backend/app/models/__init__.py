@@ -9,6 +9,7 @@ from decimal import Decimal
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     Computed,
@@ -57,6 +58,16 @@ class User(Base):
     partner_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("partners.id", ondelete="SET NULL"))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     ical_token: Mapped[str | None] = mapped_column(String(64), unique=True)
+    # Two-factor auth: Fernet-encrypted TOTP secret, sha256 hashes of unused recovery codes, last accepted 30s step
+    mfa_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    mfa_secret: Mapped[str | None] = mapped_column(Text)
+    mfa_recovery_hashes: Mapped[list] = mapped_column(JSONB, default=list)
+    mfa_last_step: Mapped[int | None] = mapped_column(BigInteger)
+    mfa_enrolled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sso_subject: Mapped[str | None] = mapped_column(String(255))
+    # Bumped to revoke every outstanding access token (MFA reset, deactivation)
+    session_version: Mapped[int] = mapped_column(Integer, default=0)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = _created()
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

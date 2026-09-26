@@ -22,8 +22,12 @@ class LoginRequest(BaseModel):
 
 
 class TokenResponse(BaseModel):
-    access_token: str
+    access_token: str | None = None
     token_type: str = "bearer"
+    # Set instead of a token when the password step passed but a second factor is still needed
+    mfa_required: bool | None = None
+    mfa_setup_required: bool | None = None
+    mfa_token: str | None = None
 
 
 class UserOut(ORM):

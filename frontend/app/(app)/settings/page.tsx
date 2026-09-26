@@ -5,6 +5,7 @@ import { AudioLines, Brain, CalendarDays, Copy, Cpu, Database, Inbox, Landmark, 
 import { useState } from "react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/AppShell";
+import { SecurityCard } from "@/components/security";
 import { AidenAvatar } from "@/components/Brand";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -50,6 +51,7 @@ export default function SettingsPage() {
     <div className="mx-auto max-w-3xl">
       <PageHeader title="Settings" description="Your mail and calendar connections, plus the workspace intelligence layer" />
       <div className="space-y-6">
+        <SecurityCard />
         <MailCard />
         <CalendarCard />
         <Card>

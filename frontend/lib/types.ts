@@ -130,6 +130,7 @@ export interface Me {
   id: UUID; email: string; full_name: string; role: Role; manager_id: UUID | null;
   partner: { id: UUID; name: string; tier: string } | null;
   permissions: Record<string, Perm>;
+  security: { mfa_enabled: boolean; mfa_required: boolean; recovery_codes_left: number; sso_linked: boolean; has_password: boolean };
 }
 
 export interface GateRule { type: string; label?: string; [k: string]: unknown }

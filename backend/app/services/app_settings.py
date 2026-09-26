@@ -33,6 +33,13 @@ DEFAULTS: dict[str, dict] = {
     },
     "approval_chain": {"order": ["sales_manager", "deal_desk", "vp_sales", "finance", "legal"]},
     "esign": {"provider": "builtin"},
+    # Sign-in policy. SSO is OpenID Connect; with "enforce" on, only Super Admins keep password sign-in (break-glass).
+    "security": {
+        "mfa_required_roles": [],
+        "sso": {"enabled": False, "enforce": False, "display_name": "Single sign-on", "issuer": "", "client_id": "",
+                "client_secret_enc": "", "scopes": "openid email profile", "allowed_domains": [], "auto_provision": False,
+                "default_role": "sdr"},
+    },
 }
 
 

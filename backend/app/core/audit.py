@@ -26,10 +26,11 @@ from sqlalchemy.orm import Session
 current_user_id: ContextVar[uuid.UUID | None] = ContextVar("current_user_id", default=None)
 audit_enabled: ContextVar[bool] = ContextVar("audit_enabled", default=True)
 
-_SKIP_FIELDS = {"embedding", "search_tsv", "updated_at", "created_at", "password_hash", "secret_encrypted", "key"}
+_SKIP_FIELDS = {"embedding", "search_tsv", "updated_at", "created_at", "password_hash", "secret_encrypted", "key",
+                "mfa_secret", "mfa_recovery_hashes", "mfa_last_step", "session_version", "last_login_at"}
 _UNAUDITED = {
     "AuditLog", "ConsentEvent", "ErasureLog", "Notification", "SubjectKey", "IntegrationEvent", "ErpSyncRun",
-    "CollateralDownload",
+    "CollateralDownload", "SsoLoginState",
 }
 _MAX = 4000
 

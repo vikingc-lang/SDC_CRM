@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Save } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
@@ -15,7 +16,7 @@ import { ROLE_LABELS } from "@/lib/me";
 import type { Action, Partner } from "@/lib/types";
 import { relativeDays } from "@/lib/utils";
 
-interface AdminUser { id: string; email: string; full_name: string; role: string; manager_id: string | null; partner_id: string | null; is_active: boolean; created_at: string }
+interface AdminUser { id: string; email: string; full_name: string; role: string; manager_id: string | null; partner_id: string | null; is_active: boolean; created_at: string; mfa_enabled: boolean; sso_linked: boolean; last_login_at: string | null }
 type Cell = Record<Action, boolean> & { scope: "all" | "own" };
 interface Matrix { roles: { key: string; label: string }[]; resources: string[]; actions: Action[]; matrix: Record<string, Record<string, Cell>> }
 
@@ -30,6 +31,11 @@ export function UsersPanel() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["admin", "users"] }); toast.success("User updated"); },
     onError: (e) => toast.error(errorMessage(e)),
   });
+  const resetMfa = useMutation({
+    mutationFn: async (id: string) => (await api.post(`/admin/users/${id}/reset-mfa`)).data,
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["admin", "users"] }); toast.success("Two-factor reset. The user is signed out and sets up a new device at next sign-in."); },
+    onError: (e) => toast.error(errorMessage(e)),
+  });
   const create = useMutation({
     mutationFn: async () => (await api.post<{ temporary_password: string | null }>("/admin/users", { ...f!, manager_id: f!.manager_id || null, partner_id: f!.partner_id || null })).data,
     onSuccess: (r) => { qc.invalidateQueries({ queryKey: ["admin", "users"] }); setF(null); toast.success(`User invited. Temporary password: ${r.temporary_password}`, { duration: 20000 }); },
@@ -40,7 +46,7 @@ export function UsersPanel() {
       <CardHeader title="Users" description="Role determines CRUD + export rights; manager lines determine which team records a Sales Manager sees."
         action={<Button size="sm" onClick={() => setF({ email: "", full_name: "", role: "account_executive", manager_id: "", partner_id: "" })}><Plus className="h-3.5 w-3.5" />Invite user</Button>} />
       {!users.data ? <Skeleton className="m-5 h-40" /> : (
-        <Table head={["Name", "Role", "Reports to", "Status", "Added", ""]} minWidth={820}>
+        <Table head={["Name", "Role", "Reports to", "Status", "Sign-in", "Last sign-in", ""]} minWidth={900}>
           {users.data.map((u) => (
             <tr key={u.id}>
               <Td><span className="font-medium">{u.full_name}</span><span className="block text-[12px] text-muted-foreground">{u.email}</span></Td>
@@ -52,8 +58,16 @@ export function UsersPanel() {
               </Td>
               <Td className="text-[13px]">{u.partner_id ? partners.data?.find((p) => p.id === u.partner_id)?.name ?? "Partner" : u.manager_id ? names.get(u.manager_id) : "—"}</Td>
               <Td><StatusPill status={u.is_active ? "active" : "inactive"} /></Td>
-              <Td className="text-[12.5px] text-muted-foreground">{relativeDays(u.created_at)}</Td>
-              <Td><Button size="sm" variant="ghost" onClick={() => patch.mutate({ id: u.id, body: { is_active: !u.is_active } })}>{u.is_active ? "Deactivate" : "Reactivate"}</Button></Td>
+              <Td><span className="flex flex-wrap gap-1">
+                {u.mfa_enabled ? <Badge tone="good">2FA</Badge> : <Badge tone="neutral">Password</Badge>}
+                {u.sso_linked && <Badge tone="primary">SSO</Badge>}
+              </span></Td>
+              <Td className="text-[12.5px] text-muted-foreground">{u.last_login_at ? relativeDays(u.last_login_at) : "Never"}</Td>
+              <Td><span className="flex justify-end gap-1">
+                {u.mfa_enabled && <Button size="sm" variant="ghost" loading={resetMfa.isPending && resetMfa.variables === u.id}
+                  onClick={() => resetMfa.mutate(u.id)} title="For a lost or replaced phone">Reset 2FA</Button>}
+                <Button size="sm" variant="ghost" onClick={() => patch.mutate({ id: u.id, body: { is_active: !u.is_active } })}>{u.is_active ? "Deactivate" : "Reactivate"}</Button>
+              </span></Td>
             </tr>
           ))}
         </Table>

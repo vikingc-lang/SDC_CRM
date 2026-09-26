@@ -11,7 +11,7 @@ from app.core.database import Base
 __all__ = [
     "RolePermission", "AuditLog", "CustomFieldDefinition", "MergeLog", "DedupDismissal", "SubjectKey",
     "ConsentEvent", "ErasureLog", "Notification", "Attachment", "MailboxConnection", "DealAlert", "FxRate",
-    "IntegrationEvent", "ErpSyncRun",
+    "IntegrationEvent", "ErpSyncRun", "SsoLoginState",
 ]
 
 
@@ -225,3 +225,14 @@ class ErpSyncRun(Base):
     error: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime] = _ts()
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class SsoLoginState(Base):
+    """One pending OpenID Connect sign-in: CSRF state, replay nonce and PKCE verifier (kept server-side)."""
+    __tablename__ = "sso_login_states"
+
+    state: Mapped[str] = mapped_column(String(64), primary_key=True)
+    nonce: Mapped[str] = mapped_column(String(64))
+    code_verifier: Mapped[str] = mapped_column(String(128))
+    return_to: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[datetime] = _ts()
