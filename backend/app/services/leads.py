@@ -362,7 +362,7 @@ def _tier(employees: int | None) -> str:
 async def convert(db: AsyncSession, lead: Lead, user: User, *, account_id: uuid.UUID | None = None, contact_id: uuid.UUID | None = None,
                   create_deal: bool = True, deal_title: str | None = None, amount: float = 0, currency: str = "USD",
                   pipeline_id: uuid.UUID | None = None, target_close_date: date | None = None, owner_id: uuid.UUID | None = None,
-                  buying_role: str = "Champion", override: bool = False) -> dict:
+                  buying_role: str = "Champion", override: bool = False, domain: str | None = None) -> dict:
     if lead.status == "converted":
         raise LeadError("Lead is already converted")
     if lead.status == "disqualified":
@@ -382,6 +382,14 @@ async def convert(db: AsyncSession, lead: Lead, user: User, *, account_id: uuid.
             next((m for m in lead.duplicate_matches or [] if m["type"] == "contact"), None)
         if match:
             account = await db.get(Account, uuid.UUID(match["id"] if match["type"] == "account" else match["account_id"]))
+    if account is None and domain:
+        # Domain supplied at conversion (lead came in from a free-mail address): store it, reuse any account on it
+        domain = _clean_domain(domain) or ""
+        if "." not in domain or enrichment.is_free_mail(domain):
+            raise LeadError(f"{domain or 'That'} is not a company domain")
+        lead.domain = domain
+        reg = registrable_domain(domain)
+        account = (await db.execute(select(Account).where(func.lower(Account.domain).in_(list({domain, reg}))))).scalars().first()
     created_account = account is None
     if account is None:
         if not lead.domain or enrichment.is_free_mail(lead.domain):

@@ -17,7 +17,7 @@ import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/misc";
 import { api, errorMessage, get } from "@/lib/api";
 import { useMe } from "@/lib/me";
-import type { LeadDetail, PipelineFull, UserBrief } from "@/lib/types";
+import type { AccountListItem, LeadDetail, PipelineFull, UserBrief } from "@/lib/types";
 import { cn, relativeDays, shortDate } from "@/lib/utils";
 
 type Crit = Record<string, { met: boolean; note: string }>;
@@ -246,13 +246,16 @@ function ConvertDialog({ lead, open, onOpenChange, canOverride, qualified }: {
   const qc = useQueryClient();
   const { data: pipelines } = useQuery({ queryKey: ["pipelines"], queryFn: () => get<PipelineFull[]>("/pipelines"), enabled: open });
   const { data: users } = useQuery({ queryKey: ["users"], queryFn: () => get<(UserBrief & { role: string })[]>("/users"), enabled: open });
+  const { data: accounts } = useQuery({ queryKey: ["accounts", "all"], queryFn: () => get<AccountListItem[]>("/accounts", { limit: 200 }), enabled: open });
   const solution = pipelines?.find((p) => p.name === "Enterprise Solution Sale") ?? pipelines?.[0];
-  const [f, setF] = useState({ create_deal: true, deal_title: "", amount: "", pipeline_id: "", owner_id: "", buying_role: "Champion", target_close_date: "", override: false });
+  const [f, setF] = useState({ create_deal: true, deal_title: "", amount: "", pipeline_id: "", owner_id: "", buying_role: "Champion", target_close_date: "", override: false, account_id: "", domain: "" });
+  // A new account needs a company domain; free-mail leads (gmail etc.) have none, so ask for one or an existing account
+  const needsDomain = !f.account_id && !lead.account_match && !lead.domain;
   const m = useMutation({
     mutationFn: async () => (await api.post<{ account_id: string; deal_id: string | null; created: Record<string, boolean> }>(`/leads/${lead.id}/convert`, {
       create_deal: f.create_deal, deal_title: f.deal_title || `${lead.company_name ?? lead.full_name}: new opportunity`, amount: Number(f.amount || 0),
       pipeline_id: f.pipeline_id || solution?.id, owner_id: f.owner_id || null, buying_role: f.buying_role, target_close_date: f.target_close_date || null,
-      override: f.override,
+      override: f.override, account_id: f.account_id || null, domain: needsDomain ? f.domain.trim() || null : null,
     })).data,
     onSuccess: (r) => {
       qc.invalidateQueries();
@@ -272,6 +275,17 @@ function ConvertDialog({ lead, open, onOpenChange, canOverride, qualified }: {
             {" "}Consent, engagement history and qualification carry over.
           </p>
           <div className="mt-4 grid grid-cols-2 gap-3">
+            <div className="col-span-2"><Label htmlFor="cv-acct">Account</Label>
+              <Select id="cv-acct" value={f.account_id} onChange={(e) => setF({ ...f, account_id: e.target.value })}>
+                <option value="">{lead.account_match ? `${lead.account_match.name} (matched)` : `Create new account${lead.company_name ? `: ${lead.company_name}` : ""}`}</option>
+                {accounts?.filter((a) => a.id !== lead.account_match?.id).map((a) => <option key={a.id} value={a.id}>{a.name} · {a.domain}</option>)}
+              </Select></div>
+            {needsDomain && (
+              <div className="col-span-2"><Label htmlFor="cv-domain">Company website</Label>
+                <Input id="cv-domain" required placeholder="example.com" value={f.domain} onChange={(e) => setF({ ...f, domain: e.target.value })} />
+                <p className="mt-1 text-[12px] text-muted-foreground">The lead has no company domain (free-mail address). Enter the company website, or pick an existing account above.</p>
+              </div>
+            )}
             <label className="col-span-2 flex items-center gap-2 text-[13px]"><input type="checkbox" checked={f.create_deal} onChange={(e) => setF({ ...f, create_deal: e.target.checked })} />Create an opportunity</label>
             {f.create_deal && <>
               <div className="col-span-2"><Label htmlFor="cv-title">Opportunity name</Label><Input id="cv-title" placeholder={`${lead.company_name ?? ""}: new opportunity`} value={f.deal_title} onChange={(e) => setF({ ...f, deal_title: e.target.value })} /></div>

@@ -81,6 +81,7 @@ class ConvertIn(BaseModel):
     owner_id: uuid.UUID | None = None
     buying_role: Literal["Champion", "Decision Maker", "Economic Buyer", "Influencer", "Evaluator", "Legal Counsel", "Procurement"] = "Champion"
     override: bool = False
+    domain: str | None = Field(default=None, max_length=255)
 
 
 class DisqualifyIn(BaseModel):

@@ -14,7 +14,7 @@ RUN npm run build
 FROM node:20-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3000 HOSTNAME=0.0.0.0
-RUN addgroup -S -g 1001 cirra \&\& adduser -S -u 1001 cirra -G cirra
+RUN addgroup -S -g 1001 cirra && adduser -S -u 1001 cirra -G cirra
 COPY --from=build --chown=cirra:cirra /app/.next/standalone ./
 COPY --from=build --chown=cirra:cirra /app/.next/static ./.next/static
 COPY --from=build --chown=cirra:cirra /app/public ./public
