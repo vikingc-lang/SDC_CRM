@@ -125,7 +125,7 @@ gates → CPQ and approvals → redlines and e-signature → Closed-Won → orde
 of every screen for five roles, and mobile layout). Run it against freshly seeded demo data with the API and web app up:
 
 ```bash
-npm i playwright && node e2e/lead-to-order.mjs ./e2e-output   # writes e2e-output/e2e/results.json
+npm i playwright && node e2e/lead-to-order.mjs ./e2e-output   # results.json + 28 evidence screenshots in e2e-output/evidence
 ```
 
 The backend suite (70 tests) covers the scoring formulas, the extractor and LLM fallback, and every pillar end to end:

@@ -4,7 +4,17 @@
 import { chromium } from "playwright";
 import { mkdirSync, writeFileSync } from "fs";
 
-const OUT = process.argv[2]; mkdirSync(`${OUT}/e2e`, { recursive: true });
+const OUT = process.argv[2]; mkdirSync(`${OUT}/e2e`, { recursive: true }); mkdirSync(`${OUT}/evidence`, { recursive: true });
+const evidence = [];
+/** Evidence screenshot: scrolls the element (if given) into view and captures the viewport. */
+async function ev(page, id, tc, title, target) {
+  try {
+    if (target) await target.first().scrollIntoViewIfNeeded();
+    await page.waitForTimeout(350);
+    await page.screenshot({ path: `${OUT}/evidence/${id}.png` });
+    evidence.push({ id, tc, title, file: `evidence/${id}.png` });
+  } catch (e) { console.log("evidence skipped", id, e.message); }
+}
 const BASE = "http://localhost:3000", API = "http://localhost:8000/api/v1", PW = "cirra123";
 const RUN = Date.now().toString(36).slice(-5);
 const results = [];
@@ -67,8 +77,10 @@ let leadId, dealId, quoteId, orderFormUrl, orderId;
     await p.fill("#f-company_name", company); await p.fill("#f-job_title", "VP Operations"); await p.fill("#f-country", "Germany");
     await p.fill("#f-employee_count", "1200"); await p.fill("#f-message", "Need CPQ integrated with SAP");
     await p.getByLabel("I agree to receive product updates").check();
+    await ev(p, "E01", "TC-03", "Prospect completes the hosted web form with email consent");
     await p.getByRole("button", { name: "Submit" }).click();
     await p.getByText("Thank you").waitFor();
+    await ev(p, "E02", "TC-03", "Submission confirmed to the prospect");
   }, p);
   await ctx.close();
 }
@@ -87,6 +99,7 @@ const mgr = await login("marcus@cirra.demo");
     const txt = await p.locator("main").innerText();
     expect(txt.includes("EMEA"), "region EMEA not derived"); expect(/Granted · GDPR/.test(txt), "GDPR consent not recorded");
     expect(/owned by (Priya Raman|Diego Alvarez)/.test(txt), "not routed by the EMEA round-robin rule");
+    await ev(p, "E03", "TC-05", "New lead: enriched (EMEA), GDPR consent recorded, routed to an owner, fit score shown");
     return txt.match(/owned by [A-Za-z ]+/)[0];
   }, p);
   await step(J, "Engagement events raise the score and promote to MQL", async () => {
@@ -96,6 +109,7 @@ const mgr = await login("marcus@cirra.demo");
       await p.waitForTimeout(400);
     }
     await p.reload(); await p.getByText("MQL", { exact: true }).first().waitFor();
+    await ev(p, "E04", "TC-06", "Engagement events lift the score past 60; lead becomes an MQL");
     return "score " + (await p.locator("span.tabular").first().innerText());
   }, p);
   await step(J, "Conversion is blocked below the BANT minimum", async () => {
@@ -107,6 +121,7 @@ const mgr = await login("marcus@cirra.demo");
     for (const k of ["Budget", "Authority", "Need", "Timeline"]) await p.getByRole("button", { name: k, exact: true }).click();
     await p.locator('input[placeholder="Evidence (who said what, when)"]').first().fill("FY27 budget confirmed by CFO");
     await p.getByRole("button", { name: "Save qualification" }).click(); await toast(p, "Sales qualified");
+    await ev(p, "E05", "TC-08", "BANT 4/4 confirmed with evidence; lead becomes an SQL", p.getByText("Qualification", { exact: true }));
   }, p);
 }
 
@@ -118,12 +133,14 @@ const mgr = await login("marcus@cirra.demo");
     const d = p.getByRole("dialog");
     await d.locator("#cv-title").fill(`${company}: Revenue platform`); await d.locator("#cv-amt").fill("150000");
     await d.locator("#cv-owner").selectOption({ label: "Priya Raman" }); await d.locator("#cv-role").selectOption("Economic Buyer");
+    await ev(p, "E06", "TC-09", "Convert dialog: opportunity name, amount, pipeline, owner and buying role");
     await d.getByRole("button", { name: "Convert" }).click();
     await p.waitForURL(/\/deals\/.+/); dealId = p.url().split("/").pop();
     await p.getByText("Enterprise Solution Sale").first().waitFor();
   }, p);
   await step(J, "Deal starts in Discovery with the lead history carried over", async () => {
     await p.getByText(/Lead converted: Anna Keller/).first().waitFor();
+    await ev(p, "E07", "TC-10", "Opportunity created in Discovery, owned by Priya Raman");
     const r = await api(mgr.token, "GET", `/deals/${dealId}`);
     expect(r.data.stage === "Discovery", `stage ${r.data.stage}`); expect(r.data.owner.full_name === "Priya Raman", "owner not Priya");
     return `${r.data.stage}, owner ${r.data.owner.full_name}`;
@@ -141,6 +158,7 @@ const mgr = await login("marcus@cirra.demo");
     await p.goto(`${BASE}/deals/${dealId}`); await moveTo(p, "Solution Design / Demo");
     await p.getByText("Entry criteria for Solution Design / Demo").waitFor();
     const unmet = await p.getByRole("dialog").getByText("Not yet").count();
+    await ev(p, "E08", "TC-12", "Stage gate blocks Solution Design / Demo until evidence exists");
     await p.getByRole("button", { name: "Cancel" }).click();
     expect(unmet >= 2, "expected unmet criteria"); return `${unmet} unmet criteria shown`;
   }, p);
@@ -157,7 +175,9 @@ const mgr = await login("marcus@cirra.demo");
     }, p);
   }
   await step(J, "Negotiation & Legal is blocked without an approved quote", async () => {
-    await p.reload(); await moveTo(p, "Negotiation & Legal");
+    await p.reload(); await p.waitForTimeout(800);
+    await ev(p, "E09", "TC-13–15", "Deal advanced through Solution Design, Technical Evaluation and Business Case Validation");
+    await moveTo(p, "Negotiation & Legal");
     await p.getByText("Entry criteria for Negotiation & Legal").waitFor();
     const txt = await p.getByRole("dialog").innerText(); await p.getByRole("button", { name: "Cancel" }).click();
     expect(/Approved quote[^\n]*\n?\s*Not yet/.test(txt) || txt.includes("Not yet"), "gate not shown");
@@ -186,6 +206,7 @@ const mgr = await login("marcus@cirra.demo");
     await p.getByPlaceholder("e.g. LAUNCH-AI").fill("LAUNCH-AI");
     await p.getByRole("button", { name: "Save" }).click(); await toast(p, "Quote saved");
     await p.getByText("Priced by the server").waitFor();
+    await ev(p, "E10", "TC-19", "Quote priced from the EMEA regional price book with the LAUNCH-AI promotion", p.getByText("Priced by the server"));
     const txt = await p.locator("main").innerText();
     expect(txt.includes("regional:EMEA 2026 regional"), "EMEA regional price book not applied");
     expect(/promo −15%/.test(txt), "LAUNCH-AI promo not applied");
@@ -195,12 +216,14 @@ const mgr = await login("marcus@cirra.demo");
     await p.getByRole("button", { name: "Submit for approval" }).click(); await toast(p, "Submitted for approval");
     await p.reload(); await p.getByText("1. Sales Manager").waitFor(); await p.getByText("2. Deal Desk").waitFor();
     expect(await p.getByText("queued").count() >= 1, "later level not queued");
+    await ev(p, "E11", "TC-20", "Sequential approval chain: Sales Manager pending, Deal Desk queued");
   }, p);
   const dana = await login("dana@cirra.demo");
   await step(J, "Deal Desk cannot decide before the Sales Manager", async () => {
     await dana.page.goto(`${BASE}/approvals`);
     const card = dana.page.locator("div.p-4", { hasText: company }).filter({ hasText: "Deal Desk" });
     await card.getByText("Waiting for an earlier level").waitFor();
+    await ev(dana.page, "E12", "TC-21", "Deal Desk inbox: cannot decide until level 1 approves", card);
   }, dana.page);
   await step(J, "Sales Manager approves level 1 in the Approvals inbox", async () => {
     await p.goto(`${BASE}/approvals`);
@@ -211,6 +234,8 @@ const mgr = await login("marcus@cirra.demo");
     await dana.page.reload();
     const card = dana.page.locator("div.p-4", { hasText: company }).filter({ hasText: "Level 2" });
     await card.getByRole("button", { name: "Approve" }).click(); await toast(dana.page, "Approved");
+    await dana.page.getByRole("tab", { name: "Decided" }).click(); await dana.page.waitForTimeout(800);
+    await ev(dana.page, "E13", "TC-22–23", "Both levels approved; decisions recorded in the Approvals inbox");
     const q = (await api(mgr.token, "GET", `/quotes/${quoteId}`)).data; expect(q.status === "approved", `quote ${q.status}`);
     return `TCV ${q.currency} ${q.tcv.toLocaleString()}`;
   }, dana.page);
@@ -235,6 +260,7 @@ const mgr = await login("marcus@cirra.demo");
     await p.getByRole("button", { name: "Comment", exact: true }).click(); await p.getByText("Customer asks for a 2x liability cap").waitFor();
     await p.locator("select").filter({ hasText: "Pick from buying committee" }).selectOption({ index: 1 });
     await p.getByRole("button", { name: "Send for e-signature" }).click(); await toast(p, "open redline comment");
+    await ev(p, "E14", "TC-26", "MSA: open clause comment blocks sending for signature", p.getByText("Customer asks for a 2x liability cap"));
   }, p);
   await step(J, "Resolve comment and save a revised version; redline diff shows the change", async () => {
     await p.getByRole("button", { name: "Resolve" }).click(); await p.waitForTimeout(600);
@@ -244,6 +270,7 @@ const mgr = await login("marcus@cirra.demo");
     await p.getByPlaceholder(/What changed and why/).fill("2x liability cap agreed");
     await p.getByRole("button", { name: "Save version 2" }).click(); await toast(p, "New version saved");
     await p.getByText(/\+\d+ \/ −\d+ lines/).waitFor(); await p.getByText("v2", { exact: true }).first().waitFor();
+    await ev(p, "E15", "TC-27", "MSA version 2 with redline comparison against version 1", p.getByText(/\+\d+ \/ −\d+ lines/));
     return await p.getByText(/\+\d+ \/ −\d+ lines/).innerText();
   }, p);
   await step(J, "Generate Order Form from the approved primary quote", async () => {
@@ -261,17 +288,20 @@ const mgr = await login("marcus@cirra.demo");
   }, p);
   await step(J, "Company cannot sign before the customer (signing order)", async () => {
     const c = await browser.newContext(); const s = await c.newPage(); await s.goto(BASE + links[1]);
-    await s.getByText("Waiting for an earlier signer").waitFor(); await c.close();
+    await s.getByText("Waiting for an earlier signer").waitFor();
+    await ev(s, "E16", "TC-30", "Company signer must wait for the customer (signing order enforced)", s.getByText("Waiting for an earlier signer")); await c.close();
   }, p);
   await step(J, "Customer signs from the public link", async () => {
     const c = await browser.newContext(); const s = await c.newPage(); await s.goto(BASE + links[0]);
     await s.locator("#sig-name").fill("Anna Keller"); await s.getByRole("checkbox").last().check();
+    await ev(s, "E17", "TC-31", "Customer signs the Order Form from the public signing link", s.getByRole("button", { name: "Sign document" }));
     await s.getByRole("button", { name: "Sign document" }).click(); await s.getByText("your signature is recorded").waitFor(); await c.close();
   }, p);
   await step(J, "Company countersigns; document fully executed", async () => {
     const c = await browser.newContext(); const s = await c.newPage(); await s.goto(BASE + links[1]);
     await s.locator("#sig-name").fill("Marcus Vance"); await s.getByRole("checkbox").last().check();
-    await s.getByRole("button", { name: "Sign document" }).click(); await s.getByText("Fully executed").waitFor(); await c.close();
+    await s.getByRole("button", { name: "Sign document" }).click(); await s.getByText("Fully executed").waitFor();
+    await ev(s, "E18", "TC-32", "Countersigned: Order Form fully executed", s.getByText("Fully executed")); await c.close();
     await p.reload(); await p.getByText(/^completed$/i).first().waitFor();
   }, p);
 }
@@ -281,18 +311,21 @@ const mgr = await login("marcus@cirra.demo");
   const J = "7. Closed-Won validation, order & ERP"; const p = mgr.page;
   await step(J, "Order readiness shows missing PO and addresses", async () => {
     await p.goto(`${BASE}/deals/${dealId}`); await p.getByText("Order readiness").waitFor();
+    await ev(p, "E19", "TC-33", "Order readiness: PO number, billing and shipping address missing", p.getByText("Order readiness"));
     const r = (await api(mgr.token, "GET", `/deals/${dealId}/order-readiness`)).data;
     const missing = r.checks.filter((c) => !c.met).map((c) => c.criterion);
     expect(!r.ready && missing.includes("Customer PO number"), "readiness wrong"); return `missing: ${missing.join(", ")}`;
   }, p);
   await step(J, "Closed-Won is blocked by the order checks", async () => {
     await moveTo(p, "Closed-Won"); await p.getByText("Entry criteria for Closed-Won").waitFor();
+    await ev(p, "E20", "TC-34", "Closed-Won blocked by the order checks");
     await p.getByRole("button", { name: "Cancel" }).click();
   }, p);
   await step(J, "Rep captures PO, bill-to and ship-to on the deal", async () => {
     await p.locator("#po").fill(`PO-E2E-${RUN}`); await p.locator("#inco").fill("DAP");
     for (const [f, v] of [["Street", "Hafenstrasse 12"], ["City", "Hamburg"], ["Postal code", "20457"], ["Country", "DE"]]) await p.getByLabel(`Bill to ${f}`).fill(v);
     await p.getByLabel("Ship to billing address").check();
+    await ev(p, "E21", "TC-35", "Rep captures PO, Incoterms and addresses on the deal", p.locator("#po"));
     await p.getByRole("button", { name: "Save order details" }).click(); await toast(p, "Order details saved");
     const r = (await api(mgr.token, "GET", `/deals/${dealId}/order-readiness`)).data; expect(r.ready, "still not ready: " + JSON.stringify(r.checks.filter((c) => !c.met)));
   }, p);
@@ -313,6 +346,7 @@ const mgr = await login("marcus@cirra.demo");
   await step(J, "Push to ERP returns a sales-order number", async () => {
     await p.getByRole("button", { name: "Push now" }).click(); await toast(p, "ERP sales order SO-");
     await p.reload(); await p.getByText("Acknowledged").first().waitFor();
+    await ev(p, "E22", "TC-36–38", "Order created from the locked quote and acknowledged by the ERP with a sales-order number");
     return (await api(mgr.token, "GET", `/orders/${orderId}`)).data.erp_order_id;
   }, p);
   await step(J, "Second order for the same deal is refused", async () => {
@@ -320,6 +354,7 @@ const mgr = await login("marcus@cirra.demo");
   }, p);
   await step(J, "Order appears in the Orders list as In ERP", async () => {
     await p.goto(`${BASE}/orders`); await p.getByRole("tab", { name: "In ERP" }).click(); await p.getByText(company).first().waitFor();
+    await ev(p, "E23", "TC-40", "Orders list: the order is in the ERP");
   }, p);
 }
 
@@ -332,6 +367,7 @@ const mgr = await login("marcus@cirra.demo");
     await ae.page.goto(`${BASE}/deals/${crescent.id}`); await moveTo(ae.page, "Closed-Won");
     await ae.page.getByText("Entry criteria for Closed-Won").waitFor();
     await ae.page.getByText("ask your sales manager").waitFor();
+    await ev(ae.page, "E24", "TC-41", "Sales rep sees the unmet criteria and no 'Move anyway' button");
     expect(await ae.page.getByRole("button", { name: "Move anyway" }).count() === 0, "Move anyway offered to a rep");
     await ae.page.getByRole("button", { name: "Cancel" }).click();
   }, ae.page);
@@ -362,7 +398,9 @@ const mgr = await login("marcus@cirra.demo");
     const form = p.locator("form", { hasText: "Issue key" });
     await form.locator("input").first().fill(`E2E form ${RUN}`); await form.locator("input").last().fill(`E2E campaign ${RUN}`);
     await p.getByRole("button", { name: "Issue key" }).click(); await p.getByText("Key issued").waitFor();
-    raw = await p.locator("input.font-mono").first().inputValue(); expect(raw.startsWith("cf_"), "bad key"); return raw.slice(0, 10) + "…";
+    raw = await p.locator("input.font-mono").first().inputValue(); expect(raw.startsWith("cf_"), "bad key");
+    await ev(p, "E25", "TC-44", "Admin issues a web-form key; shown once with the hosted-form URL and embed code");
+    return raw.slice(0, 10) + "…";
   }, p);
   await step(J, "The new key's hosted form captures a lead tagged with the campaign", async () => {
     const c = await browser.newContext(); const f = await c.newPage(); await f.goto(`${BASE}/forms/${raw}`);
@@ -378,6 +416,7 @@ const mgr = await login("marcus@cirra.demo");
   await step(J, "Approval chain shows five levels with approvers", async () => {
     await p.getByRole("tab", { name: "Approval chain" }).click();
     for (const l of ["1. Sales Manager", "2. Deal Desk", "3. VP Sales", "4. Finance", "5. Legal"]) await p.getByText(l, { exact: true }).waitFor();
+    await ev(p, "E26", "TC-47", "Admin: five-level approval chain with approvers", p.getByText("1. Sales Manager", { exact: true }));
   }, p);
   await step(J, "Stage editor adds and deletes a stage", async () => {
     await p.getByRole("tab", { name: "Stages", exact: true }).click();
@@ -402,6 +441,7 @@ const mgr = await login("marcus@cirra.demo");
     expect(await aud.page.getByRole("button", { name: "New lead" }).count() === 0, "New lead visible");
     await aud.page.goto(`${BASE}/leads/${leadId}`); await aud.page.getByText("Anna Keller").first().waitFor();
     expect(await aud.page.getByRole("button", { name: "Convert" }).count() === 0, "Convert visible");
+    await ev(aud.page, "E27", "TC-50", "Auditor: lead is read-only (no Convert, Disqualify or edit actions)");
   }, aud.page);
   await step(J, "Auditor cannot create orders via the API", async () => {
     const r = await api(aud.token, "POST", `/deals/${dealId}/orders`); expect(r.status === 403, `got ${r.status}`);
@@ -446,6 +486,7 @@ const mgr = await login("marcus@cirra.demo");
     await step(J, `${r.replace(/[0-9a-f-]{36}/, ":id")} has no horizontal page scroll`, async () => {
       await p.goto(BASE + r); await p.waitForTimeout(1200);
       const over = await p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+      if (r.startsWith("/leads/")) await ev(p, "E28", "TC-59", "Lead page on a phone (390 px): no sideways scroll");
       expect(over <= 1, `page is ${over}px wider than the viewport`);
     }, p);
   }
@@ -454,5 +495,6 @@ const mgr = await login("marcus@cirra.demo");
 
 await browser.close();
 writeFileSync(`${OUT}/e2e/results.json`, JSON.stringify({ run: RUN, at: new Date().toISOString(), results }, null, 2));
+writeFileSync(`${OUT}/evidence/evidence.json`, JSON.stringify(evidence, null, 2));
 const c = (s) => results.filter((r) => r.status === s).length;
 console.log(`\nTOTAL ${results.length}: ${c("pass")} passed, ${c("fail")} failed, ${c("blocked")} blocked`);
