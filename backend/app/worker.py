@@ -6,7 +6,7 @@ from celery.schedules import crontab
 
 from app.core.config import settings
 
-celery_app = Celery("relate", broker=settings.redis_url, backend=settings.redis_url)
+celery_app = Celery("cirra", broker=settings.redis_url, backend=settings.redis_url)
 
 
 def _every(job: str, schedule) -> dict:

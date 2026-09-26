@@ -43,7 +43,7 @@ function AskInner() {
     <div className="mx-auto max-w-3xl">
       <div className="pb-6 pt-4 text-center">
         <span className="ai-gradient mx-auto flex h-11 w-11 items-center justify-center rounded-2xl shadow-pop"><Sparkles className="h-5 w-5 text-white" /></span>
-        <h1 className="mt-4 text-[26px] font-semibold tracking-tight">Ask <span className="ai-gradient-text">relate</span></h1>
+        <h1 className="mt-4 text-[26px] font-semibold tracking-tight">Ask <span className="ai-gradient-text">Cirra</span></h1>
         <p className="mt-1 text-sm text-muted-foreground">Semantic search across every note, call and email, grounded in live pipeline data.</p>
       </div>
       <form onSubmit={(e) => { e.preventDefault(); run(q); }} className="flex items-center gap-2 rounded-2xl border bg-surface p-2 shadow-pop focus-within:border-ring">

@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from app.schemas.ai import ActionItem, ContactExtracted, DealExtracted, QuickLogResponse
 from app.services import llm
 
-SYSTEM_PROMPT = """You are the deterministic data extraction engine for the relate [R] CRM.
+SYSTEM_PROMPT = """You are the deterministic data extraction engine for the Cirra CRM.
 Your task is to parse raw, unformatted sales notes and return a valid JSON object matching the schema below.
 Follow these rules strictly:
 1. Extract or infer: Account name, contacts mentioned, deal values, timeline, and next action items.

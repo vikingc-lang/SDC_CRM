@@ -4,7 +4,7 @@ from httpx import ASGITransport, AsyncClient
 
 
 @asynccontextmanager
-async def login_as(email: str, password: str = "relate123"):
+async def login_as(email: str, password: str = "cirra123"):
     from app.main import app
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:

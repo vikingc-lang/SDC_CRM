@@ -13,14 +13,14 @@ from app.models import Activity, Contact, Task, User
 async def user_feed(db: AsyncSession, user: User) -> bytes:
     """Subscribable calendar: the user's open tasks (all-day on due date) and scheduled meetings."""
     cal = Calendar()
-    cal.add("prodid", "-//SDC Solutions//relate [R]//EN")
+    cal.add("prodid", "-//SDC Solutions//Cirra//EN")
     cal.add("version", "2.0")
-    cal.add("x-wr-calname", f"relate [R]: {user.full_name}")
+    cal.add("x-wr-calname", f"Cirra: {user.full_name}")
     tasks = (await db.execute(select(Task).where(or_(Task.assignee_id == user.id, Task.owner_id == user.id), Task.completed.is_(False),
                                                  Task.due_date.is_not(None)))).scalars().unique().all()
     for t in tasks:
         ev = Event()
-        ev.add("uid", f"task-{t.id}@relate")
+        ev.add("uid", f"task-{t.id}@cirra")
         ev.add("summary", f"{'[!] ' if t.priority in ('high', 'urgent') else ''}{t.title}")
         ev.add("dtstart", t.due_date)
         ev.add("dtend", t.due_date + timedelta(days=1))
@@ -32,7 +32,7 @@ async def user_feed(db: AsyncSession, user: User) -> bytes:
                                                         Activity.occurred_at >= datetime.now(timezone.utc) - timedelta(days=1)))).scalars().unique().all()
     for m in meetings:
         ev = Event()
-        ev.add("uid", f"meeting-{m.id}@relate")
+        ev.add("uid", f"meeting-{m.id}@cirra")
         ev.add("summary", m.subject or m.summary[:80])
         ev.add("dtstart", m.occurred_at)
         ev.add("dtend", m.occurred_at + timedelta(seconds=m.duration_seconds or 1800))

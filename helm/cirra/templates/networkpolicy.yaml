@@ -1,11 +1,11 @@
 {{- if .Values.networkPolicy.enabled }}
-# Zero-egress posture: relate pods accept traffic from each other and the ingress controller,
+# Zero-egress posture: Cirra pods accept traffic from each other and the ingress controller,
 # and can only reach each other plus cluster DNS (and any explicitly allowed CIDRs).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: {{ include "relate.fullname" . }}-zero-egress
-  labels: {{- include "relate.labels" . | nindent 4 }}
+  name: {{ include "cirra.fullname" . }}-zero-egress
+  labels: {{- include "cirra.labels" . | nindent 4 }}
 spec:
   podSelector:
     matchLabels: { app.kubernetes.io/instance: {{ .Release.Name }} }

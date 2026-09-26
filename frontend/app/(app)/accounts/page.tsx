@@ -93,7 +93,7 @@ export default function AccountsPage() {
             </tbody>
           </table>
         </div>
-        {!isLoading && rows.length === 0 && <EmptyState icon={<Building2 className="h-4 w-4" />} title="No accounts found" description="Create one, or log a conversation with ⌘K and relate will create it for you." />}
+        {!isLoading && rows.length === 0 && <EmptyState icon={<Building2 className="h-4 w-4" />} title="No accounts found" description="Create one, or log a conversation with ⌘K and Cirra will create it for you." />}
       </Card>
       <NewAccountDialog open={creating} onOpenChange={setCreating} />
     </div>

@@ -1,7 +1,7 @@
 import axios, { AxiosError } from "axios";
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-const TOKEN_KEY = "relate.token";
+const TOKEN_KEY = "cirra.token";
 
 export const api = axios.create({ baseURL: `${API_URL}/api/v1` });
 
@@ -45,7 +45,7 @@ export function errorMessage(error: unknown, fallback = "Something went wrong"):
   const detail = e?.response?.data?.detail;
   if (typeof detail === "string") return detail;
   if (Array.isArray(detail)) return detail.map((d: { msg?: string }) => d.msg).filter(Boolean).join(", ") || fallback;
-  if (e?.message === "Network Error") return "Can't reach the relate API. Is the backend running?";
+  if (e?.message === "Network Error") return "Can't reach the Cirra API. Is the backend running?";
   return fallback;
 }
 

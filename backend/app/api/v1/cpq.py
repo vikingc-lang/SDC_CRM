@@ -374,7 +374,7 @@ async def list_contracts(status: str | None = None, expiring_within_days: int | 
 @router.post("/quotes/{quote_id}/contract", status_code=201)
 async def contract_from_quote(quote_id: uuid.UUID, start_date: date | None = None, db: AsyncSession = Depends(get_db),
                               p: Principal = Depends(authorize("contracts", "create"))):
-    """Record a contract executed outside relate (e.g. wet ink) from an approved quote."""
+    """Record a contract executed outside Cirra (e.g. wet ink) from an approved quote."""
     quote = await _quote(db, p, quote_id)
     if quote.status not in ("approved", "sent", "accepted"):
         raise HTTPException(422, "Quote must be approved")

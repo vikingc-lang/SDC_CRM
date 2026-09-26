@@ -114,7 +114,7 @@ export function QuickLogModal() {
     onSuccess: (res: { account_id: string; deal_id: string | null; contacts_created: number; tasks_created: number }) => {
       qc.invalidateQueries();
       close();
-      toast.success("Logged to relate", {
+      toast.success("Logged to Cirra", {
         description: [
           res.deal_id ? "Deal updated" : null,
           res.contacts_created ? `${res.contacts_created} new contact${res.contacts_created > 1 ? "s" : ""}` : null,
@@ -173,7 +173,7 @@ export function QuickLogModal() {
 
   return (
     <Dialog open={open} onOpenChange={(o) => ui.set({ quickLogOpen: o })}>
-      <DialogContent title="Quick-Log" description="Paste notes and let relate structure them" className="max-w-2xl p-0" hideClose>
+      <DialogContent title="Quick-Log" description="Paste notes and let Cirra structure them" className="max-w-2xl p-0" hideClose>
         {phase === "input" && (
           <div>
             <div className="flex items-center gap-2 border-b px-4 py-3">
@@ -227,7 +227,7 @@ export function QuickLogModal() {
               </Button>
               {isSearch && (
                 <Button variant="ghost" size="sm" className="ml-auto" onClick={() => go(`/ask?q=${encodeURIComponent(text.trim())}`)}>
-                  <Search className="h-3.5 w-3.5" />Ask relate
+                  <Search className="h-3.5 w-3.5" />Ask Cirra
                 </Button>
               )}
               <Button variant="ai" size="sm" className={cn(!isSearch && "ml-auto")} disabled={text.trim().length < 3} onClick={() => extract.mutate()}>
@@ -306,7 +306,7 @@ function Review({ draft, setDraft, createDeal, setCreateDeal, onBack, onCommit, 
       <div className="flex items-center gap-2 border-b px-4 py-3">
         <button onClick={onBack} className="rounded p-1 text-muted-foreground hover:bg-muted" aria-label="Back"><ArrowLeft className="h-4 w-4" /></button>
         <span className="text-sm font-medium">Review before saving</span>
-        <Badge tone="ai" className="ml-1"><Sparkles className="h-3 w-3" />{draft.engine === "heuristic" ? "relate engine" : draft.engine}</Badge>
+        <Badge tone="ai" className="ml-1"><Sparkles className="h-3 w-3" />{draft.engine === "heuristic" ? "Cirra engine" : draft.engine}</Badge>
         <span className="ml-auto hidden text-[12px] text-muted-foreground sm:block">Everything is editable</span>
       </div>
 
@@ -411,7 +411,7 @@ function Review({ draft, setDraft, createDeal, setCreateDeal, onBack, onCommit, 
       <div className="flex items-center gap-2 border-t px-4 py-3">
         <Button variant="ghost" size="sm" onClick={onBack}>Back</Button>
         <Button className="ml-auto" size="sm" onClick={onCommit} loading={committing} disabled={!draft.account_name && !draft.matched_account_id}>
-          <Check className="h-4 w-4" />Save to relate
+          <Check className="h-4 w-4" />Save to Cirra
         </Button>
       </div>
     </div>

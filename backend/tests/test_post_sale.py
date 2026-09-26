@@ -51,14 +51,14 @@ async def test_erp_customer_master_ar_aging_and_credit_hold(client):
     orion = next(r for r in aging["accounts"] if r["account"]["name"] == "Orion Asset Management")
     assert orion["credit_hold"] and orion["buckets"]["90_plus"] >= 66000 and orion["credit_limit"]
     assert (await client.post("/api/v1/integrations/erp/sync")).status_code == 403  # managers read finance; admins run syncs
-    async with login_as("admin@relate.demo") as admin:
+    async with login_as("admin@cirra.demo") as admin:
         run = (await admin.post("/api/v1/integrations/erp/sync")).json()
     assert run["status"] == "succeeded" and run["stats"]["customers_matched"] >= 3
     # quotes for accounts on credit hold route to finance
     oam = await _account(client, "Orion Asset Management")
     pipeline = next(p for p in (await client.get("/api/v1/pipelines")).json() if p["kind"] == "direct")
     deal = (await client.post("/api/v1/deals", json={"title": "OAM expansion", "account_id": oam["id"], "pipeline_id": pipeline["id"]})).json()
-    plat = next(p for p in (await client.get("/api/v1/products")).json() if p["sku"] == "REL-PLAT")
+    plat = next(p for p in (await client.get("/api/v1/products")).json() if p["sku"] == "CIR-PLAT")
     q = (await client.post(f"/api/v1/deals/{deal['id']}/quotes", json={"lines": [{"product_id": plat["id"], "quantity": 10}]})).json()
     q = (await client.post(f"/api/v1/quotes/{q['id']}/submit")).json()
     assert q["status"] == "pending_approval" and any("credit hold" in a["reason"] for a in q["approvals"])
@@ -78,7 +78,7 @@ async def test_file_based_erp_connector(client, tmp_path, monkeypatch):
                                                         "balance": 12000, "status": "open"}]))
     monkeypatch.setattr(settings, "erp_connector", "file")
     monkeypatch.setattr(settings, "erp_exchange_dir", str(tmp_path))
-    async with login_as("admin@relate.demo") as admin:
+    async with login_as("admin@cirra.demo") as admin:
         run = (await admin.post("/api/v1/integrations/erp/sync")).json()
         assert run["status"] == "succeeded" and run["stats"]["invoices_upserted"] == 1
         out = (await admin.post("/api/v1/integrations/erp/sync", params={"direction": "outbound"})).json()

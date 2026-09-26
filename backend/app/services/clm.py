@@ -20,7 +20,7 @@ import secrets
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-from fpdf import FPDF
+from fpdf import FPDF, FontFace
 from jinja2.sandbox import SandboxedEnvironment
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,7 +32,7 @@ from app.models import (
 from app.services import storage
 from app.services.notify import emit, notify
 
-COMPANY = {"name": "SDC Solutions", "product": "relate [R]", "signatory_title": "Authorized Signatory"}
+COMPANY = {"name": "SDC Solutions", "product": "Cirra", "signatory_title": "Authorized Signatory"}
 RENEWAL_LEAD_DAYS = 120
 _FONT_DIRS = ("/usr/share/fonts/truetype/dejavu", "/usr/share/fonts/dejavu")
 
@@ -206,16 +206,66 @@ def _latin(text: str) -> str:
     return text.translate(str.maketrans({"“": '"', "”": '"', "‘": "'", "’": "'", "–": "-", "—": "-", "•": "-", "…": "..."})).encode("latin-1", "replace").decode("latin-1")
 
 
+class _BrandedPDF(FPDF):
+    """A4 document with the Cirra brand header (mark + name + teal rule) and page footer."""
+
+    TEAL, AQUA, NAVY = (31, 111, 120), (166, 227, 225), (27, 34, 64)
+    brand_family = "Helvetica"
+    doc_title = ""
+
+    def _mark(self, x: float, y: float, size: float) -> None:
+        k = size / 64
+        self.set_fill_color(*self.TEAL)
+        self.rect(x, y, size, size, style="F", round_corners=True, corner_radius=12 * k)
+        self.set_draw_color(255, 255, 255)
+        self.set_line_width(7.5 * k)
+        r = 18 * k
+        self.arc(x + 34 * k - r, y + 32 * k - r, 2 * r, 45, 315, style="D")
+        self.set_fill_color(255, 255, 255)
+        self.circle(x + 23 * k, y + 32 * k, 4.3 * k, style="F")
+        self.set_fill_color(*self.AQUA)
+        for dy in (-12.73, 12.73):
+            self.circle(x + 46.73 * k, y + (32 + dy) * k, 5.6 * k, style="F")
+
+    def header(self) -> None:
+        self._mark(18, 10, 8)
+        self.set_xy(28, 10)
+        self.set_text_color(*self.NAVY)
+        self.set_font(self.brand_family, "B", 13)
+        self.cell(40, 8, COMPANY["product"])
+        self.set_font(self.brand_family, size=8)
+        self.set_text_color(107, 113, 157)
+        self.set_xy(110, 10)
+        self.cell(82, 8, f"{COMPANY['name']} · Connect what matters.", align="R")
+        self.set_draw_color(*self.TEAL)
+        self.set_line_width(0.5)
+        self.line(18, 20.5, 192, 20.5)
+        self.set_text_color(0, 0, 0)
+        self.set_y(26)
+
+    def footer(self) -> None:
+        self.set_y(-12)
+        self.set_font(self.brand_family, size=7.5)
+        self.set_text_color(130, 130, 140)
+        self.cell(0, 6, f"{self.doc_title}  ·  Page {self.page_no()}/{{nb}}", align="C")
+        self.set_text_color(0, 0, 0)
+
+
 def render_pdf(document: Document, signers: list[SignatureRequest]) -> bytes:
-    pdf = FPDF(format="A4")
-    pdf.set_margins(18, 18, 18)
+    pdf = _BrandedPDF(format="A4")
+    pdf.alias_nb_pages()
+    pdf.set_margins(18, 26, 18)
     pdf.set_auto_page_break(True, 18)
     family = _font(pdf)
     unicode_ok = family == "DejaVu"
     clean = (lambda s: s) if unicode_ok else _latin
+    pdf.brand_family = family
+    pdf.doc_title = clean(document.title)
     pdf.add_page()
     pdf.set_font(family, size=10)
-    pdf.write_html(clean(to_html(document.body)), font_family=family)
+    heading = lambda color, size: FontFace(color=color, emphasis="BOLD", size_pt=size)  # noqa: E731
+    pdf.write_html(clean(to_html(document.body)), font_family=family, li_prefix_color=_BrandedPDF.TEAL,
+                   tag_styles={"h1": heading(_BrandedPDF.NAVY, 20), "h2": heading(_BrandedPDF.TEAL, 13), "h3": heading(_BrandedPDF.NAVY, 11)})
 
     # Signature certificate
     pdf.add_page()

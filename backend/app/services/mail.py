@@ -56,7 +56,7 @@ def _body_text(msg) -> str:
 async def ingest_message(db: AsyncSession, raw: bytes, mailbox_owner: User | None = None) -> Activity | None:
     """Parse one RFC 822 message into an email activity; None if unrelated to any contact or already stored."""
     msg = email.message_from_bytes(raw, policy=email.policy.default)
-    message_id = (msg.get("Message-ID") or "").strip() or f"<{hashlib.sha256(raw).hexdigest()}@relate.local>"
+    message_id = (msg.get("Message-ID") or "").strip() or f"<{hashlib.sha256(raw).hexdigest()}@cirra.local>"
     if (await db.execute(select(Activity.id).where(Activity.external_id == message_id))).first():
         return None
     sender = [a.lower() for _, a in getaddresses([msg.get("From", "")]) if a]
@@ -143,7 +143,7 @@ async def send_email(db: AsyncSession, user: User, contact: Contact, subject: st
     msg["From"] = conn.email_address if conn else user.email
     msg["To"] = contact.email
     msg["Subject"] = subject
-    msg["Message-ID"] = make_msgid(domain=(msg["From"].split("@")[-1] if "@" in msg["From"] else "relate.local"))
+    msg["Message-ID"] = make_msgid(domain=(msg["From"].split("@")[-1] if "@" in msg["From"] else "cirra.local"))
     if in_reply_to:
         msg["In-Reply-To"] = msg["References"] = in_reply_to
     msg.set_content(body)

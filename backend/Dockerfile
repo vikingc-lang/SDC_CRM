@@ -10,8 +10,8 @@ COPY requirements.txt .
 RUN pip install -r requirements.txt
 
 COPY . .
-RUN chmod +x docker-entrypoint.sh && useradd --create-home --uid 1000 relate && mkdir -p /data/storage /data/erp-exchange && chown -R relate /app /data
-USER relate
+RUN chmod +x docker-entrypoint.sh && useradd --create-home --uid 1000 cirra && mkdir -p /data/storage /data/erp-exchange && chown -R cirra /app /data
+USER cirra
 
 EXPOSE 8000
 ENTRYPOINT ["./docker-entrypoint.sh"]

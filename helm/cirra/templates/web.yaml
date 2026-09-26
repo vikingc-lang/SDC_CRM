@@ -1,17 +1,17 @@
-{{- $fn := include "relate.fullname" . }}
+{{- $fn := include "cirra.fullname" . }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ $fn }}-web
-  labels: {{- include "relate.labels" . | nindent 4 }}
+  labels: {{- include "cirra.labels" . | nindent 4 }}
     app.kubernetes.io/component: web
 spec:
   replicas: {{ .Values.web.replicas }}
   selector:
-    matchLabels: {{- include "relate.selector" (dict "root" . "component" "web") | nindent 6 }}
+    matchLabels: {{- include "cirra.selector" (dict "root" . "component" "web") | nindent 6 }}
   template:
     metadata:
-      labels: {{- include "relate.selector" (dict "root" . "component" "web") | nindent 8 }}
+      labels: {{- include "cirra.selector" (dict "root" . "component" "web") | nindent 8 }}
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets: {{- toYaml . | nindent 8 }}
@@ -19,7 +19,7 @@ spec:
       securityContext: { runAsNonRoot: true, runAsUser: 1001, runAsGroup: 1001 }
       containers:
         - name: web
-          image: {{ include "relate.image" (dict "root" . "name" .Values.image.web) }}
+          image: {{ include "cirra.image" (dict "root" . "name" .Values.image.web) }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports: [{ name: http, containerPort: 3000 }]
           readinessProbe: { httpGet: { path: /login, port: http }, periodSeconds: 10 }
@@ -29,7 +29,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: {{ $fn }}-web
-  labels: {{- include "relate.labels" . | nindent 4 }}
+  labels: {{- include "cirra.labels" . | nindent 4 }}
 spec:
-  selector: {{- include "relate.selector" (dict "root" . "component" "web") | nindent 4 }}
+  selector: {{- include "cirra.selector" (dict "root" . "component" "web") | nindent 4 }}
   ports: [{ name: http, port: 3000, targetPort: http }]

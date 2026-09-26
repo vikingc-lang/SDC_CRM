@@ -36,7 +36,7 @@ export function CopilotPanel() {
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-black/20 animate-fade-in lg:bg-transparent" />
         <DialogPrimitive.Content className="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col border-l bg-surface shadow-pop animate-slide-up focus:outline-none">
-          <DialogPrimitive.Title className="sr-only">relate Copilot</DialogPrimitive.Title>
+          <DialogPrimitive.Title className="sr-only">Cirra Copilot</DialogPrimitive.Title>
           <DialogPrimitive.Description className="sr-only">Ask questions about your pipeline</DialogPrimitive.Description>
           <div className="flex h-14 items-center gap-2 border-b px-4">
             <span className="ai-gradient flex h-7 w-7 items-center justify-center rounded-lg"><Sparkles className="h-3.5 w-3.5 text-white" /></span>

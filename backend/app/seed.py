@@ -1,4 +1,4 @@
-"""Seed relate [R] with a demo workspace that exercises every capability pillar.
+"""Seed Cirra with a demo workspace that exercises every capability pillar.
 
     python -m app.seed            # full demo dataset (idempotent)
     python -m app.seed --minimal  # specification minimum: 3 accounts, 6 contacts, 3 active deals
@@ -31,16 +31,16 @@ from app.services.pipeline_templates import PIPELINES
 from app.services.search import account_document
 from app.services.success import provision_onboarding
 
-DEMO_PASSWORD = "relate123"
+DEMO_PASSWORD = "cirra123"
 
 # (email, name, role, manager email)
 USERS = [
-    ("admin@relate.demo", "Avery Admin", "super_admin", None),
-    ("marcus@relate.demo", "Marcus Vance", "sales_manager", "admin@relate.demo"),
-    ("priya@relate.demo", "Priya Raman", "account_executive", "marcus@relate.demo"),
-    ("diego@relate.demo", "Diego Alvarez", "account_executive", "marcus@relate.demo"),
-    ("sam@relate.demo", "Sam Okoye", "sdr", "marcus@relate.demo"),
-    ("viewer@relate.demo", "Robin Viewer", "auditor", None),
+    ("admin@cirra.demo", "Avery Admin", "super_admin", None),
+    ("marcus@cirra.demo", "Marcus Vance", "sales_manager", "admin@cirra.demo"),
+    ("priya@cirra.demo", "Priya Raman", "account_executive", "marcus@cirra.demo"),
+    ("diego@cirra.demo", "Diego Alvarez", "account_executive", "marcus@cirra.demo"),
+    ("sam@cirra.demo", "Sam Okoye", "sdr", "marcus@cirra.demo"),
+    ("viewer@cirra.demo", "Robin Viewer", "auditor", None),
 ]
 PARTNER_USER = ("partner@northstar-partners.com", "Nia Fontaine")
 
@@ -51,7 +51,7 @@ PARTNER_USER = ("partner@northstar-partners.com", "Nia Fontaine")
 # tasks: (title, due_in_days)
 ACCOUNTS = [
     (
-        "Apex Industrial Supply", "apexindustrial.com", "Industrial Distribution", "Mid-Market", "marcus@relate.demo",
+        "Apex Industrial Supply", "apexindustrial.com", "Industrial Distribution", "Mid-Market", "marcus@cirra.demo",
         [
             ("Elena", "Rostova", "elena.rostova@apexindustrial.com", "VP Procurement", "Decision Maker"),
             ("James", "Cole", "james.cole@apexindustrial.com", "IT Director", "Blocker"),
@@ -66,7 +66,7 @@ ACCOUNTS = [
         [("Answer James Cole's follow-up questions on data residency", 2), ("Send final pricing proposal to Elena", 5)],
     ),
     (
-        "Northwind Logistics", "northwind.io", "Logistics", "Enterprise", "priya@relate.demo",
+        "Northwind Logistics", "northwind.io", "Logistics", "Enterprise", "priya@cirra.demo",
         [
             ("Samantha", "Okafor", "s.okafor@northwind.io", "Chief Operating Officer", "Economic Buyer"),
             ("Liam", "Chen", "liam.chen@northwind.io", "Fleet Systems Manager", "Evaluator"),
@@ -80,7 +80,7 @@ ACCOUNTS = [
         [("Share latency benchmark results with Liam", -3)],
     ),
     (
-        "Helios Energy", "heliosenergy.com", "Energy & Utilities", "Enterprise", "diego@relate.demo",
+        "Helios Energy", "heliosenergy.com", "Energy & Utilities", "Enterprise", "diego@cirra.demo",
         [
             ("Marta", "Keller", "marta.keller@heliosenergy.com", "Head of Digital Transformation", "Champion"),
             ("Raj", "Patel", "raj.patel@heliosenergy.com", "CFO", "Economic Buyer"),
@@ -93,7 +93,7 @@ ACCOUNTS = [
         [("Prepare ROI model for Raj Patel", 4), ("Book executive alignment meeting", 7)],
     ),
     (
-        "Bluepeak Health", "bluepeakhealth.org", "Healthcare", "Enterprise", "marcus@relate.demo",
+        "Bluepeak Health", "bluepeakhealth.org", "Healthcare", "Enterprise", "marcus@cirra.demo",
         [
             ("Nora", "Lindqvist", "nora.lindqvist@bluepeakhealth.org", "CIO", "Decision Maker"),
             ("Tom", "Becker", "tom.becker@bluepeakhealth.org", "Procurement Lead", "Evaluator"),
@@ -108,7 +108,7 @@ ACCOUNTS = [
         [("Draft analytics expansion business case", 10)],
     ),
     (
-        "Cobalt Retail Group", "cobaltretail.com", "Retail", "Mid-Market", "priya@relate.demo",
+        "Cobalt Retail Group", "cobaltretail.com", "Retail", "Mid-Market", "priya@cirra.demo",
         [
             ("Grace", "Huang", "grace.huang@cobaltretail.com", "Director of eCommerce", "Evaluator"),
         ],
@@ -119,7 +119,7 @@ ACCOUNTS = [
         [("Follow up with Grace on case study", -10)],
     ),
     (
-        "Summit Foods Co.", "summitfoods.com", "Food & Beverage", "Mid-Market", "diego@relate.demo",
+        "Summit Foods Co.", "summitfoods.com", "Food & Beverage", "Mid-Market", "diego@cirra.demo",
         [
             ("Oliver", "Grant", "oliver.grant@summitfoods.com", "VP Finance", "Economic Buyer"),
             ("Chloe", "Martin", "chloe.martin@summitfoods.com", "Trade Marketing Manager", "Champion"),
@@ -132,7 +132,7 @@ ACCOUNTS = [
         [("Send redlined MSA back to legal", 1)],
     ),
     (
-        "Vertex Manufacturing", "vertexmfg.com", "Manufacturing", "SMB", "priya@relate.demo",
+        "Vertex Manufacturing", "vertexmfg.com", "Manufacturing", "SMB", "priya@cirra.demo",
         [
             ("Ben", "Russo", "ben.russo@vertexmfg.com", "Operations Manager", "Evaluator"),
         ],
@@ -144,14 +144,14 @@ ACCOUNTS = [
         [],
     ),
     (
-        "Orion Financial", "orionfinancial.com", "Financial Services", "Enterprise", "marcus@relate.demo",
+        "Orion Financial", "orionfinancial.com", "Financial Services", "Enterprise", "marcus@cirra.demo",
         [
             ("Hannah", "Weiss", "hannah.weiss@orionfinancial.com", "SVP Revenue Operations", "Champion"),
             ("Kevin", "Doyle", "kevin.doyle@orionfinancial.com", "CISO", "Blocker"),
         ],
         [("Revenue Intelligence Platform", 410000, "Solution Demo", 11, 75, None)],
         [
-            (5, "meeting", "neutral", "Technical deep dive. Kevin Doyle pushed back on cloud hosting; relate's private-cloud Docker deployment addressed most concerns."),
+            (5, "meeting", "neutral", "Technical deep dive. Kevin Doyle pushed back on cloud hosting; Cirra's private-cloud Docker deployment addressed most concerns."),
             (11, "meeting", "positive", "Executive demo with Hannah's team. Strong excitement about ambient note capture and pipeline risk scoring."),
         ],
         [("Send private-cloud architecture doc to Kevin Doyle", 3)],
@@ -193,12 +193,12 @@ CONTACT_PROFILE = {
 }
 
 PRODUCTS = [
-    ("REL-PLAT", "relate [R] Platform", "Private-cloud CRM subscription", "relate [R]", "recurring", "user / month",
+    ("CIR-PLAT", "Cirra Platform", "Private-cloud CRM subscription", "Cirra", "recurring", "user / month",
      {"USD": [(1, 65), (100, 58), (500, 49)], "EUR": [(1, 60), (100, 53), (500, 45)], "GBP": [(1, 52), (100, 46), (500, 39)]}),
-    ("REL-AI", "Ambient AI add-on", "Quick-Log, voice transcription, copilot", "relate [R]", "recurring", "user / month",
+    ("CIR-AI", "Ambient AI add-on", "Quick-Log, voice transcription, copilot", "Cirra", "recurring", "user / month",
      {"USD": [(1, 20), (100, 17), (500, 14)], "EUR": [(1, 18), (100, 16), (500, 13)]}),
-    ("REL-SUP", "Premium Support", "24x7 support with named TAM", "relate [R]", "recurring", "org / month", {"USD": [(1, 1500)], "EUR": [(1, 1400)]}),
-    ("REL-IMPL", "Implementation Services", "Deployment, migration and enablement", "Services", "one_time", "project", {"USD": [(1, 15000)], "EUR": [(1, 14000)]}),
+    ("CIR-SUP", "Premium Support", "24x7 support with named TAM", "Cirra", "recurring", "org / month", {"USD": [(1, 1500)], "EUR": [(1, 1400)]}),
+    ("CIR-IMPL", "Implementation Services", "Deployment, migration and enablement", "Services", "one_time", "project", {"USD": [(1, 15000)], "EUR": [(1, 14000)]}),
     ("PROMO-Q", "promo [Q] module", "SDC Solutions module", "SDC Solutions", "recurring", "user / month", {"USD": [(1, 45), (100, 40)]}),
     ("YIELD-S", "Yield [S] module", "SDC Solutions module", "SDC Solutions", "recurring", "user / month", {"USD": [(1, 55), (100, 49)]}),
     ("DEDUCT", "deduct module", "SDC Solutions module", "SDC Solutions", "recurring", "user / month", {"USD": [(1, 40), (100, 35)]}),
@@ -233,6 +233,7 @@ def _pdf(title: str, lines: list[str]) -> bytes:
 
 
 async def _reset(db) -> None:
+    # GUC name is fixed by the append-only trigger in migration 002 (internal identifier, predates the Cirra name)
     await db.execute(text("SET LOCAL relate.allow_ledger_reset = 'on'"))
     tables = (await db.execute(text("SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'alembic_version'"))).scalars().all()
     await db.execute(text("TRUNCATE " + ", ".join(f'"{t}"' for t in tables) + " RESTART IDENTITY CASCADE"))
@@ -374,12 +375,12 @@ async def seed(minimal: bool = False, reset: bool = False) -> None:
             await insights.scan_pipeline(db)
             await sla.escalate_overdue(db)
         total = (await db.execute(select(func.count()).select_from(Account))).scalar_one()
-        print(f"Seeded {total} accounts. Log in with marcus@relate.demo / {DEMO_PASSWORD} "
+        print(f"Seeded {total} accounts. Log in with marcus@cirra.demo / {DEMO_PASSWORD} "
               f"(partner portal: {PARTNER_USER[0]} / {DEMO_PASSWORD})")
 
 
 async def _enterprise(db, users, accounts, deals, contacts, stages, pipelines, products, now, today) -> None:
-    marcus, priya, diego, sam, admin = (users[e] for e in ("marcus@relate.demo", "priya@relate.demo", "diego@relate.demo", "sam@relate.demo", "admin@relate.demo"))
+    marcus, priya, diego, sam, admin = (users[e] for e in ("marcus@cirra.demo", "priya@cirra.demo", "diego@cirra.demo", "sam@cirra.demo", "admin@cirra.demo"))
 
     # -- hierarchies (pillar 1) -------------------------------------------------------------------
     helios_group = Account(name="Helios Group", domain="heliosgroup.com", industry="Energy & Utilities", tier="Enterprise", owner_id=diego.id,
@@ -444,13 +445,13 @@ async def _enterprise(db, users, accounts, deals, contacts, stages, pipelines, p
                        term_months=12, payment_terms="NET30", created_by=marcus.id)
     db.add(apex_quote)
     await db.flush()
-    await cpq.rebuild(db, apex_quote, [{"product_id": products["REL-PLAT"].id, "quantity": 100, "discount_pct": 8},
-                                       {"product_id": products["REL-AI"].id, "quantity": 100, "discount_pct": 0},
-                                       {"product_id": products["REL-IMPL"].id, "quantity": 1, "discount_pct": 0}])
+    await cpq.rebuild(db, apex_quote, [{"product_id": products["CIR-PLAT"].id, "quantity": 100, "discount_pct": 8},
+                                       {"product_id": products["CIR-AI"].id, "quantity": 100, "discount_pct": 0},
+                                       {"product_id": products["CIR-IMPL"].id, "quantity": 1, "discount_pct": 0}])
     await cpq.submit(db, apex_quote)
     order_form = await clm.generate(db, "order_form", accounts["Apex Industrial Supply"], apex_deal, apex_quote, marcus.id)
     await clm.send_for_signature(db, order_form, [{"name": "Elena Rostova", "email": "elena.rostova@apexindustrial.com", "party": "customer"},
-                                                  {"name": "Marcus Vance", "email": "marcus@relate.demo", "party": "company"}])
+                                                  {"name": "Marcus Vance", "email": "marcus@cirra.demo", "party": "company"}])
     # -- CPQ: quote needing manager + finance approval (Summit Foods) ------------------------------------
     summit_deal = deals["Trade Deduction Automation"]
     summit_quote = Quote(deal_id=summit_deal.id, quote_number=await cpq.next_quote_number(db), name="Deduction automation rollout", currency="USD",
@@ -458,8 +459,8 @@ async def _enterprise(db, users, accounts, deals, contacts, stages, pipelines, p
     db.add(summit_quote)
     await db.flush()
     await cpq.rebuild(db, summit_quote, [{"product_id": products["DEDUCT"].id, "quantity": 120, "discount_pct": 18},
-                                         {"product_id": products["REL-PLAT"].id, "quantity": 40, "discount_pct": 12},
-                                         {"product_id": products["REL-IMPL"].id, "quantity": 1, "discount_pct": 0}])
+                                         {"product_id": products["CIR-PLAT"].id, "quantity": 40, "discount_pct": 12},
+                                         {"product_id": products["CIR-IMPL"].id, "quantity": 1, "discount_pct": 0}])
     await cpq.submit(db, summit_quote)
 
     # -- Bluepeak: won deal signed through built-in e-signature -> contract -> onboarding ------------------
@@ -468,13 +469,13 @@ async def _enterprise(db, users, accounts, deals, contacts, stages, pipelines, p
                        term_months=12, payment_terms="NET30", created_by=marcus.id)
     db.add(blue_quote)
     await db.flush()
-    await cpq.rebuild(db, blue_quote, [{"product_id": products["REL-PLAT"].id, "quantity": 400, "discount_pct": 5},
-                                       {"product_id": products["REL-SUP"].id, "quantity": 1, "discount_pct": 0},
-                                       {"product_id": products["REL-IMPL"].id, "quantity": 1, "discount_pct": 0}])
+    await cpq.rebuild(db, blue_quote, [{"product_id": products["CIR-PLAT"].id, "quantity": 400, "discount_pct": 5},
+                                       {"product_id": products["CIR-SUP"].id, "quantity": 1, "discount_pct": 0},
+                                       {"product_id": products["CIR-IMPL"].id, "quantity": 1, "discount_pct": 0}])
     blue_quote.status, blue_quote.approved_at = "approved", now - timedelta(days=15)
     blue_doc = await clm.generate(db, "order_form", blue, blue_deal, blue_quote, marcus.id)
     await clm.send_for_signature(db, blue_doc, [{"name": "Nora Lindqvist", "email": "nora.lindqvist@bluepeakhealth.org", "party": "customer"},
-                                                {"name": "Marcus Vance", "email": "marcus@relate.demo", "party": "company"}])
+                                                {"name": "Marcus Vance", "email": "marcus@cirra.demo", "party": "company"}])
     for signer in sorted(blue_doc.signers, key=lambda s: s.sign_order):
         await clm.sign(db, signer, signer.signer_name, None, "203.0.113.24" if signer.signer_party == "customer" else "10.0.4.12", "Mozilla/5.0 (seed)")
     blue_contract = (await db.execute(select(Contract).where(Contract.quote_id == blue_quote.id))).scalars().first()
@@ -495,12 +496,12 @@ async def _enterprise(db, users, accounts, deals, contacts, stages, pipelines, p
         t.due_date, t.completed = ms.due_date, ms.status == "done"
 
     # -- contracts for renewals (pillar 7) ------------------------------------------------------------------
-    ren_contract = Contract(account_id=renewables.id, contract_number="CT-2025-0007", name="Helios Renewables: relate [R] Platform", currency="EUR",
+    ren_contract = Contract(account_id=renewables.id, contract_number="CT-2025-0007", name="Helios Renewables: Cirra Platform", currency="EUR",
                             start_date=today - timedelta(days=290), end_date=today + timedelta(days=75), acv=138000, tcv=138000, payment_terms="NET30",
-                            terms={"term_months": 12, "lines": [{"sku": "REL-PLAT", "quantity": 220, "net_unit_price": 52.27, "billing_type": "recurring"}]})
+                            terms={"term_months": 12, "lines": [{"sku": "CIR-PLAT", "quantity": 220, "net_unit_price": 52.27, "billing_type": "recurring"}]})
     oam_contract = Contract(account_id=orion_am.id, contract_number="CT-2025-0003", name="Orion Asset Management: Platform + Yield [S]", currency="USD",
                             start_date=today - timedelta(days=160), end_date=today + timedelta(days=205), acv=264000, tcv=528000, payment_terms="NET45",
-                            terms={"term_months": 24, "lines": [{"sku": "REL-PLAT", "quantity": 250, "net_unit_price": 58}, {"sku": "YIELD-S", "quantity": 120, "net_unit_price": 49}]})
+                            terms={"term_months": 24, "lines": [{"sku": "CIR-PLAT", "quantity": 250, "net_unit_price": 58}, {"sku": "YIELD-S", "quantity": 120, "net_unit_price": 49}]})
     db.add_all([ren_contract, oam_contract])
     await db.flush()
     await clm.run_renewals(db, today)  # opens the Helios Renewables renewal (expires in 75 days)
@@ -536,17 +537,17 @@ async def _enterprise(db, users, accounts, deals, contacts, stages, pipelines, p
                                                      "product_interest": "Platform + Ambient AI", "notes": "Met at a logistics summit; evaluating CRM replacement in Q1."})
     await prm.decide(db, approved, marcus, True, "Approved: no conflicts.")
     await prm.submit(db, northstar, nia, {"company_name": "Lumina Retail", "domain": "lumina-retail.com", "contact_name": "Ava Chen",
-                                          "estimated_amount": 90000, "territory": "NA-Central", "product_interest": "promo [Q] + relate [R]"})
+                                          "estimated_amount": 90000, "territory": "NA-Central", "product_interest": "promo [Q] + Cirra"})
     await prm.submit(db, northstar, nia, {"company_name": "Cobalt Retail Group", "domain": "cobaltretail.com", "estimated_amount": 64000,
                                           "territory": "NA-East", "product_interest": "Promotions"})
     db.add(DealPartner(deal_id=deals["Revenue Intelligence Platform"].id, partner_id=brightpath.id, role="co_sell", split_pct=30))
     db.add(DealPartner(deal_id=blue_deal.id, partner_id=keystone.id, role="referral", split_pct=100))
     for title, category, tier, domains, lines in (
-        ("relate [R] partner overview", "deck", "registered", [], ["Positioning, ideal customer profile and the private-cloud deployment model.",
+        ("Cirra partner overview", "deck", "registered", [], ["Positioning, ideal customer profile and the private-cloud deployment model.",
                                                                     "Use with new prospects in your territory."]),
-        ("Battlecard: relate [R] vs incumbent SaaS CRMs", "battlecard", "silver", [], ["Private-cloud data residency, ambient AI capture and stage-gate governance.",
+        ("Battlecard: Cirra vs incumbent SaaS CRMs", "battlecard", "silver", [], ["Private-cloud data residency, ambient AI capture and stage-gate governance.",
                                                                                       "Handle objections about migration effort with the import engine."]),
-        ("Channel price list (Gold and above)", "price_list", "gold", [], ["relate [R] Platform: tiered per-user pricing; distributor margin per agreement."]),
+        ("Channel price list (Gold and above)", "price_list", "gold", [], ["Cirra Platform: tiered per-user pricing; distributor margin per agreement."]),
         ("EMEA case study: utilities", "case_study", "registered", ["brightpath.agency"], ["Restricted to BrightPath Agency."]),
     ):
         att = storage.save(_pdf(title, lines), f"{title}.pdf", "application/pdf", uploaded_by=admin.id)
@@ -557,7 +558,7 @@ async def _enterprise(db, users, accounts, deals, contacts, stages, pipelines, p
     # -- a pending NDA for Northwind (e-signature demo) ------------------------------------------------------
     nda = await clm.generate(db, "nda", accounts["Northwind Logistics"], nw_deal, None, priya.id)
     await clm.send_for_signature(db, nda, [{"name": "Samantha Okafor", "email": "s.okafor@northwind.io", "party": "customer"},
-                                           {"name": "Priya Raman", "email": "priya@relate.demo", "party": "company"}])
+                                           {"name": "Priya Raman", "email": "priya@cirra.demo", "party": "company"}])
 
     # -- SDR-sourced inbound lead in the mid-market pipeline ------------------------------------------------------
     inbound = pipelines["inbound"]

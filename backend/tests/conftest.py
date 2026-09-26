@@ -2,7 +2,7 @@
 import os
 
 os.environ["DATABASE_URL"] = os.environ.get(
-    "TEST_DATABASE_URL", "postgresql+asyncpg://relate_user:relate_secure_password@localhost:5432/relate_test"
+    "TEST_DATABASE_URL", "postgresql+asyncpg://cirra_user:cirra_secure_password@localhost:5432/cirra_test"
 )
 os.environ["LLM_PROVIDER"] = "heuristic"
 os.environ["EMBEDDING_PROVIDER"] = "hash"
@@ -39,6 +39,6 @@ async def client(seeded):
     from app.main import app
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-        resp = await c.post("/api/v1/auth/login", json={"username": "marcus@relate.demo", "password": "relate123"})
+        resp = await c.post("/api/v1/auth/login", json={"username": "marcus@cirra.demo", "password": "cirra123"})
         c.headers["Authorization"] = f"Bearer {resp.json()['access_token']}"
         yield c

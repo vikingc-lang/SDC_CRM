@@ -2,7 +2,7 @@ import pytest
 
 
 async def test_login_rejects_bad_password(client):
-    resp = await client.post("/api/v1/auth/login", json={"username": "marcus@relate.demo", "password": "nope"})
+    resp = await client.post("/api/v1/auth/login", json={"username": "marcus@cirra.demo", "password": "nope"})
     assert resp.status_code == 401
 
 
@@ -99,7 +99,7 @@ async def test_dashboard_and_briefing(client):
 async def test_auditor_reads_and_exports_but_cannot_write(client):
     from tests.helpers import login_as
 
-    async with login_as("viewer@relate.demo") as c:
+    async with login_as("viewer@cirra.demo") as c:
         assert (await c.get("/api/v1/accounts")).status_code == 200
         assert (await c.post("/api/v1/tasks", json={"title": "x"})).status_code == 403
         assert (await c.get("/api/v1/admin/export/accounts")).status_code == 200

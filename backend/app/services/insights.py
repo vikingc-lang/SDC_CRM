@@ -18,7 +18,7 @@ from app.services.ai_extractor import detect_signals
 from app.services.serializers import activity_out, days_between
 
 COPILOT_SYSTEM = (
-    "You are relate [R] Copilot, an assistant embedded in a private B2B CRM. Answer using only the CRM context "
+    "You are Cirra Copilot, an assistant embedded in a private B2B CRM. Answer using only the CRM context "
     "provided. Be concise and specific: name accounts, people, amounts and dates. If the context does not contain "
     "the answer, say so plainly. Use short paragraphs or bullets; no preamble."
 )
@@ -363,7 +363,7 @@ async def draft_email(db: AsyncSession, deal: Deal, purpose: str = "follow-up") 
     ).scalars().unique().all()
     open_tasks = (await db.execute(select(Task).where(Task.deal_id == deal.id, Task.completed.is_(False)).limit(4))).scalars().unique().all()
     first = contact.first_name if contact else "there"
-    sender = deal.owner.full_name if deal.owner else "The relate team"
+    sender = deal.owner.full_name if deal.owner else "The Cirra team"
 
     if llm.provider_name() != "heuristic":
         ctx = "\n".join(f"- {a.occurred_at:%Y-%m-%d} {a.activity_type}: {a.summary}" for a in last)

@@ -75,7 +75,7 @@ export function DocumentsCard({ dealId, documents, canCreate, hasApprovedQuote }
   });
   return (
     <Card>
-      <CardHeader title="Documents & e-signature" icon={<FilePlus2 className="h-4 w-4 text-muted-foreground" />} description="Generated from CRM fields, signed in relate" />
+      <CardHeader title="Documents & e-signature" icon={<FilePlus2 className="h-4 w-4 text-muted-foreground" />} description="Generated from CRM fields, signed in Cirra" />
       <CardBody className="space-y-3">
         {canCreate && (
           <div className="flex flex-wrap gap-2">

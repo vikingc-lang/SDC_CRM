@@ -1,10 +1,10 @@
-# relate [R] Helm values. Every component runs inside the cluster; with the default
+# Cirra Helm values. Every component runs inside the cluster; with the default
 # NetworkPolicy the workloads have no egress beyond cluster DNS and each other.
 
 image:
   registry: ""                 # e.g. registry.internal/sdc
-  api: relate-api
-  web: relate-web
+  api: cirra-api
+  web: cirra-web
   tag: "0.2.0"
   pullPolicy: IfNotPresent
 imagePullSecrets: []
@@ -58,8 +58,8 @@ postgresql:
 externalDatabase:
   host: ""
   port: 5432
-  database: relate_crm
-  user: relate_user
+  database: cirra_crm
+  user: cirra_user
 
 redis:
   enabled: true
@@ -81,7 +81,7 @@ ingress:
   enabled: true
   className: nginx
   host: crm.example.com
-  tls: []                       # - { secretName: relate-tls, hosts: [crm.example.com] }
+  tls: []                       # - { secretName: cirra-tls, hosts: [crm.example.com] }
   annotations:
     nginx.ingress.kubernetes.io/proxy-body-size: 30m
 

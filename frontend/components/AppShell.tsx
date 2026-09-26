@@ -9,6 +9,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
+import { CirraLogo, CirraMark } from "@/components/Brand";
 import { CopilotPanel } from "@/components/CopilotPanel";
 import { QuickLogModal } from "@/components/QuickLogModal";
 import { Button } from "@/components/ui/button";
@@ -27,7 +28,7 @@ const NAV: { group: string | null; items: NavItem[] }[] = [
     { href: "/accounts", label: "Accounts", icon: Building2, resource: "accounts" },
     { href: "/contacts", label: "Contacts", icon: Users, resource: "contacts" },
     { href: "/tasks", label: "Tasks", icon: CheckSquare, resource: "tasks" },
-    { href: "/ask", label: "Ask relate", icon: Sparkles, resource: "activities" },
+    { href: "/ask", label: "Ask Cirra", icon: Sparkles, resource: "activities" },
   ] },
   { group: "Revenue", items: [
     { href: "/quotes", label: "Quotes", icon: FileSignature, resource: "quotes" },
@@ -47,22 +48,15 @@ const NAV: { group: string | null; items: NavItem[] }[] = [
 
 /** The SDC Solutions product family (Functional Solution Specification section 1). */
 const SDC_SUITE = [
-  { name: "relate", mark: "R", desc: "AI-first CRM", active: true },
+  { name: "Cirra", mark: "", desc: "AI CRM · Connect what matters.", active: true },
   { name: "promo", mark: "Q", desc: "SDC Solutions" },
   { name: "Yield", mark: "S", desc: "SDC Solutions" },
   { name: "deduct", mark: "✔", desc: "SDC Solutions" },
   { name: "nexora", mark: "§", desc: "SDC Solutions" },
 ];
 
-export function Logo({ className }: { className?: string }) {
-  return (
-    <span className={cn("flex items-center gap-2", className)}>
-      <span className="ai-gradient flex h-7 w-7 items-center justify-center rounded-lg text-[13px] font-bold text-white shadow-sm">R</span>
-      <span className="text-[15px] font-semibold tracking-tight">
-        relate <span className="font-medium text-muted-foreground">[R]</span>
-      </span>
-    </span>
-  );
+export function Logo({ className, height = 26 }: { className?: string; height?: number }) {
+  return <CirraLogo height={height} className={className} />;
 }
 
 function ThemeToggle() {
@@ -139,9 +133,9 @@ function Sidebar({ user, onNavigate }: { user?: Me; onNavigate?: () => void }) {
             <div className="px-2 pb-1 pt-1.5 text-[11px] font-medium uppercase tracking-wide text-subtle">SDC Solutions portfolio</div>
             {SDC_SUITE.map((p) => (
               <DropdownItem key={p.name} disabled={!p.active} className={cn(!p.active && "opacity-60")}>
-                <span className={cn("flex h-6 w-6 items-center justify-center rounded-md text-xs font-bold", p.active ? "ai-gradient text-white" : "bg-muted text-muted-foreground")}>{p.mark}</span>
+                {p.active ? <CirraMark size={24} /> : <span className="flex h-6 w-6 items-center justify-center rounded-md bg-muted text-xs font-bold text-muted-foreground">{p.mark}</span>}
                 <span className="flex-1">
-                  <span className="block font-medium">{p.name} [{p.mark}]</span>
+                  <span className="block font-medium">{p.mark ? `${p.name} [${p.mark}]` : p.name}</span>
                   <span className="block text-[11.5px] text-muted-foreground">{p.desc}</span>
                 </span>
                 {p.active && <span className="text-[11px] text-primary">Current</span>}

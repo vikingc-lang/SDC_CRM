@@ -22,7 +22,7 @@ const PROVIDER_LABEL: Record<string, string> = {
   ollama: "Ollama (local, on-prem)",
   aws_bedrock: "Claude on AWS Bedrock (your VPC)",
   anthropic: "Claude API",
-  heuristic: "relate deterministic engine (offline)",
+  heuristic: "Cirra deterministic engine (offline)",
 };
 const ASR_LABEL: Record<string, string> = { disabled: "Disabled (type or paste notes)", whisper_asr: "Local Whisper ASR service", faster_whisper: "faster-whisper in the API container" };
 

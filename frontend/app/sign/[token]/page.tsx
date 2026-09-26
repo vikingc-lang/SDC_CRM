@@ -33,7 +33,7 @@ function SignaturePad({ onChange }: { onChange: (dataUrl: string | null) => void
     ctx.scale(ratio, ratio);
     ctx.lineWidth = 2;
     ctx.lineCap = "round";
-    ctx.strokeStyle = "#1e1b4b";
+    ctx.strokeStyle = "#1B2240";
   }, []);
   const pos = (e: React.PointerEvent) => {
     const r = ref.current!.getBoundingClientRect();

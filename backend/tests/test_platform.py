@@ -12,12 +12,12 @@ async def _account(client, name):
 
 async def test_row_level_ownership_isolation(client):
     apex = await _account(client, "Apex Industrial Supply")  # owned by Marcus
-    async with login_as("priya@relate.demo") as ae:
+    async with login_as("priya@cirra.demo") as ae:
         names = {a["name"] for a in (await ae.get("/api/v1/accounts", params={"limit": 200})).json()}
         assert "Northwind Logistics" in names and "Apex Industrial Supply" not in names
         assert (await ae.get(f"/api/v1/accounts/{apex['id']}/360")).status_code == 404  # not 403: existence isn't leaked
         assert (await ae.delete(f"/api/v1/accounts/{apex['id']}")).status_code == 403  # AEs cannot delete accounts
-    async with login_as("sam@relate.demo") as sdr:
+    async with login_as("sam@cirra.demo") as sdr:
         deals = (await sdr.get("/api/v1/deals")).json()
         assert {d["title"] for d in deals} == {"Quarry Labs: 25 seats"}  # only the SDR's own records
         assert (await sdr.patch(f"/api/v1/deals/{deals[0]['id']}", json={"title": "x"})).status_code == 403  # SDR: create/read only
@@ -33,10 +33,10 @@ async def test_partner_users_are_confined_to_portal(client):
 async def test_permission_matrix_is_editable_and_enforced(client):
     matrix = (await client.get("/api/v1/admin/permissions")).json()
     assert set(r["key"] for r in matrix["roles"]) >= {"super_admin", "sales_manager", "account_executive", "sdr", "auditor"}
-    async with login_as("admin@relate.demo") as admin:
+    async with login_as("admin@cirra.demo") as admin:
         row = {"role": "sdr", "resource": "reports", "can_read": False, "scope": "own"}
         assert (await admin.put("/api/v1/admin/permissions", json=[row])).status_code == 200
-        async with login_as("sam@relate.demo") as sdr:
+        async with login_as("sam@cirra.demo") as sdr:
             assert (await sdr.get("/api/v1/reports/win-loss")).status_code == 403
         await admin.put("/api/v1/admin/permissions", json=[{**row, "can_read": True}])
         # lock-out protection
@@ -88,7 +88,7 @@ async def test_consent_blocks_outreach_and_erasure_crypto_shreds_pii(client):
 
 
 async def test_custom_fields_are_typed(client):
-    async with login_as("admin@relate.demo") as admin:
+    async with login_as("admin@cirra.demo") as admin:
         r = await admin.post("/api/v1/admin/custom-fields", json={"entity": "account", "key": "fleet_size", "label": "Fleet size", "field_type": "number"})
         assert r.status_code == 201
     acc = await _account(client, "Northwind Logistics")
@@ -115,7 +115,7 @@ async def test_duplicate_detection_and_merge_rules(client):
     # the duplicate Elena (no email) now sits next to the real one -> auto-mergeable contact pair
     contact_pair = next(c for c in (await client.get("/api/v1/admin/dedup")).json()["contacts"] if c["a"]["name"] == c["b"]["name"] == "Elena Rostova")
     assert contact_pair["auto_mergeable"]
-    async with login_as("admin@relate.demo") as admin:
+    async with login_as("admin@cirra.demo") as admin:
         assert (await admin.post("/api/v1/admin/dedup/auto")).json()["contacts"] >= 1
     elenas = [c for c in (await client.get("/api/v1/contacts", params={"search": "Elena"})).json() if c["name"] == "Elena Rostova"]
     assert len(elenas) == 1 and elenas[0]["email"] == "elena.rostova@apexindustrial.com" and elenas[0]["buying_role"] == "Decision Maker"
@@ -154,10 +154,10 @@ async def test_import_auto_maps_validates_and_rolls_back(client):
 
 
 async def test_export_respects_scope_and_is_audited(client):
-    async with login_as("viewer@relate.demo") as auditor:
+    async with login_as("viewer@cirra.demo") as auditor:
         r = await auditor.get("/api/v1/admin/export/accounts", params={"format": "json"})
         assert r.status_code == 200 and len(r.json()) >= 10
-    async with login_as("priya@relate.demo") as ae:
+    async with login_as("priya@cirra.demo") as ae:
         assert (await ae.get("/api/v1/admin/export/accounts")).status_code == 403  # AEs have no export right by default
     log = (await client.get("/api/v1/admin/audit", params={"action": "export"})).json()["items"]
     assert log and log[0]["entity"] == "accounts"

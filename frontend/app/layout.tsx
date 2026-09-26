@@ -5,8 +5,8 @@ import { Providers } from "@/lib/providers";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: { default: "relate [R] · AI-first CRM", template: "%s · relate [R]" },
-  description: "Intelligent pipeline memory. A private-cloud, AI-first CRM from the SDC Solutions portfolio.",
+  title: { default: "Cirra · AI CRM", template: "%s · Cirra" },
+  description: "Connect what matters. A private-cloud AI CRM from the SDC Solutions portfolio.",
   icons: { icon: "/icon.svg" },
 };
 

@@ -1,4 +1,4 @@
-"""relate [R] API: FastAPI application entrypoint."""
+"""Cirra API: FastAPI application entrypoint."""
 import logging
 
 from fastapi import FastAPI
@@ -12,7 +12,7 @@ from app.core.database import engine
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 app = FastAPI(
-    title="relate [R] API",
+    title="Cirra API",
     version="2.0.0",
     description="AI-first, private-cloud CRM from the SDC Solutions portfolio.",
 )
@@ -33,4 +33,4 @@ for router in (auth.router, accounts.router, contacts.router, deals.router, acti
 async def health():
     async with engine.connect() as conn:
         await conn.execute(text("SELECT 1"))
-    return {"status": "ok", "service": "relate-api", "llm_provider": settings.llm_provider}
+    return {"status": "ok", "service": "cirra-api", "llm_provider": settings.llm_provider}

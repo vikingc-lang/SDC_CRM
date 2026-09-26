@@ -1,11 +1,30 @@
-# relate [R]: AI-first, private-cloud CRM
+<p>
+  <img src="docs/brand/cirra-logo.svg" alt="Cirra" height="56">
+</p>
 
-**Intelligent pipeline memory** from the SDC Solutions portfolio (alongside promo [Q], Yield [S], deduct [✔] and nexora [§]).
+# Cirra: Connect what matters.
 
-Sales teams stop typing into forms. Paste meeting notes, emails or dictation into **Quick-Log (⌘K)** and relate extracts
-the account, the buying committee, the deal value and timeline, the next steps and the sentiment. You review the preview
-and commit it in one click. Health and risk scores update right away and explain themselves. Every note becomes
-searchable semantic memory (pgvector) that the Copilot (⌘J) can answer questions from.
+**A CRM built around relationships, not just records.** Cirra is the AI CRM in the SDC Solutions portfolio of
+distinguished products (alongside promo [Q], Yield [S], deduct [✔] and nexora [§]). It brings every account, contact, deal
+and conversation into one place, and uses AI to surface the customers, signals and next steps that move revenue.
+
+**The problem.** Reps log activity late or never. The pipeline looks healthy until a deal goes quiet, and managers find out
+on the forecast call, when it's too late to act.
+
+**Why it's different.** The CRM does the data entry and flags risk while there's still time to act:
+
+- **AI briefing every morning:** overdue follow-ups, deals at risk and deals closing soon, in one view.
+- **Quick-Log from meeting notes (⌘K):** paste notes, dictate or log a conversation, and Cirra files it against the right
+  account and deal. You review the extraction (people and buying roles, deal value and timeline, next steps, sentiment)
+  and commit it in one click.
+- **Deal risk you can see:** every deal gets a risk score with the reason: stale, no champion, sentiment drop.
+- **Ask Cirra (⌘J):** a copilot that answers questions about accounts, deals and pipeline in plain English, grounded in
+  hybrid keyword + semantic search (pgvector).
+- **A forecast you can explain:** weighted by stage probability and deal risk, shown by stage and by close month.
+- **Account 360 and stage gates:** the full picture of every account, and clear criteria for moving a deal forward.
+
+**Partner fit.** Suits partners serving mid-market clients who need a CRM that runs cleanly next to SAP (customer master,
+A/R aging and credit holds sync through the ERP fabric).
 
 ![Home dashboard](docs/screenshots/home-light.png)
 
@@ -25,7 +44,7 @@ searchable semantic memory (pgvector) that the Copilot (⌘J) can answer questio
 
 Dark mode, phone-width layouts and keyboard shortcuts are built in (`docs/screenshots/home-dark.png`, `mobile-home-light.png`).
 
-**No setup needed to look around:** open [`docs/relate-ui-preview.html`](docs/relate-ui-preview.html) in any browser. It is a single
+**No setup needed to look around:** open [`docs/cirra-ui-preview.html`](docs/cirra-ui-preview.html) in any browser. It is a single
 self-contained file (works offline) with every screen rendered from the real app and demo data. Links, ⌘K / ⌘J and the
 theme toggle work, while live features (drag-and-drop, AI extraction, saving) need the running app.
 
@@ -42,15 +61,15 @@ docker compose exec ollama ollama pull llama3.1:8b   # first run only, for the l
 docker compose --profile voice up -d                  # optional: private Whisper transcription for voice notes
 ```
 
-Open http://localhost:3000. Every demo user's password is `relate123`:
+Open http://localhost:3000. Every demo user's password is `cirra123`:
 
 | Login | Role | What they see |
 |---|---|---|
-| `admin@relate.demo` | Super Admin | Everything, including Admin (users, RBAC, audit, privacy, dedup, import/export, jobs) and finance approvals |
-| `marcus@relate.demo` | Sales Manager | Whole pipeline, approves discounts, customer success, partners, reports |
-| `priya@relate.demo`, `diego@relate.demo` | Account Executive | Only their own accounts, deals and quotes (row-level ownership) |
-| `sam@relate.demo` | SDR | Own leads and contacts; no quotes, finance or deletes |
-| `viewer@relate.demo` | Auditor | Read and export everything, including the immutable audit trail; no writes |
+| `admin@cirra.demo` | Super Admin | Everything, including Admin (users, RBAC, audit, privacy, dedup, import/export, jobs) and finance approvals |
+| `marcus@cirra.demo` | Sales Manager | Whole pipeline, approves discounts, customer success, partners, reports |
+| `priya@cirra.demo`, `diego@cirra.demo` | Account Executive | Only their own accounts, deals and quotes (row-level ownership) |
+| `sam@cirra.demo` | SDR | Own leads and contacts; no quotes, finance or deletes |
+| `viewer@cirra.demo` | Auditor | Read and export everything, including the immutable audit trail; no writes |
 | `partner@northstar-partners.com` | Partner | External partner portal only: deal registration, commissions, collateral |
 
 The stack runs Postgres 16 + pgvector, Redis 7, Ollama, the FastAPI API, a Celery worker with beat (risk scans, SLA
@@ -60,7 +79,7 @@ Migrations run automatically, and `SEED_DEMO_DATA=true` loads the demo workspace
 ### Option C: Kubernetes (Helm)
 
 ```bash
-helm install relate ./helm/relate -n relate --create-namespace \
+helm install cirra ./helm/cirra -n cirra --create-namespace \
   --set image.registry=registry.internal/sdc \
   --set ingress.host=crm.example.com --set publicWebUrl=https://crm.example.com
 ```
@@ -80,7 +99,7 @@ Prerequisites: Python 3.11, Node 20+, PostgreSQL 16 with the `vector` extension,
 cd backend
 python -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
-export DATABASE_URL=postgresql+asyncpg://relate_user:relate_secure_password@localhost:5432/relate_crm
+export DATABASE_URL=postgresql+asyncpg://cirra_user:cirra_secure_password@localhost:5432/cirra_crm
 alembic upgrade head
 python -m app.seed                   # --minimal = spec minimum (3 accounts, 6 contacts, 3 deals); --reset wipes first
 uvicorn app.main:app --reload        # http://localhost:8000/docs
@@ -91,13 +110,13 @@ npm install
 NEXT_PUBLIC_API_URL=http://localhost:8000 npm run dev   # http://localhost:3000
 ```
 
-With no model configured (`LLM_PROVIDER=heuristic`, the default outside Docker), every AI feature runs on relate's
+With no model configured (`LLM_PROVIDER=heuristic`, the default outside Docker), every AI feature runs on Cirra's
 deterministic engine, so the product works fully offline.
 
 ### Tests
 
 ```bash
-cd backend && TEST_DATABASE_URL=postgresql+asyncpg://relate_user:relate_secure_password@localhost:5432/relate_test pytest
+cd backend && TEST_DATABASE_URL=postgresql+asyncpg://cirra_user:cirra_secure_password@localhost:5432/cirra_test pytest
 cd frontend && npm run typecheck && npm run lint && npm run build
 ```
 
@@ -118,11 +137,11 @@ all-or-nothing imports.
 | 3 | **Opportunity & revenue engine** | Four pipelines with their own stages and probabilities: Enterprise Direct, Inbound Mid-Market, Renewals & Upsells and Partner Channel. Declarative stage-gate rules, editable as JSON (min contacts, role mapped, activity logged, approved amount, signed document…) with a logged manager override. A multi-currency weighted forecast converted to USD and risk-adjusted. Win/loss taxonomy (Competitor, Budget Frozen, Feature Gap, Champion Departed, Price, No Decision…) with a required rep debrief and competitor capture. | Pipeline tabs · Reports · Admin → Pipelines & gates |
 | 4 | **CPQ / CLM** | Multi-currency price books with volume tiers, TCV/ACV and discount totals. Approval policies route by discount, payment terms, deal size and credit hold, to Sales Manager and then Finance. NDA, SOW and Order Form generated from sandboxed templates into PDF, with a content hash. **Embedded e-signature**: the customer signs through a public token link on a canvas signature pad, then the company countersigns. The countersigned PDF is attached to the timeline, and a completed Order Form creates the contract. | Deal → Quotes & Documents · Quotes · Approvals · Products · `/sign/[token]` |
 | 5 | **Omnichannel activity ledger** | Emails, calls (duration, disposition), meetings (agenda, attendance), notes, stage changes and attachments on one timeline. IMAP/SMTP mailbox sync with encrypted credentials; this works with Microsoft 365, Google Workspace and Exchange through their IMAP/SMTP endpoints. `.eml` drop-in. **Task & SLA engine**: delegation, priority, dependencies with cycle checks, and automatic escalation to the manager and then admins. A personal **iCal feed** that any CalDAV or calendar client subscribes to, plus `.ics` import that logs meetings. | Deal/Account timelines · Log activity · Tasks · Settings |
-| 6 | **Ambient AI** | Quick-Log (⌘K) from text **or voice** (local Whisper, audio never stored). **Risk & slippage copilot**: > 14 days stagnant, close-date pushbacks, sentiment drift and champion loss raise alerts. **Hybrid RAG**: Postgres full-text and pgvector results merged with reciprocal-rank fusion over activities and accounts. **Next-best-action generator**: cadence, missing buying roles and suggested messaging you can copy. | ⌘K · Home alerts · Deal page · Ask relate · Copilot |
+| 6 | **Ambient AI** | Quick-Log (⌘K) from text **or voice** (local Whisper, audio never stored). **Risk & slippage copilot**: > 14 days stagnant, close-date pushbacks, sentiment drift and champion loss raise alerts. **Hybrid RAG**: Postgres full-text and pgvector results merged with reciprocal-rank fusion over activities and accounts. **Next-best-action generator**: cadence, missing buying roles and suggested messaging you can copy. | ⌘K · Home alerts · Deal page · Ask Cirra · Copilot |
 | 7 | **Post-sale** | Closed-Won provisions an onboarding workspace with milestones and the full pre-sales hand-off (priorities, products, stakeholders, competitors). **Churn early warning** from adoption and utilisation trends, critical/high ticket load and champion turnover. **Renewal opportunities are created 90–120 days before expiry**, carrying the original contract terms. | Customer success · Account → Success |
 | 8 | **ERP fabric** | Customer master sync (legal name, tax ID, billing address, credit limit) through `demo`, `file` (CSV drop folder) or `rest` connectors. Invoice-level **A/R aging**; **credit holds** set from 90+ day balances or over-limit exposure block quotes behind finance approval. An outbound event outbox (`quote.approved`, `deal.closed_won`, `contract.created`, `invoice.overdue`…) feeds **promo, Yield, deduct and nexora** through a cursor feed or optional webhooks. | Finance & ERP · Account → Contracts & finance |
 | 9 | **PRM** | Partner **deal-registration portal**, where registrations are checked for existing accounts and overlapping registrations. Approval grants **90-day territory exclusivity** and creates the deal in the Partner pipeline. **Co-sell and commission attribution** by partner split and rate. **Collateral repository** gated by partner tier and email domain, with every download logged. | Partners · Partner portal (`/portal`) · Deal → Partners |
-| 10 | **Platform** | **RBAC** with CRUD + Export per resource for Super Admin, Sales Manager, Account Executive, SDR, Auditor and Partner, editable in the UI. **Row-level ownership**: out-of-scope records return 404. **Immutable audit trail** (user_id, record_id, field_name, old_value, new_value, timestamp), made append-only by a database trigger that rejects UPDATE, DELETE and TRUNCATE. CSV/JSON **import with auto-mapping, validation and all-or-nothing rollback**; scoped, audited **export**. docker-compose and **Helm with a zero-egress NetworkPolicy**. | Admin · `helm/relate` · `docker-compose.yml` |
+| 10 | **Platform** | **RBAC** with CRUD + Export per resource for Super Admin, Sales Manager, Account Executive, SDR, Auditor and Partner, editable in the UI. **Row-level ownership**: out-of-scope records return 404. **Immutable audit trail** (user_id, record_id, field_name, old_value, new_value, timestamp), made append-only by a database trigger that rejects UPDATE, DELETE and TRUNCATE. CSV/JSON **import with auto-mapping, validation and all-or-nothing rollback**; scoped, audited **export**. docker-compose and **Helm with a zero-egress NetworkPolicy**. | Admin · `helm/cirra` · `docker-compose.yml` |
 
 ---
 
@@ -130,7 +149,7 @@ all-or-nothing imports.
 
 ```
 ├── docker-compose.yml        # db (pgvector), redis, ollama, api, worker, web (+ whisper "voice" profile)
-├── helm/relate/              # Kubernetes chart: api, worker, web, optional pgvector/redis/ollama/whisper, zero-egress policy
+├── helm/cirra/               # Kubernetes chart: api, worker, web, optional pgvector/redis/ollama/whisper, zero-egress policy
 ├── .env.example              # every setting, documented
 ├── backend/                  # FastAPI · async SQLAlchemy 2.0 · asyncpg · Pydantic v2 · Alembic · Celery
 │   ├── alembic/versions/001_initial_schema.py   # spec §4 DDL + activities/tasks/audit/pgvector
@@ -219,3 +238,7 @@ admin access (lock-out protection).
   free of cloud OAuth apps and outbound calls; a Graph connector can be added behind the same `mail.py` interface.
 - **The frontend uses Radix primitives styled in the shadcn/ui pattern**, written directly into `components/ui` instead
   of generated by the CLI.
+
+- **Renamed from "relate [R]" to Cirra.** A few internal database identifiers created by the migrations keep their original
+  prefix (the `relate_append_only()` trigger function and the `relate.allow_ledger_reset` setting). They are never shown to
+  users, and renaming them would need a migration on existing databases.

@@ -44,7 +44,7 @@ async def test_task_dependencies_delegation_and_escalation(client):
     # delegation notifies the assignee
     t = (await client.post("/api/v1/tasks", json={"title": "Prep QBR deck", "assignee_id": prereq["assignee"]["id"], "priority": "high"})).json()
     assert t["assignee"]["full_name"] == "Priya Raman"
-    async with login_as("priya@relate.demo") as ae:
+    async with login_as("priya@cirra.demo") as ae:
         notes = (await ae.get("/api/v1/notifications")).json()
         assert any("Prep QBR deck" in n["title"] for n in notes["items"])
         mine = (await ae.get("/api/v1/tasks", params={"assignee": "me"})).json()
@@ -56,10 +56,10 @@ async def test_task_dependencies_delegation_and_escalation(client):
 async def test_email_ingest_threads_and_feeds_relationship_strength(client):
     msg = EmailMessage()
     msg["From"] = "Hannah Weiss <hannah.weiss@orionfinancial.com>"
-    msg["To"] = "marcus@relate.demo"
+    msg["To"] = "marcus@cirra.demo"
     msg["Subject"] = "Re: Revenue intelligence rollout plan"
     msg["Message-ID"] = "<abc123@orionfinancial.com>"
-    msg["In-Reply-To"] = msg["References"] = "<root-thread@relate.demo>"
+    msg["In-Reply-To"] = msg["References"] = "<root-thread@cirra.demo>"
     msg["Date"] = "Wed, 23 Sep 2026 10:00:00 +0000"
     msg.set_content("Thanks Marcus, this looks great and the team is excited. Let's lock the rollout plan.\n\nOn Tue, Marcus wrote:\n> earlier text")
     raw = bytes(msg)
@@ -103,7 +103,7 @@ async def test_risk_copilot_alerts_and_next_best_actions(client):
     alerts = (await client.get("/api/v1/alerts")).json()
     kinds = {(a["deal"]["title"], a["kind"]) for a in alerts}
     assert ("Fleet Telemetry Rollout", "close_date_pushed") in kinds and ("Fleet Telemetry Rollout", "stagnant") in kinds
-    async with login_as("admin@relate.demo") as admin:
+    async with login_as("admin@cirra.demo") as admin:
         stats = (await admin.post("/api/v1/admin/jobs/risk_scan")).json()
         assert stats["deals_scanned"] > 5
     nw = next(d for d in (await client.get("/api/v1/deals", params={"search": "Fleet"})).json())

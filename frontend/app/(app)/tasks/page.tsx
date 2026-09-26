@@ -38,7 +38,7 @@ export default function TasksPage() {
     <div className="mx-auto max-w-3xl">
       <PageHeader
         title="Tasks"
-        description={escalated ? `${escalated} escalated past SLA · dependencies and delegation tracked` : "Action items you logged, delegated work and ones relate extracted for you"}
+        description={escalated ? `${escalated} escalated past SLA · dependencies and delegation tracked` : "Action items you logged, delegated work and ones Cirra extracted for you"}
         actions={
           <>
             <div className="flex rounded-md border bg-surface p-0.5 text-[13px]">
@@ -58,7 +58,7 @@ export default function TasksPage() {
       />
       {isLoading && <Skeleton className="h-60 w-full" />}
       {!isLoading && !data?.length && (
-        <Card><EmptyState icon={<CheckSquare className="h-4 w-4" />} title={status === "open" ? "Nothing on your plate" : "No completed tasks yet"} description="Log a meeting with ⌘K and relate will pull out the next steps." /></Card>
+        <Card><EmptyState icon={<CheckSquare className="h-4 w-4" />} title={status === "open" ? "Nothing on your plate" : "No completed tasks yet"} description="Log a meeting with ⌘K and Cirra will pull out the next steps." /></Card>
       )}
       <div className="space-y-4">
         {status === "done"

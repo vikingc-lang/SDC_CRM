@@ -8,10 +8,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    app_name: str = "relate [R]"
+    app_name: str = "Cirra"
     environment: str = "development"
 
-    database_url: str = "postgresql+asyncpg://relate_user:relate_secure_password@localhost:5432/relate_crm"
+    database_url: str = "postgresql+asyncpg://cirra_user:cirra_secure_password@localhost:5432/cirra_crm"
     redis_url: str = "redis://localhost:6379/0"
 
     jwt_secret: str = "super_secret_jwt_key_change_in_production"

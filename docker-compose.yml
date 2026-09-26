@@ -1,7 +1,7 @@
-# relate [R]: single-command private-cloud deployment.
+# Cirra: single-command private-cloud deployment.
 #   cp .env.example .env && docker compose up -d --build
 #   (first run) docker compose exec ollama ollama pull llama3.1:8b
-#   open http://localhost:3000  -  marcus@relate.demo / relate123
+#   open http://localhost:3000  -  marcus@cirra.demo / cirra123
 #   optional private voice transcription:  docker compose --profile voice up -d
 #
 # Zero egress: nothing below needs outbound internet at runtime. Outbound calls only happen
@@ -9,31 +9,31 @@
 services:
   db:
     image: pgvector/pgvector:pg16
-    container_name: relate_db
+    container_name: cirra_db
     restart: always
     environment:
-      POSTGRES_USER: relate_user
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-relate_secure_password}
-      POSTGRES_DB: relate_crm
+      POSTGRES_USER: cirra_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cirra_secure_password}
+      POSTGRES_DB: cirra_crm
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U relate_user -d relate_crm"]
+      test: ["CMD-SHELL", "pg_isready -U cirra_user -d cirra_crm"]
       interval: 5s
       retries: 10
 
   redis:
     image: redis:7-alpine
-    container_name: relate_redis
+    container_name: cirra_redis
     restart: always
     ports:
       - "6379:6379"
 
   ollama:
     image: ollama/ollama:latest
-    container_name: relate_ollama
+    container_name: cirra_ollama
     restart: always
     volumes:
       - ollama_data:/root/.ollama
@@ -44,7 +44,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: relate_api
+    container_name: cirra_api
     restart: always
     depends_on:
       db:
@@ -53,7 +53,7 @@ services:
         condition: service_started
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+asyncpg://relate_user:${POSTGRES_PASSWORD:-relate_secure_password}@db:5432/relate_crm
+      DATABASE_URL: postgresql+asyncpg://cirra_user:${POSTGRES_PASSWORD:-cirra_secure_password}@db:5432/cirra_crm
       REDIS_URL: redis://redis:6379/0
       OLLAMA_ENDPOINT: http://ollama:11434
       USE_CELERY: "true"
@@ -61,7 +61,7 @@ services:
       ERP_EXCHANGE_DIR: /data/erp-exchange
       WHISPER_ENDPOINT: http://whisper:9000
     volumes:
-      - relate_files:/data
+      - cirra_files:/data
     ports:
       - "8000:8000"
 
@@ -69,13 +69,13 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: relate_worker
+    container_name: cirra_worker
     restart: always
     depends_on:
       - api
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+asyncpg://relate_user:${POSTGRES_PASSWORD:-relate_secure_password}@db:5432/relate_crm
+      DATABASE_URL: postgresql+asyncpg://cirra_user:${POSTGRES_PASSWORD:-cirra_secure_password}@db:5432/cirra_crm
       REDIS_URL: redis://redis:6379/0
       OLLAMA_ENDPOINT: http://ollama:11434
       DB_NULL_POOL: "true"
@@ -84,13 +84,13 @@ services:
       ERP_EXCHANGE_DIR: /data/erp-exchange
       WHISPER_ENDPOINT: http://whisper:9000
     volumes:
-      - relate_files:/data
+      - cirra_files:/data
     command: ["celery", "-A", "app.worker", "worker", "--beat", "--loglevel=info"]
 
   # Local speech-to-text for Quick-Log voice notes (set TRANSCRIPTION_PROVIDER=whisper_asr).
   whisper:
     image: onerahmet/openai-whisper-asr-webservice:latest
-    container_name: relate_whisper
+    container_name: cirra_whisper
     profiles: ["voice"]
     restart: always
     environment:
@@ -105,7 +105,7 @@ services:
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
-    container_name: relate_web
+    container_name: cirra_web
     restart: always
     depends_on:
       - api
@@ -115,5 +115,5 @@ services:
 volumes:
   postgres_data:
   ollama_data:
-  relate_files:     # contracts, signed PDFs, attachments, collateral
+  cirra_files:     # contracts, signed PDFs, attachments, collateral
   whisper_cache:

@@ -41,9 +41,9 @@ async def test_independent_pipelines_have_their_own_gates(client):
 async def test_gate_rules_are_configurable(client):
     p = await _pipeline(client, "inbound")
     lead = next(s for s in p["stages"] if s["name"] == "Lead")
-    async with login_as("priya@relate.demo") as ae:
+    async with login_as("priya@cirra.demo") as ae:
         assert (await ae.put(f"/api/v1/pipelines/stages/{lead['id']}/gates", json={"gate_rules": []})).status_code == 403
-    async with login_as("admin@relate.demo") as admin:
+    async with login_as("admin@cirra.demo") as admin:
         bad = await admin.put(f"/api/v1/pipelines/stages/{lead['id']}/gates", json={"gate_rules": [{"type": "nonsense"}]})
         assert bad.status_code == 422
         ok = await admin.put(f"/api/v1/pipelines/stages/{lead['id']}/gates",
@@ -56,8 +56,8 @@ async def test_cpq_tiers_tcv_and_two_level_approval_routing(client):
     products = {p["sku"]: p for p in (await client.get("/api/v1/products")).json()}
     q = (await client.post(f"/api/v1/deals/{deal['id']}/quotes", json={
         "currency": "USD", "term_months": 24, "payment_terms": "NET60",
-        "lines": [{"product_id": products["REL-PLAT"]["id"], "quantity": 150, "discount_pct": 30},
-                  {"product_id": products["REL-IMPL"]["id"], "quantity": 1}]})).json()
+        "lines": [{"product_id": products["CIR-PLAT"]["id"], "quantity": 150, "discount_pct": 30},
+                  {"product_id": products["CIR-IMPL"]["id"], "quantity": 1}]})).json()
     plat = q["lines"][0]
     assert plat["list_unit_price"] == 58  # volume tier reached at 100 seats
     assert plat["line_total"] == pytest.approx(58 * 0.70 * 150 * 24)
@@ -69,25 +69,25 @@ async def test_cpq_tiers_tcv_and_two_level_approval_routing(client):
     roles = {a["required_role"]: a for a in q["approvals"] if a["status"] == "pending"}
     assert set(roles) == {"sales_manager", "finance"}
     assert "NET60" in roles["finance"]["reason"] and "30%" in roles["finance"]["reason"]
-    async with login_as("priya@relate.demo") as ae:
+    async with login_as("priya@cirra.demo") as ae:
         assert (await ae.post(f"/api/v1/approvals/{roles['sales_manager']['id']}/decide", json={"approve": True})).status_code == 403
     assert (await client.post(f"/api/v1/approvals/{roles['finance']['id']}/decide", json={"approve": True})).status_code == 403  # manager isn't finance
     inbox = (await client.get("/api/v1/approvals", params={"status": "pending"})).json()
     item = next(a for a in inbox if a["id"] == roles["sales_manager"]["id"])
     assert item["can_decide"] and item["quote"]["deal"]["title"] == "Quote Routing"
-    async with login_as("diego@relate.demo") as other_ae:  # row-level scope: not his deal
+    async with login_as("diego@cirra.demo") as other_ae:  # row-level scope: not his deal
         theirs = (await other_ae.get("/api/v1/approvals", params={"status": "all"})).json()
         assert all(a["quote"]["deal"]["title"] != "Quote Routing" for a in theirs)
     q = (await client.post(f"/api/v1/approvals/{roles['sales_manager']['id']}/decide", json={"approve": True, "comment": "Strategic logo"})).json()
     assert q["status"] == "pending_approval"
-    async with login_as("admin@relate.demo") as finance:
+    async with login_as("admin@cirra.demo") as finance:
         q = (await finance.post(f"/api/v1/approvals/{roles['finance']['id']}/decide", json={"approve": True})).json()
     assert q["status"] == "approved"
     refreshed = (await client.get(f"/api/v1/deals/{deal['id']}")).json()
     assert refreshed["amount"] == pytest.approx(q["tcv"])  # approved amount flows to the forecast
     # editing an approved quote resets approval
     q2 = (await client.put(f"/api/v1/quotes/{q['id']}", json={"currency": "USD", "term_months": 24, "payment_terms": "NET30",
-                                                               "lines": [{"product_id": products["REL-PLAT"]["id"], "quantity": 150, "discount_pct": 5}]})).json()
+                                                               "lines": [{"product_id": products["CIR-PLAT"]["id"], "quantity": 150, "discount_pct": 5}]})).json()
     assert q2["status"] == "draft"
     assert (await client.post(f"/api/v1/quotes/{q['id']}/submit")).json()["status"] == "approved"  # within policy: auto-approved
 
@@ -96,7 +96,7 @@ async def test_document_assembly_esignature_and_contract(client):
     deal, _ = await _new_deal(client, "Sign Flow", amount=0)
     products = {p["sku"]: p for p in (await client.get("/api/v1/products")).json()}
     assert (await client.post("/api/v1/documents", json={"doc_type": "order_form", "deal_id": deal["id"]})).status_code == 422  # no approved quote
-    q = (await client.post(f"/api/v1/deals/{deal['id']}/quotes", json={"lines": [{"product_id": products["REL-PLAT"]["id"], "quantity": 20}]})).json()
+    q = (await client.post(f"/api/v1/deals/{deal['id']}/quotes", json={"lines": [{"product_id": products["CIR-PLAT"]["id"], "quantity": 20}]})).json()
     await client.post(f"/api/v1/quotes/{q['id']}/submit")
     doc = (await client.post("/api/v1/documents", json={"doc_type": "order_form", "deal_id": deal["id"]})).json()
     assert q["quote_number"] in doc["body"] and "Sign Flow Corp" in doc["body"] and "<table" in doc["body_html"]
@@ -104,7 +104,7 @@ async def test_document_assembly_esignature_and_contract(client):
     assert "Mutual Non-Disclosure Agreement" in nda["body"]
     doc = (await client.post(f"/api/v1/documents/{doc['id']}/send", json={"signers": [
         {"name": "Kim Sign", "email": "kim@signflow.example.com", "party": "customer"},
-        {"name": "Marcus Vance", "email": "marcus@relate.demo", "party": "company"}]})).json()
+        {"name": "Marcus Vance", "email": "marcus@cirra.demo", "party": "company"}]})).json()
     customer, company = sorted(doc["signers"], key=lambda s: s["order"])
     tok_c, tok_co = customer["sign_url"].rsplit("/", 1)[1], company["sign_url"].rsplit("/", 1)[1]
     from httpx import ASGITransport, AsyncClient

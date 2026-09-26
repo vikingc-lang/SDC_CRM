@@ -1,4 +1,4 @@
-"""SQLAlchemy 2.0 declarative models for relate [R].
+"""SQLAlchemy 2.0 declarative models for Cirra.
 
 The physical schema is owned by alembic/versions/001_initial_schema.py; these
 models mirror it one-to-one.
