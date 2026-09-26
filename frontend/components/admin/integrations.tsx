@@ -9,12 +9,12 @@ import { api, errorMessage } from "@/lib/api";
 
 const JOBS = [
   { key: "risk_scan", icon: Radar, label: "Risk & slippage scan", when: "Hourly", desc: "Flags deals stagnant > 14 days, pushed close dates and sentiment drift; raises alerts to owners." },
-  { key: "escalations", icon: Gauge, label: "Task SLA escalation", when: "Every 15 min", desc: "Escalates overdue tasks to the owner's manager, then to admins." },
+  { key: "escalations", icon: Gauge, label: "Task SLA escalation", when: "Hourly", desc: "Escalates overdue tasks to the owner's manager, then to admins." },
   { key: "renewals", icon: CalendarClock, label: "Renewal generation", when: "Daily", desc: "Opens renewal deals 90–120 days before contract expiry, carrying the original terms." },
   { key: "rescore", icon: RefreshCw, label: "Re-score all accounts", when: "Nightly", desc: "Recomputes health, relationship strength and churn risk (recency decays daily)." },
   { key: "auto_dedup", icon: GitMerge, label: "Autonomous de-duplication", when: "Nightly", desc: "Merges high-confidence duplicate accounts and contacts with full merge logs." },
-  { key: "erp_sync", icon: Landmark, label: "ERP sync", when: "Hourly", desc: "Pulls customer masters, invoices and credit status; pushes new customers." },
-  { key: "reindex", icon: Search, label: "Rebuild search index", when: "On demand", desc: "Re-embeds activity for hybrid (keyword + vector) retrieval." },
+  { key: "erp_sync", icon: Landmark, label: "ERP sync", when: "Every 4 hours", desc: "Pulls customer masters, invoices and credit status; pushes new customers." },
+  { key: "reindex", icon: Search, label: "Rebuild search index", when: "Nightly", desc: "Re-embeds activity for hybrid (keyword + vector) retrieval." },
 ];
 
 export function JobsPanel() {
