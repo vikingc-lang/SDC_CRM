@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { DashboardsList, SavedReportsList } from "@/components/analytics";
 import { PageHeader } from "@/components/AppShell";
+import { ForecastCall } from "@/components/forecast";
 import { ForecastByMonth, ForecastByStage, StatTile } from "@/components/charts";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
@@ -31,11 +32,11 @@ interface Forecast {
 }
 
 export default function ReportsPage() {
-  type Tab = "dashboards" | "reports" | "forecast" | "winloss";
+  type Tab = "dashboards" | "reports" | "call" | "forecast" | "winloss";
   const [tab, setTab] = useState<Tab>("dashboards");
   useEffect(() => {
     const t = new URLSearchParams(window.location.search).get("tab") as Tab | null;
-    if (t && ["dashboards", "reports", "forecast", "winloss"].includes(t)) setTab(t);
+    if (t && ["dashboards", "reports", "call", "forecast", "winloss"].includes(t)) setTab(t);
   }, []);
   const [pipelineId, setPipelineId] = useState("");
   const { can } = useMe();
@@ -47,9 +48,10 @@ export default function ReportsPage() {
     <div className="mx-auto max-w-6xl">
       <PageHeader title="Reports" description="Dashboards and self-service reports, the risk-adjusted forecast, and win/loss analysis."
         actions={can("deals", "export") && <Button size="sm" variant="outline" onClick={exportDeals}><Download className="h-3.5 w-3.5" />Export deals</Button>} />
-      <Tabs value={tab} onChange={setTab} tabs={[{ value: "dashboards", label: "Dashboards" }, { value: "reports", label: "Saved reports" }, { value: "forecast", label: "Forecast" }, { value: "winloss", label: "Win / loss" }]} />
+      <Tabs value={tab} onChange={setTab} tabs={[{ value: "dashboards", label: "Dashboards" }, { value: "reports", label: "Saved reports" }, { value: "call", label: "Forecast call" }, { value: "forecast", label: "Pipeline forecast" }, { value: "winloss", label: "Win / loss" }]} />
       {tab === "dashboards" && <DashboardsList />}
       {tab === "reports" && <SavedReportsList />}
+      {tab === "call" && <ForecastCall />}
       {tab === "forecast" && (
         <>
           <div className="mb-4 flex items-center gap-2">

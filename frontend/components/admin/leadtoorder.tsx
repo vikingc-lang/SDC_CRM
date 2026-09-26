@@ -362,6 +362,11 @@ export function StagesPanel() {
               <Input className="h-8 w-20" type="number" min={0} max={100} defaultValue={s.default_probability} disabled={closed} aria-label="Probability"
                 onBlur={(e) => Number(e.target.value) !== s.default_probability && patch.mutate({ id: s.id, body: { default_probability: Number(e.target.value) } })} />
               <span className="text-[12px] text-muted-foreground">%</span>
+              <Select className="h-8 w-32 text-[13px]" aria-label={`Forecast category for ${s.name}`} disabled={closed} title="Forecast category deals in this stage start in"
+                value={s.forecast_category ?? "pipeline"} onChange={(e) => patch.mutate({ id: s.id, body: { forecast_category: e.target.value } })}>
+                {closed ? <option value={s.forecast_category}>{s.is_closed_won ? "Closed" : "Omitted"}</option>
+                  : [["pipeline", "Pipeline"], ["best_case", "Best case"], ["commit", "Commit"]].map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+              </Select>
               <Button variant="ghost" size="icon" aria-label="Move up" disabled={closed || i === 0} onClick={() => patch.mutate({ id: s.id, body: { move: "up" } })}><ArrowUp className="h-3.5 w-3.5" /></Button>
               <Button variant="ghost" size="icon" aria-label="Move down" disabled={closed || pipeline.stages[i + 1]?.is_closed_won || pipeline.stages[i + 1]?.is_closed_lost}
                 onClick={() => patch.mutate({ id: s.id, body: { move: "down" } })}><ArrowDown className="h-3.5 w-3.5" /></Button>

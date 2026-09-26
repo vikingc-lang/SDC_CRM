@@ -11,7 +11,7 @@ from app.core.database import Base
 __all__ = [
     "RolePermission", "AuditLog", "CustomFieldDefinition", "MergeLog", "DedupDismissal", "SubjectKey",
     "ConsentEvent", "ErasureLog", "Notification", "Attachment", "MailboxConnection", "DealAlert", "FxRate",
-    "IntegrationEvent", "ErpSyncRun", "SsoLoginState", "SavedReport", "Dashboard", "WorkflowRule", "WorkflowRun",
+    "IntegrationEvent", "ErpSyncRun", "SsoLoginState", "SavedReport", "Dashboard", "WorkflowRule", "WorkflowRun", "ForecastSubmission", "ForecastAdjustment",
 ]
 
 
@@ -296,3 +296,32 @@ class WorkflowRun(Base):
     status: Mapped[str] = mapped_column(String(10))
     detail: Mapped[list] = mapped_column(JSONB, default=list)
     created_at: Mapped[datetime] = _ts()
+
+
+class ForecastSubmission(Base):
+    """A rep's (scope 'self') or manager's (scope 'team') forecast call for a quarter, e.g. period '2026-Q4'."""
+    __tablename__ = "forecast_submissions"
+
+    id: Mapped[uuid.UUID] = _pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    period: Mapped[str] = mapped_column(String(7))
+    scope: Mapped[str] = mapped_column(String(4))
+    commit_amount: Mapped[float] = mapped_column(Numeric(15, 2))
+    best_case_amount: Mapped[float] = mapped_column(Numeric(15, 2))
+    calculated: Mapped[dict] = mapped_column(JSONB, default=dict)
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _ts()
+
+
+class ForecastAdjustment(Base):
+    """A manager's override of one rep's call for a quarter."""
+    __tablename__ = "forecast_adjustments"
+
+    id: Mapped[uuid.UUID] = _pk()
+    manager_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    rep_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    period: Mapped[str] = mapped_column(String(7))
+    commit_amount: Mapped[float] = mapped_column(Numeric(15, 2))
+    best_case_amount: Mapped[float] = mapped_column(Numeric(15, 2))
+    note: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

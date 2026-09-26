@@ -79,7 +79,7 @@ class GateRulesUpdate(BaseModel):
 
 def _stage_out(s: PipelineStage) -> dict:
     return {"id": s.id, "name": s.name, "stage_order": s.stage_order, "default_probability": s.default_probability,
-            "is_closed_won": s.is_closed_won, "is_closed_lost": s.is_closed_lost, "gate_rules": s.gate_rules or []}
+            "is_closed_won": s.is_closed_won, "is_closed_lost": s.is_closed_lost, "gate_rules": s.gate_rules or [], "forecast_category": s.forecast_category}
 
 
 @router.get("/pipelines")
@@ -104,6 +104,7 @@ class StagePatch(BaseModel):
     name: str | None = Field(default=None, min_length=2, max_length=100)
     default_probability: int | None = Field(default=None, ge=0, le=100)
     move: Literal["up", "down"] | None = None
+    forecast_category: Literal["pipeline", "best_case", "commit"] | None = None
 
 
 async def _renumber(db: AsyncSession, stages: list[PipelineStage]) -> None:
@@ -148,6 +149,10 @@ async def edit_stage(stage_id: uuid.UUID, body: StagePatch, db: AsyncSession = D
         stage.name = body.name.strip()
     if body.default_probability is not None:
         stage.default_probability = body.default_probability
+    if body.forecast_category:
+        if stage.is_closed_won or stage.is_closed_lost:
+            raise HTTPException(422, "Won and lost stages are forecast as Closed and Omitted")
+        stage.forecast_category = body.forecast_category
     if body.move:
         if stage.is_closed_won or stage.is_closed_lost:
             raise HTTPException(422, "Closed stages stay at the end of the pipeline")

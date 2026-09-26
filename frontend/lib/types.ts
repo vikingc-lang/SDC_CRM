@@ -54,7 +54,7 @@ export interface Task {
   account: { id: UUID; name: string } | null; deal: { id: UUID; title: string } | null; created_at: string;
 }
 
-export interface Stage { id: UUID; name: string; stage_order: number; default_probability: number; is_closed_won: boolean; is_closed_lost: boolean }
+export interface Stage { id: UUID; name: string; stage_order: number; default_probability: number; is_closed_won: boolean; is_closed_lost: boolean; forecast_category?: string }
 export interface Pipeline { id: UUID; name: string; is_default: boolean; stages: Stage[] }
 
 export interface KanbanColumn {

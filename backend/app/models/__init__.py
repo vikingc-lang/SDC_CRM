@@ -177,6 +177,16 @@ class Pipeline(Base):
     )
 
 
+def default_forecast_category(stage: dict) -> str:
+    """Forecast category a new stage starts with (admins can change it): by outcome, else by probability."""
+    if stage.get("is_closed_won"):
+        return "closed"
+    if stage.get("is_closed_lost"):
+        return "omitted"
+    prob = stage.get("default_probability") or 0
+    return "commit" if prob >= 70 else "best_case" if prob >= 40 else "pipeline"
+
+
 class PipelineStage(Base):
     __tablename__ = "pipeline_stages"
     __table_args__ = (
@@ -192,6 +202,7 @@ class PipelineStage(Base):
     is_closed_won: Mapped[bool] = mapped_column(Boolean, default=False)
     is_closed_lost: Mapped[bool] = mapped_column(Boolean, default=False)
     gate_rules: Mapped[list] = mapped_column(JSONB, default=list)
+    forecast_category: Mapped[str] = mapped_column(String(12), default=lambda ctx: default_forecast_category(ctx.get_current_parameters()))
 
     pipeline: Mapped[Pipeline] = relationship(back_populates="stages")
 
@@ -238,6 +249,7 @@ class Deal(Base):
     requested_delivery_date: Mapped[date | None] = mapped_column(Date)
     incoterms: Mapped[str | None] = mapped_column(String(10))
     lead_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("leads.id", ondelete="SET NULL", use_alter=True))
+    forecast_category: Mapped[str | None] = mapped_column(String(12))  # rep override of the stage's category
     stage_entered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = _created()

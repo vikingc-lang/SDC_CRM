@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
-from app.api.v1 import accounts, activities, admin, ai, analytics, auth, contacts, cpq, deals, finance, leads, orders, partners, success, workflows
+from app.api.v1 import accounts, activities, admin, ai, analytics, auth, contacts, cpq, deals, finance, leads, orders, partners, forecasting, success, workflows
 from app.core.config import settings
 from app.core.database import engine
 
@@ -26,7 +26,7 @@ app.add_middleware(
 
 for router in (auth.router, accounts.router, contacts.router, deals.router, activities.router, ai.router, cpq.router, cpq.public,
                success.router, finance.router, partners.router, partners.portal, admin.router, leads.router, leads.intake,
-               orders.router, analytics.router, workflows.router):
+               orders.router, analytics.router, workflows.router, forecasting.router):
     app.include_router(router, prefix="/api/v1")
 
 

@@ -71,7 +71,8 @@ async def _deal_owner(db: AsyncSession, deal_id) -> uuid.UUID | None:
 
 ENTITIES: dict[str, Entity] = {
     "deals": Entity(Deal, "Opportunity",
-                    {"stage": "stage_id", "owner": "owner_id", "amount": "amount", "close_date": "target_close_date", "risk_score": "risk_score"},
+                    {"stage": "stage_id", "owner": "owner_id", "amount": "amount", "close_date": "target_close_date", "risk_score": "risk_score",
+                     "forecast_category": "forecast_category"},
                     lambda db, o: _attr(o, "owner_id"), lambda o: f"/deals/{o.id}", lambda o: o.account_id, lambda o: o.id,
                     {"owner": ("owner_id", "user", None)}),
     "leads": Entity(Lead, "Lead", {"status": "status", "owner": "owner_id", "score": "score"},
