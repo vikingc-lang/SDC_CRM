@@ -22,11 +22,13 @@ from app.core.database import SessionLocal
 from app.core.rbac import seed_permissions
 from app.core.security import hash_password
 from app.models import (
-    Account, Activity, ApprovalPolicy, Collateral, Contact, Contract, CustomFieldDefinition, Deal, DealPartner, DealRegistration,
-    DealStageHistory, FxRate, OnboardingMilestone, Partner, Pipeline, PipelineStage, PriceBookEntry, Product, ProductUsage, Quote,
+    Account, Activity, ApprovalGroup, ApprovalPolicy, AssignmentRule, BundleComponent, Collateral, Contact, Contract, CustomFieldDefinition, Deal, DealPartner, DealRegistration,
+    DealStageHistory, EngagementEvent, FxRate, IntakeKey, Lead, OnboardingMilestone, Partner, Pipeline, PipelineStage, PriceBook,
+    PriceBookEntry, Product, ProductRule, ProductUsage, Promotion, Quote,
     SupportTicket, Task, User,
 )
 from app.services import clm, cpq, embeddings, erp, fx, insights, prm, scoring, sla, storage
+from app.services.cpq import LEVEL_LABELS
 from app.services.pipeline_templates import PIPELINES
 from app.services.search import account_document
 from app.services.success import provision_onboarding
@@ -204,12 +206,21 @@ PRODUCTS = [
     ("DEDUCT", "deduct module", "SDC Solutions module", "SDC Solutions", "recurring", "user / month", {"USD": [(1, 40), (100, 35)]}),
 ]
 
-POLICIES = [
+POLICIES = [  # sequential chain: sales manager -> deal desk -> VP sales -> finance -> legal
     ("Discount above 10% needs sales manager", "discount_pct", 10, "sales_manager"),
-    ("Discount above 25% needs finance", "discount_pct", 25, "finance"),
+    ("Discount above 20% needs deal desk", "discount_pct", 20, "deal_desk"),
+    ("Discount above 30% needs VP Sales", "discount_pct", 30, "vp_sales"),
+    ("Deals above 500k TCV need VP Sales", "tcv", 500000, "vp_sales"),
     ("Payment terms beyond NET45 need finance", "payment_terms", 45, "finance"),
     ("Accounts on credit hold need finance", "credit_hold", None, "finance"),
-    ("Deals above 500k TCV need sales manager", "tcv", 500000, "sales_manager"),
+    ("Credit risk score 70+ needs finance", "credit_risk", 70, "finance"),
+    ("Non-standard legal terms need legal", "custom_terms", None, "legal"),
+]
+APPROVER_USERS = [  # approval authority comes from approval groups, not from the RBAC role
+    ("dana@cirra.demo", "Dana Whitfield", "sales_manager", "deal_desk"),
+    ("victor@cirra.demo", "Victor Osei", "sales_manager", "vp_sales"),
+    ("fiona@cirra.demo", "Fiona Brandt", "auditor", "finance"),
+    ("lena@cirra.demo", "Lena Kowalski", "auditor", "legal"),
 ]
 
 CUSTOM_FIELDS = [
@@ -272,12 +283,13 @@ async def seed(minimal: bool = False, reset: bool = False) -> None:
             p = Pipeline(name=spec["name"], kind=spec["kind"], is_default=spec["is_default"], description=spec["description"])
             db.add(p)
             await db.flush()
-            pipelines[spec["kind"]] = p
+            key = spec.get("key", spec["kind"])
+            pipelines[key] = p
             for order, (name, prob, rules) in enumerate(spec["stages"], start=1):
                 s = PipelineStage(pipeline_id=p.id, name=name, stage_order=order, default_probability=prob, gate_rules=rules,
                                   is_closed_won=name == "Closed-Won", is_closed_lost=name == "Closed-Lost")
                 db.add(s)
-                stages[(spec["kind"], name)] = s
+                stages[(key, name)] = s
         await db.flush()
 
         products: dict[str, Product] = {}
@@ -288,6 +300,31 @@ async def seed(minimal: bool = False, reset: bool = False) -> None:
             products[sku] = prod
         for name, rule, threshold, role in POLICIES:
             db.add(ApprovalPolicy(name=name, rule_type=rule, threshold=threshold, approver_role=role))
+        groups: dict[str, list[str]] = {"deal_desk": [], "vp_sales": [], "finance": [], "legal": []}
+        for email, name, role, group in APPROVER_USERS:
+            users[email] = User(email=email, full_name=name, role=role, password_hash=hash_password(DEMO_PASSWORD),
+                                manager_id=users["admin@cirra.demo"].id)
+            db.add(users[email])
+            await db.flush()
+            groups[group].append(str(users[email].id))
+        for key, members in groups.items():
+            db.add(ApprovalGroup(key=key, name=LEVEL_LABELS[key], member_ids=members))
+        # deal desk catalogue: a bundle with dependency / exclusion rules and a launch promotion
+        growth = Product(sku="CIR-GROWTH", name="Cirra Growth Bundle", description="Platform + Ambient AI per user, one price", family="Cirra",
+                         billing_type="recurring", unit="user / month", product_type="bundle",
+                         prices=[PriceBookEntry(currency="USD", tiers=[{"min_qty": 1, "unit_price": 78}, {"min_qty": 100, "unit_price": 69}]),
+                                 PriceBookEntry(currency="EUR", tiers=[{"min_qty": 1, "unit_price": 72}, {"min_qty": 100, "unit_price": 64}])])
+        db.add(growth)
+        products["CIR-GROWTH"] = growth
+        await db.flush()
+        db.add_all([BundleComponent(bundle_id=growth.id, component_id=products["CIR-PLAT"].id, quantity=1),
+                    BundleComponent(bundle_id=growth.id, component_id=products["CIR-AI"].id, quantity=1),
+                    ProductRule(product_id=products["CIR-AI"].id, rule_type="requires", target_product_id=products["CIR-PLAT"].id,
+                                message="Ambient AI add-on requires the Cirra Platform"),
+                    ProductRule(product_id=growth.id, rule_type="excludes", target_product_id=products["CIR-SUP"].id,
+                                message="The Growth Bundle cannot be combined with Premium Support; quote Enterprise instead"),
+                    Promotion(code="LAUNCH-AI", name="Ambient AI launch offer", discount_pct=15, product_ids=[str(products["CIR-AI"].id)],
+                              min_quantity=50, valid_from=today - timedelta(days=30), valid_to=today + timedelta(days=90))])
         await clm.ensure_templates(db)
         await db.flush()
 

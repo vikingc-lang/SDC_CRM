@@ -16,6 +16,10 @@ EVENT_TARGETS = {
     "contract.created": ["deduct", "yield", "nexora"],
     "contract.renewal_opened": ["yield"],
     "invoice.overdue": ["deduct"],
+    "lead.created": ["promo", "nexora"],
+    "lead.converted": ["promo", "nexora"],
+    "order.created": ["deduct", "nexora"],
+    "order.acknowledged": ["deduct", "yield", "nexora"],
 }
 
 

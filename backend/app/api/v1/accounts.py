@@ -42,6 +42,7 @@ class AccountCreate(BaseModel):
     tier: Tier = "Mid-Market"
     owner_id: uuid.UUID | None = None
     parent_id: uuid.UUID | None = None
+    country: str | None = Field(default=None, max_length=64)
     force: bool = False  # create even if a likely duplicate exists
 
 
@@ -62,6 +63,8 @@ class AccountUpdate(BaseModel):
     tax_id: str | None = None
     billing_address: dict | None = None
     payment_terms: str | None = None
+    country: str | None = Field(default=None, max_length=64)
+    region: Literal["NA", "EMEA", "APAC", "LATAM"] | None = None
     custom_fields: dict | None = None
 
 
@@ -128,8 +131,9 @@ async def create_account(body: AccountCreate, db: AsyncSession = Depends(get_db)
         if match and match["score"] >= dedup.ACCOUNT_SUGGEST_AT:
             return JSONResponse(status_code=409, content={"detail": "Possible duplicate account", "duplicate": {
                 **{k: v for k, v in match.items() if k != "account"}, "account": {k: str(v) for k, v in match["account"].items()}}})
+    from app.services.enrichment import region_for
     account = Account(name=body.name.strip(), domain=domain, industry=body.industry, tier=body.tier, owner_id=body.owner_id or p.id,
-                      parent_id=body.parent_id, custom_metadata={})
+                      parent_id=body.parent_id, country=body.country, region=region_for(body.country), custom_metadata={})
     db.add(account)
     try:
         await db.commit()
@@ -167,6 +171,9 @@ async def update_account(account_id: uuid.UUID, body: AccountUpdate, db: AsyncSe
         data["locations"] = [loc.model_dump() if hasattr(loc, "model_dump") else loc for loc in body.locations or []]
     if "alt_domains" in data:
         data["alt_domains"] = sorted({_normalize_domain(d) for d in data["alt_domains"] or [] if d})
+    if "country" in data and "region" not in data:
+        from app.services.enrichment import region_for
+        data["region"] = region_for(data["country"])
     for field, value in data.items():
         setattr(account, field, value)
     emit(db, "account.updated", "account", account.id, {"account_id": str(account.id), "name": account.name, "changed": sorted(data)})
@@ -229,7 +236,9 @@ async def account_360(account_id: uuid.UUID, db: AsyncSession = Depends(get_db),
             "id": account.id, "name": account.name, "domain": account.domain, "alt_domains": account.alt_domains, "industry": account.industry,
             "industry_code": account.industry_code, "tier": account.tier, "lifecycle_stage": account.lifecycle_stage,
             "annual_revenue": float(account.annual_revenue) if account.annual_revenue is not None else None, "employee_count": account.employee_count,
-            "locations": account.locations, "health_score": account.health_score, "health_breakdown": meta.get("health_breakdown"),
+            "locations": account.locations, "country": account.country, "region": account.region,
+            "credit_risk": {"score": account.credit_risk_score, "band": account.credit_risk_band, "factors": account.credit_risk_factors},
+            "health_score": account.health_score, "health_breakdown": meta.get("health_breakdown"),
             "relationship_strength": account.relationship_strength, "churn_risk": account.churn_risk, "churn_factors": account.churn_factors,
             "owner": user_brief(account.owner), "created_at": account.created_at,
             "customer_master": {"legal_name": account.legal_name, "tax_id": account.tax_id, "billing_address": account.billing_address,

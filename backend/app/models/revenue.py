@@ -11,7 +11,8 @@ from app.core.database import Base
 
 __all__ = [
     "Product", "PriceBookEntry", "ApprovalPolicy", "Quote", "QuoteLine", "ApprovalRequest", "DocumentTemplate",
-    "Document", "SignatureRequest", "Contract",
+    "Document", "SignatureRequest", "Contract", "PriceBook", "Promotion", "BundleComponent", "ProductRule", "ApprovalGroup",
+    "DocumentVersion", "DocumentComment",
 ]
 
 
@@ -34,6 +35,7 @@ class Product(Base):
     billing_type: Mapped[str] = mapped_column(String(20), default="recurring")
     unit: Mapped[str] = mapped_column(String(40), default="user / month")
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    product_type: Mapped[str] = mapped_column(String(10), default="standard")
     created_at: Mapped[datetime] = _ts()
 
     prices: Mapped[list["PriceBookEntry"]] = relationship(back_populates="product", lazy="selectin", cascade="all, delete-orphan")
@@ -48,6 +50,7 @@ class PriceBookEntry(Base):
     product_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"))
     currency: Mapped[str] = mapped_column(String(3))
     tiers: Mapped[list] = mapped_column(JSONB)
+    price_book_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("price_books.id", ondelete="CASCADE"))
 
     product: Mapped[Product] = relationship(back_populates="prices")
 
@@ -82,6 +85,13 @@ class Quote(Base):
     acv: Mapped[Decimal] = mapped_column(Numeric(16, 2), default=0)
     tcv: Mapped[Decimal] = mapped_column(Numeric(16, 2), default=0)
     notes: Mapped[str | None] = mapped_column(Text)
+    price_book_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("price_books.id", ondelete="SET NULL"))
+    promo_code: Mapped[str | None] = mapped_column(String(40))
+    promo_discount_total: Mapped[Decimal] = mapped_column(Numeric(16, 2), default=0)
+    is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    custom_terms: Mapped[str | None] = mapped_column(Text)
+    billing_frequency: Mapped[str] = mapped_column(String(10), default="annual")
     created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = _ts()
@@ -106,6 +116,10 @@ class QuoteLine(Base):
     net_unit_price: Mapped[Decimal] = mapped_column(Numeric(14, 4))
     billing_type: Mapped[str] = mapped_column(String(20))
     line_total: Mapped[Decimal] = mapped_column(Numeric(16, 2))
+    parent_line_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("quote_lines.id", ondelete="CASCADE"))
+    is_included: Mapped[bool] = mapped_column(Boolean, default=False)
+    promo_discount_pct: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=0)
+    price_source: Mapped[str] = mapped_column(String(160), default="list")
 
     quote: Mapped[Quote] = relationship(back_populates="lines")
     product: Mapped[Product] = relationship(lazy="joined")
@@ -117,6 +131,7 @@ class ApprovalRequest(Base):
     id: Mapped[uuid.UUID] = _pk()
     quote_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("quotes.id", ondelete="CASCADE"))
     required_role: Mapped[str] = mapped_column(String(30))
+    level: Mapped[int] = mapped_column(Integer, default=1)
     reason: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(20), default="pending")
     decided_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
@@ -157,6 +172,9 @@ class Document(Base):
     created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = _ts()
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    current_version: Mapped[int] = mapped_column(Integer, default=1)
+    esign_provider: Mapped[str] = mapped_column(String(20), default="builtin")
+    envelope_id: Mapped[str | None] = mapped_column(String(120))
 
     signers: Mapped[list["SignatureRequest"]] = relationship(back_populates="document", lazy="selectin", cascade="all, delete-orphan", order_by="SignatureRequest.sign_order")
     account = relationship("Account", lazy="joined")
@@ -206,3 +224,100 @@ class Contract(Base):
     created_at: Mapped[datetime] = _ts()
 
     account = relationship("Account", lazy="joined")
+
+
+class PriceBook(Base):
+    """Customer-specific or regional price book; entries with no book are the list price book."""
+
+    __tablename__ = "price_books"
+
+    id: Mapped[uuid.UUID] = _pk()
+    name: Mapped[str] = mapped_column(String(120))
+    kind: Mapped[str] = mapped_column(String(10))
+    account_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("accounts.id", ondelete="CASCADE"))
+    region: Mapped[str | None] = mapped_column(String(40))
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    valid_from: Mapped[date | None] = mapped_column(Date)
+    valid_to: Mapped[date | None] = mapped_column(Date)
+    created_at: Mapped[datetime] = _ts()
+
+    entries: Mapped[list[PriceBookEntry]] = relationship(lazy="selectin", cascade="all, delete-orphan")
+
+
+class Promotion(Base):
+    __tablename__ = "promotions"
+
+    id: Mapped[uuid.UUID] = _pk()
+    code: Mapped[str] = mapped_column(String(40), unique=True)
+    name: Mapped[str] = mapped_column(String(120))
+    discount_pct: Mapped[Decimal] = mapped_column(Numeric(5, 2))
+    product_ids: Mapped[list] = mapped_column(JSONB, default=list)
+    min_quantity: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
+    valid_from: Mapped[date | None] = mapped_column(Date)
+    valid_to: Mapped[date | None] = mapped_column(Date)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = _ts()
+
+
+class BundleComponent(Base):
+    __tablename__ = "bundle_components"
+
+    bundle_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), primary_key=True)
+    component_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("products.id", ondelete="RESTRICT"), primary_key=True)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=1)
+
+    component: Mapped[Product] = relationship(foreign_keys=[component_id], lazy="joined")
+
+
+class ProductRule(Base):
+    __tablename__ = "product_rules"
+
+    id: Mapped[uuid.UUID] = _pk()
+    product_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"))
+    rule_type: Mapped[str] = mapped_column(String(10))
+    target_product_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"))
+    message: Mapped[str | None] = mapped_column(String(300))
+    created_at: Mapped[datetime] = _ts()
+
+    product: Mapped[Product] = relationship(foreign_keys=[product_id], lazy="joined")
+    target: Mapped[Product] = relationship(foreign_keys=[target_product_id], lazy="joined")
+
+
+class ApprovalGroup(Base):
+    __tablename__ = "approval_groups"
+
+    key: Mapped[str] = mapped_column(String(30), primary_key=True)
+    name: Mapped[str] = mapped_column(String(80))
+    member_ids: Mapped[list] = mapped_column(JSONB, default=list)
+
+
+class DocumentVersion(Base):
+    __tablename__ = "document_versions"
+
+    id: Mapped[uuid.UUID] = _pk()
+    document_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("documents.id", ondelete="CASCADE"))
+    version: Mapped[int] = mapped_column(Integer)
+    body: Mapped[str] = mapped_column(Text)
+    content_sha256: Mapped[str] = mapped_column(String(64))
+    note: Mapped[str | None] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(String(10), default="internal")
+    created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    author_name: Mapped[str | None] = mapped_column(String(200))
+    created_at: Mapped[datetime] = _ts()
+
+
+class DocumentComment(Base):
+    __tablename__ = "document_comments"
+
+    id: Mapped[uuid.UUID] = _pk()
+    document_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("documents.id", ondelete="CASCADE"))
+    version: Mapped[int] = mapped_column(Integer)
+    clause: Mapped[str | None] = mapped_column(String(200))
+    body: Mapped[str] = mapped_column(Text)
+    party: Mapped[str] = mapped_column(String(10))
+    author_name: Mapped[str] = mapped_column(String(200))
+    author_email: Mapped[str | None] = mapped_column(String(255))
+    user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    resolved: Mapped[bool] = mapped_column(Boolean, default=False)
+    resolved_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = _ts()

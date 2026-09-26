@@ -145,6 +145,7 @@ async def sync_inbound(db: AsyncSession) -> ErpSyncRun:
                 emit(db, "invoice.overdue", "account", acc.id, {"account": acc.name, "open_balance": summary["open_balance"], "buckets": summary["buckets"]})
             acc.credit_hold = bool(hold)
             stats["credit_holds"] += int(acc.credit_hold)
+            await assess_credit_risk(db, acc)
         run.status, run.stats = "succeeded", stats
     except Exception as exc:  # recorded on the run; the API surfaces it
         run.status, run.error, run.stats = "failed", str(exc)[:1000], stats
@@ -197,6 +198,43 @@ async def ar_summary(db: AsyncSession, account: Account, today: date | None = No
                       "amount": float(i.amount), "balance": float(i.balance), "status": i.status,
                       "days_overdue": max(0, (today - i.due_date).days) if i.status == "open" and float(i.balance) > 0 else 0} for i in invoices],
     }
+
+
+async def assess_credit_risk(db: AsyncSession, account: Account, pending_exposure: float = 0.0) -> dict:
+    """Credit & risk score (0-100, higher = riskier) from receivables, credit utilisation and history.
+
+    utilisation of the credit limit (incl. the pending deal)  >100% +40 · >80% +25 · >50% +10
+    overdue share of the open balance                          >50% +25 · >20% +15 · >0 +5
+    oldest bucket                                               90+ days +25 · 61-90 days +10
+    ERP credit hold +20 · no ERP customer record (no payment history) +25
+    band: <40 low · 40-69 medium · >=70 high
+    """
+    ar = await ar_summary(db, account)
+    score, factors = 0, {}
+    limit = ar["credit_limit"]
+    if account.erp_customer_id is None:
+        score += 25
+        factors["no_credit_history"] = True
+    if limit:
+        util = (ar["open_balance"] + pending_exposure) / limit
+        factors["utilization_pct"] = round(util * 100)
+        score += 40 if util > 1 else 25 if util > 0.8 else 10 if util > 0.5 else 0
+    if ar["open_balance"]:
+        share = ar["overdue_balance"] / ar["open_balance"]
+        factors["overdue_pct"] = round(share * 100)
+        score += 25 if share > 0.5 else 15 if share > 0.2 else 5 if share > 0 else 0
+    if ar["buckets"]["90_plus"] > 0:
+        score, factors["over_90_days"] = score + 25, ar["buckets"]["90_plus"]
+    elif ar["buckets"]["61_90"] > 0:
+        score, factors["over_60_days"] = score + 10, ar["buckets"]["61_90"]
+    if account.credit_hold:
+        score, factors["credit_hold"] = score + 20, True
+    score = min(100, score)
+    band = "high" if score >= 70 else "medium" if score >= 40 else "low"
+    account.credit_risk_score, account.credit_risk_band, account.credit_risk_factors = score, band, factors
+    return {"score": score, "band": band, "factors": factors, "credit_hold": account.credit_hold,
+            "credit_limit": limit, "credit_available": ar["credit_available"], "open_balance": ar["open_balance"],
+            "overdue_balance": ar["overdue_balance"]}
 
 
 async def deliver_events(db: AsyncSession, limit: int = 200) -> dict:

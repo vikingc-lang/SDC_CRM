@@ -87,6 +87,20 @@ async def job_mail_sync() -> None:
             await mail.sync_mailbox(db, conn)
 
 
+async def job_erp_orders() -> None:
+    from app.services import orders
+
+    async with SessionLocal() as db:
+        await orders.process_queue(db)
+
+
+async def job_lead_rescore() -> None:
+    from app.services import leads
+
+    async with SessionLocal() as db:
+        await leads.rescore_open(db)
+
+
 async def job_reindex() -> None:
     async with SessionLocal() as db:
         await insights.reindex(db)
@@ -104,6 +118,8 @@ JOBS = {
     "auto_dedup": job_auto_dedup,
     "erp_sync": job_erp_sync,
     "mail_sync": job_mail_sync,
+    "erp_orders": job_erp_orders,
+    "lead_rescore": job_lead_rescore,
     "reindex": job_reindex,
 }
 

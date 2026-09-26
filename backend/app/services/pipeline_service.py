@@ -6,13 +6,16 @@ Every stage carries declarative ``gate_rules`` evaluated on entry:
     domain_verified   {}                                account has a real domain
     role_mapped       {"roles": ["Champion", ...]}      at least one active contact in a role
     activity_logged   {"activity_types": [...], "keywords": "regex", "since_stage": bool}
-    field_present     {"field": "target_close_date"}    deal field populated
+    field_present     {"field": "target_close_date"}    deal field populated ("custom:<key>" for custom fields)
     amount_approved   {}                                amount > 0 and an approved/sent/accepted quote
     keyword           {"pattern": "regex"}              mentioned anywhere in logged notes
     pain_identified   {}                                AI pain points captured or pain discussed
     signed_document   {"doc_type": "order_form"}       fully executed document
     any_of            {"rules": [...]}                  one of several rules
     loss_reason       {"min_debrief": 15}               Closed-Lost taxonomy + rep debrief
+    qualification     {"framework": "meddpicc", "min": 5}   criteria confirmed (carried over from the lead)
+    primary_quote     {}                                a primary quote that is approved, sent or accepted
+    tax_exempt_cert   {}                                certificate on file when the deal is tax exempt
 
 Forward moves with unmet rules are rejected (HTTP 409 + checklist) unless the
 user explicitly overrides, which is written to the audit trail. The Closed-Lost
@@ -52,6 +55,10 @@ TRIGGER_DESCRIPTIONS = {
     "Joint Demo": "Drafting follow-up recap email and action items",
     "Proposal/InfoSec": "Checking deal stagnation against average velocity (14 days)",
     "Proposal Sent": "Checking deal stagnation against average velocity (14 days)",
+    "Solution Design / Demo": "Drafting follow-up recap email and action items",
+    "Technical Evaluation / PoC": "Scanning transcripts for competitor mentions",
+    "Business Case Validation": "Checking deal stagnation against average velocity (14 days)",
+    "Negotiation & Legal": "Checking deal stagnation against average velocity (14 days)",
     "won": "Provisioning onboarding workspace, contract and renewal schedule; health set to 100",
     "lost": "Logging win/loss post-mortem to vector memory",
 }
@@ -113,6 +120,9 @@ class _Ctx:
             self._quotes = (await self.db.execute(select(Quote.status).where(Quote.deal_id == self.deal.id))).scalars().all()
         return self._quotes
 
+    async def primary_quote_status(self):
+        return (await self.db.execute(select(Quote.status).where(Quote.deal_id == self.deal.id, Quote.is_primary.is_(True)))).scalar_one_or_none()
+
     async def documents(self):
         if self._docs is None:
             self._docs = (
@@ -148,8 +158,20 @@ async def _check(rule: dict, ctx: _Ctx) -> bool:
             return True
         return False
     if t == "field_present":
-        value = getattr(deal, rule["field"], None)
-        return value not in (None, "", 0)
+        field = rule["field"]
+        value = (deal.custom_fields or {}).get(field[7:]) if field.startswith("custom:") else getattr(deal, field, None)
+        if isinstance(value, dict):
+            return any(str(v).strip() for v in value.values() if v is not None)
+        return value not in (None, "", 0, [])
+    if t == "qualification":
+        q = (deal.custom_fields or {}).get("qualification") or {}
+        if rule.get("framework") and q.get("framework") != rule["framework"]:
+            return False
+        return sum(1 for c in (q.get("criteria") or {}).values() if c.get("met")) >= int(rule.get("min", 1))
+    if t == "primary_quote":
+        return await ctx.primary_quote_status() in ("approved", "sent", "accepted")
+    if t == "tax_exempt_cert":
+        return not deal.tax_exempt or deal.tax_exempt_cert_id is not None
     if t == "amount_approved":
         return float(deal.amount or 0) > 0 and any(s in ("approved", "sent", "accepted") for s in await ctx.quotes())
     if t == "keyword":
@@ -241,6 +263,10 @@ async def change_stage(
             "amount": float(deal.amount or 0), "currency": deal.currency, "loss_reason": deal.loss_reason,
         })
     await db.flush()
+    if stage.is_closed_won:  # lock the primary quote and raise the order when the ERP has everything it needs
+        from app.services import orders
+
+        await orders.on_closed_won(db, deal, user)
     return deal, delta, gates, trigger_for(stage)
 
 

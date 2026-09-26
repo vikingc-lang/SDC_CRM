@@ -2,7 +2,7 @@ import uuid
 from datetime import date
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -11,10 +11,12 @@ from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
 from app.core.rbac import Principal, authorize
+from app.core.config import settings
 from app.models import (
-    ApprovalPolicy, ApprovalRequest, Attachment, Contract, Deal, Document, PriceBookEntry, Product, Quote, SignatureRequest,
+    Account, ApprovalGroup, ApprovalPolicy, ApprovalRequest, Attachment, BundleComponent, Contract, Deal, Document, DocumentComment,
+    DocumentVersion, PriceBook, PriceBookEntry, Product, ProductRule, Promotion, Quote, SignatureRequest, User,
 )
-from app.services import clm, cpq, storage
+from app.services import clm, contracting, cpq, storage
 
 router = APIRouter(tags=["cpq"])
 public = APIRouter(tags=["e-signature (public)"])
@@ -38,6 +40,7 @@ class ProductIn(BaseModel):
     billing_type: Literal["recurring", "one_time"] = "recurring"
     unit: str = "user / month"
     active: bool = True
+    product_type: Literal["standard", "bundle"] = "standard"
     prices: list[PriceIn] = []
 
 
@@ -54,6 +57,9 @@ class QuoteIn(BaseModel):
     term_months: int = Field(default=12, ge=1, le=120)
     payment_terms: str = "NET30"
     notes: str | None = None
+    promo_code: str | None = Field(default=None, max_length=40)
+    custom_terms: str | None = Field(default=None, max_length=4000)
+    billing_frequency: Literal["annual", "quarterly", "monthly"] = "annual"
     lines: list[LineIn] = []
 
 
@@ -63,7 +69,7 @@ class DecisionIn(BaseModel):
 
 
 class DocumentIn(BaseModel):
-    doc_type: Literal["nda", "sow", "order_form"]
+    doc_type: Literal["nda", "sow", "order_form", "proposal", "msa", "sla", "dpa"]
     deal_id: uuid.UUID
     quote_id: uuid.UUID | None = None
 
@@ -76,6 +82,7 @@ class Signer(BaseModel):
 
 class SendIn(BaseModel):
     signers: list[Signer] = Field(min_length=2)
+    provider: Literal["builtin", "docusign", "adobe_sign"] | None = None
 
 
 class SignIn(BaseModel):
@@ -87,9 +94,9 @@ class SignIn(BaseModel):
 
 class PolicyIn(BaseModel):
     name: str
-    rule_type: Literal["discount_pct", "payment_terms", "credit_hold", "tcv"]
+    rule_type: Literal["discount_pct", "payment_terms", "credit_hold", "tcv", "custom_terms", "credit_risk"]
     threshold: float | None = None
-    approver_role: Literal["sales_manager", "finance"]
+    approver_role: Literal["sales_manager", "deal_desk", "vp_sales", "finance", "legal"]
     active: bool = True
 
 
@@ -186,9 +193,11 @@ async def list_quotes(status: str | None = None, db: AsyncSession = Depends(get_
 @router.post("/deals/{deal_id}/quotes", status_code=201)
 async def create_quote(deal_id: uuid.UUID, body: QuoteIn, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("quotes", "create"))):
     deal = await _deal(db, p, deal_id)
+    has_primary = (await db.execute(select(Quote.id).where(Quote.deal_id == deal.id, Quote.is_primary.is_(True)))).first()
     quote = Quote(deal_id=deal.id, quote_number=await cpq.next_quote_number(db), name=body.name or f"{deal.title} quote",
                   currency=body.currency.upper(), term_months=body.term_months, payment_terms=body.payment_terms.upper(), notes=body.notes,
-                  created_by=p.id, status="draft")
+                  promo_code=(body.promo_code or "").strip().upper() or None, custom_terms=body.custom_terms,
+                  billing_frequency=body.billing_frequency, created_by=p.id, status="draft", is_primary=not has_primary)
     db.add(quote)
     await db.flush()
     try:
@@ -214,8 +223,12 @@ async def update_quote(quote_id: uuid.UUID, body: QuoteIn, db: AsyncSession = De
     quote = await _quote(db, p, quote_id)
     if quote.status in ("sent", "accepted"):
         raise HTTPException(409, f"Quote is {quote.status}; create a new version instead")
+    if quote.locked_at:
+        raise HTTPException(409, "Quote is locked; create a new quote instead")
     quote.name = body.name or quote.name
     quote.currency, quote.term_months, quote.payment_terms, quote.notes = body.currency.upper(), body.term_months, body.payment_terms.upper(), body.notes
+    quote.promo_code, quote.custom_terms = (body.promo_code or "").strip().upper() or None, body.custom_terms
+    quote.billing_frequency = body.billing_frequency
     try:
         await cpq.rebuild(db, quote, [l.model_dump() for l in body.lines])
     except cpq.PricingError as exc:
@@ -236,10 +249,22 @@ async def submit_quote(quote_id: uuid.UUID, db: AsyncSession = Depends(get_db), 
     return cpq.quote_out(await db.get(Quote, quote_id))
 
 
+@router.post("/quotes/{quote_id}/primary")
+async def make_primary(quote_id: uuid.UUID, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("quotes", "update"))):
+    quote = await _quote(db, p, quote_id)
+    try:
+        await cpq.set_primary(db, quote)
+    except cpq.PricingError as exc:
+        raise HTTPException(409, str(exc))
+    await db.commit()
+    return cpq.quote_out(await db.get(Quote, quote_id))
+
+
 @router.get("/approvals")
 async def approvals_inbox(status: Literal["pending", "decided", "all"] = "pending", db: AsyncSession = Depends(get_db),
                           p: Principal = Depends(authorize("approvals", "read"))):
-    stmt = (select(ApprovalRequest).options(selectinload(ApprovalRequest.quote).joinedload(Quote.deal).joinedload(Deal.account))
+    stmt = (select(ApprovalRequest).options(selectinload(ApprovalRequest.quote).joinedload(Quote.deal).joinedload(Deal.account),
+                                            selectinload(ApprovalRequest.quote).selectinload(Quote.approvals))
             .order_by(ApprovalRequest.created_at.desc()).limit(200))
     if p.is_own_scope("approvals"):
         stmt = stmt.where(ApprovalRequest.quote_id.in_(select(Quote.id).join(Deal, Quote.deal_id == Deal.id).where(
@@ -254,7 +279,10 @@ async def approvals_inbox(status: Literal["pending", "decided", "all"] = "pendin
         q = a.quote
         out.append({"id": a.id, "required_role": a.required_role, "reason": a.reason, "status": a.status, "comment": a.comment, "created_at": a.created_at,
                     "decided_at": a.decided_at, "decided_by": {"full_name": a.decider.full_name} if a.decider else None,
-                    "can_decide": a.status == "pending" and p.user.role in cpq.APPROVER_ROLES[a.required_role],
+                    "level": a.level, "label": cpq.LEVEL_LABELS.get(a.required_role, a.required_role),
+                    "waiting": a.status == "pending" and any(o.status == "pending" and o.level < a.level for o in q.approvals),
+                    "can_decide": a.status == "pending" and await cpq.can_approve(db, p.user, a.required_role)
+                    and not any(o.status == "pending" and o.level < a.level for o in q.approvals),
                     "quote": {"id": q.id, "quote_number": q.quote_number, "name": q.name, "currency": q.currency, "tcv": float(q.tcv),
                               "acv": float(q.acv), "max_discount_pct": float(q.max_discount_pct), "payment_terms": q.payment_terms,
                               "deal": {"id": q.deal.id, "title": q.deal.title, "account": q.deal.account.name}}})
@@ -308,7 +336,9 @@ async def send_document(document_id: uuid.UUID, body: SendIn, db: AsyncSession =
         raise HTTPException(404, "Document not found")
     await p.ensure_account(db, doc.account_id, "documents")
     try:
-        await clm.send_for_signature(db, doc, [s.model_dump() for s in body.signers])
+        await clm.send_for_signature(db, doc, [s.model_dump(exclude={"provider"}) for s in body.signers], body.provider)
+    except contracting.CreditReviewRequired as exc:
+        raise HTTPException(409, str(exc))
     except ValueError as exc:
         raise HTTPException(422, str(exc))
     await db.commit()
@@ -336,9 +366,13 @@ async def signing_view(token: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(404, "This signing link is invalid")
     doc = await db.get(Document, req.document_id)
     await db.refresh(doc, ["signers"])
-    return {"document": {"title": doc.title, "status": doc.status, "body_html": clm.to_html(doc.body), "content_sha256": doc.content_sha256},
+    comments = (await db.execute(select(DocumentComment).where(DocumentComment.document_id == doc.id).order_by(DocumentComment.created_at))).scalars().all()
+    return {"document": {"title": doc.title, "status": doc.status, "body_html": clm.to_html(doc.body), "content_sha256": doc.content_sha256,
+                         "version": doc.current_version},
+            "comments": [contracting.comment_out(c) for c in comments],
+            "can_comment": req.signer_party == "customer" and doc.status in ("sent", "partially_signed", "in_negotiation"),
             "signer": {"name": req.signer_name, "email": req.signer_email, "party": req.signer_party, "status": req.status},
-            "your_turn": req.status == "pending" and clm.is_turn(req, doc) and doc.status not in ("completed", "voided"),
+            "your_turn": req.status == "pending" and clm.is_turn(req, doc) and doc.status not in ("completed", "voided", "in_negotiation"),
             "signers": [{"name": s.signer_name, "party": s.signer_party, "status": s.status, "signed_at": s.signed_at} for s in doc.signers]}
 
 
@@ -384,3 +418,327 @@ async def contract_from_quote(quote_id: uuid.UUID, start_date: date | None = Non
     quote.status = "accepted"
     await db.commit()
     return clm.contract_out(await db.get(Contract, contract.id))
+
+
+# ---- deal desk administration: price books, promotions, bundles, rules, approval chain ---------------------
+class BookEntryIn(BaseModel):
+    product_id: uuid.UUID
+    currency: str = Field(min_length=3, max_length=3)
+    tiers: list[Tier] = Field(min_length=1)
+
+
+class PriceBookIn(BaseModel):
+    name: str = Field(min_length=2, max_length=120)
+    kind: Literal["customer", "regional"]
+    account_id: uuid.UUID | None = None
+    region: str | None = None
+    active: bool = True
+    valid_from: date | None = None
+    valid_to: date | None = None
+    entries: list[BookEntryIn] = []
+
+
+class PromotionIn(BaseModel):
+    code: str = Field(min_length=3, max_length=40, pattern=r"^[A-Za-z0-9_-]+$")
+    name: str = Field(min_length=2, max_length=120)
+    discount_pct: float = Field(gt=0, lt=100)
+    product_ids: list[uuid.UUID] = []
+    min_quantity: float = Field(default=0, ge=0)
+    valid_from: date | None = None
+    valid_to: date | None = None
+    active: bool = True
+
+
+class ComponentIn(BaseModel):
+    component_id: uuid.UUID
+    quantity: float = Field(default=1, gt=0)
+
+
+class RuleIn(BaseModel):
+    product_id: uuid.UUID
+    rule_type: Literal["requires", "excludes"]
+    target_product_id: uuid.UUID
+    message: str | None = Field(default=None, max_length=300)
+
+
+class GroupIn(BaseModel):
+    member_ids: list[uuid.UUID]
+
+
+def _book_out(b: PriceBook) -> dict:
+    return {"id": b.id, "name": b.name, "kind": b.kind, "account_id": b.account_id, "region": b.region, "active": b.active,
+            "valid_from": b.valid_from, "valid_to": b.valid_to,
+            "entries": [{"product_id": e.product_id, "currency": e.currency, "tiers": e.tiers} for e in b.entries]}
+
+
+@router.get("/price-books")
+async def list_books(db: AsyncSession = Depends(get_db), _: Principal = Depends(authorize("products", "read"))):
+    books = (await db.execute(select(PriceBook).order_by(PriceBook.kind, PriceBook.name))).scalars().unique().all()
+    accounts = {a.id: a.name for a in (await db.execute(select(Account).where(Account.id.in_([b.account_id for b in books if b.account_id])))).scalars().unique().all()}
+    return [{**_book_out(b), "account_name": accounts.get(b.account_id)} for b in books]
+
+
+@router.post("/price-books", status_code=201)
+async def create_book(body: PriceBookIn, db: AsyncSession = Depends(get_db), _: Principal = Depends(authorize("products", "update"))):
+    if (body.kind == "customer") != bool(body.account_id) or (body.kind == "regional") != bool(body.region):
+        raise HTTPException(422, "Customer books need an account; regional books need a region")
+    book = PriceBook(**body.model_dump(exclude={"entries"}))
+    db.add(book)
+    await db.flush()
+    for e in body.entries:
+        tiers = sorted([t.model_dump() for t in e.tiers], key=lambda t: t["min_qty"])
+        db.add(PriceBookEntry(product_id=e.product_id, currency=e.currency.upper(), tiers=tiers, price_book_id=book.id))
+    await db.commit()
+    fresh = (await db.execute(select(PriceBook).where(PriceBook.id == book.id).options(selectinload(PriceBook.entries))
+                              .execution_options(populate_existing=True))).scalars().one()
+    return _book_out(fresh)
+
+
+@router.delete("/price-books/{book_id}", status_code=204)
+async def delete_book(book_id: uuid.UUID, db: AsyncSession = Depends(get_db), _: Principal = Depends(authorize("products", "update"))):
+    book = await db.get(PriceBook, book_id)
+    if book:
+        await db.delete(book)
+        await db.commit()
+
+
+def _promo_out(p: Promotion) -> dict:
+    return {"id": p.id, "code": p.code, "name": p.name, "discount_pct": float(p.discount_pct), "product_ids": p.product_ids,
+            "min_quantity": float(p.min_quantity or 0), "valid_from": p.valid_from, "valid_to": p.valid_to, "active": p.active}
+
+
+@router.get("/promotions")
+async def list_promotions(db: AsyncSession = Depends(get_db), _: Principal = Depends(authorize("quotes", "read"))):
+    return [_promo_out(p) for p in (await db.execute(select(Promotion).order_by(Promotion.created_at.desc()))).scalars().all()]
+
+
+@router.post("/promotions", status_code=201)
+async def create_promotion(body: PromotionIn, db: AsyncSession = Depends(get_db), _: Principal = Depends(authorize("products", "update"))):
+    if (await db.execute(select(Promotion.id).where(Promotion.code == body.code.upper()))).first():
+        raise HTTPException(409, "Promotion code already exists")
+    promo = Promotion(**{**body.model_dump(), "code": body.code.upper(), "product_ids": [str(x) for x in body.product_ids]})
+    db.add(promo)
+    await db.commit()
+    return _promo_out(promo)
+
+
+@router.patch("/promotions/{promo_id}")
+async def toggle_promotion(promo_id: uuid.UUID, active: bool, db: AsyncSession = Depends(get_db), _: Principal = Depends(authorize("products", "update"))):
+    promo = await db.get(Promotion, promo_id)
+    if promo is None:
+        raise HTTPException(404, "Promotion not found")
+    promo.active = active
+    await db.commit()
+    return _promo_out(promo)
+
+
+@router.get("/products/{product_id}/configuration")
+async def product_configuration(product_id: uuid.UUID, db: AsyncSession = Depends(get_db), _: Principal = Depends(authorize("products", "read"))):
+    comps = (await db.execute(select(BundleComponent).where(BundleComponent.bundle_id == product_id))).scalars().unique().all()
+    rules = (await db.execute(select(ProductRule).where(ProductRule.product_id == product_id))).scalars().unique().all()
+    return {"components": [{"component_id": c.component_id, "sku": c.component.sku, "name": c.component.name, "quantity": float(c.quantity)} for c in comps],
+            "rules": [{"id": r.id, "rule_type": r.rule_type, "target_product_id": r.target_product_id, "target": r.target.name, "message": r.message} for r in rules]}
+
+
+@router.put("/products/{product_id}/components")
+async def set_components(product_id: uuid.UUID, body: list[ComponentIn], db: AsyncSession = Depends(get_db), _: Principal = Depends(authorize("products", "update"))):
+    product = await db.get(Product, product_id)
+    if product is None:
+        raise HTTPException(404, "Product not found")
+    if any(c.component_id == product_id for c in body):
+        raise HTTPException(422, "A bundle cannot contain itself")
+    for old in (await db.execute(select(BundleComponent).where(BundleComponent.bundle_id == product_id))).scalars().all():
+        await db.delete(old)
+    await db.flush()
+    for c in body:
+        db.add(BundleComponent(bundle_id=product_id, component_id=c.component_id, quantity=c.quantity))
+    product.product_type = "bundle" if body else "standard"
+    await db.commit()
+    return await product_configuration(product_id, db)
+
+
+@router.post("/product-rules", status_code=201)
+async def create_rule(body: RuleIn, db: AsyncSession = Depends(get_db), _: Principal = Depends(authorize("products", "update"))):
+    if body.product_id == body.target_product_id:
+        raise HTTPException(422, "A product cannot reference itself")
+    rule = ProductRule(**body.model_dump())
+    db.add(rule)
+    await db.commit()
+    return {"id": rule.id}
+
+
+@router.delete("/product-rules/{rule_id}", status_code=204)
+async def delete_rule(rule_id: uuid.UUID, db: AsyncSession = Depends(get_db), _: Principal = Depends(authorize("products", "update"))):
+    rule = await db.get(ProductRule, rule_id)
+    if rule:
+        await db.delete(rule)
+        await db.commit()
+
+
+@router.post("/approval-policies", status_code=201)
+async def create_policy(body: PolicyIn, db: AsyncSession = Depends(get_db), _: Principal = Depends(authorize("admin", "update"))):
+    policy = ApprovalPolicy(**body.model_dump())
+    db.add(policy)
+    await db.commit()
+    return {"id": policy.id}
+
+
+@router.delete("/approval-policies/{policy_id}", status_code=204)
+async def delete_policy(policy_id: uuid.UUID, db: AsyncSession = Depends(get_db), _: Principal = Depends(authorize("admin", "update"))):
+    policy = await db.get(ApprovalPolicy, policy_id)
+    if policy:
+        await db.delete(policy)
+        await db.commit()
+
+
+@router.get("/approval-groups")
+async def approval_groups(db: AsyncSession = Depends(get_db), _: Principal = Depends(authorize("approvals", "read"))):
+    groups = {g.key: g for g in (await db.execute(select(ApprovalGroup))).scalars().all()}
+    users = {u.id: u for u in (await db.execute(select(User))).scalars().all()}
+    out = []
+    for level, key in enumerate(cpq.CHAIN, start=1):
+        members = [users[uuid.UUID(str(m))] for m in (groups[key].member_ids if key in groups else []) if uuid.UUID(str(m)) in users]
+        implicit = [u for u in users.values() if u.is_active and (u.role == "super_admin" or (key == "sales_manager" and u.role == "sales_manager"))]
+        out.append({"key": key, "label": cpq.LEVEL_LABELS[key], "level": level,
+                    "members": [{"id": u.id, "full_name": u.full_name, "role": u.role} for u in members],
+                    "implicit": [{"id": u.id, "full_name": u.full_name, "role": u.role} for u in implicit]})
+    return out
+
+
+@router.put("/approval-groups/{key}")
+async def set_group(key: Literal["sales_manager", "deal_desk", "vp_sales", "finance", "legal"], body: GroupIn, db: AsyncSession = Depends(get_db),
+                    _: Principal = Depends(authorize("admin", "update"))):
+    group = await db.get(ApprovalGroup, key)
+    ids = [str(x) for x in body.member_ids]
+    if group is None:
+        db.add(ApprovalGroup(key=key, name=cpq.LEVEL_LABELS[key], member_ids=ids))
+    else:
+        group.member_ids = ids
+    await db.commit()
+    return {"key": key, "member_ids": ids}
+
+
+# ---- negotiation: versions, redlines, comments ---------------------------------------------------------------
+class VersionIn(BaseModel):
+    body: str = Field(min_length=20, max_length=200_000)
+    note: str | None = Field(default=None, max_length=500)
+
+
+class CommentIn(BaseModel):
+    body: str = Field(min_length=3, max_length=4000)
+    clause: str | None = Field(default=None, max_length=200)
+
+
+async def _doc(db: AsyncSession, p: Principal, document_id: uuid.UUID) -> Document:
+    doc = await db.get(Document, document_id)
+    if doc is None:
+        raise HTTPException(404, "Document not found")
+    await p.ensure_account(db, doc.account_id, "documents")
+    return doc
+
+
+@router.get("/documents/{document_id}/negotiation")
+async def negotiation(document_id: uuid.UUID, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("documents", "read"))):
+    doc = await _doc(db, p, document_id)
+    comments = (await db.execute(select(DocumentComment).where(DocumentComment.document_id == doc.id).order_by(DocumentComment.created_at))).scalars().all()
+    return {"current_version": doc.current_version, "status": doc.status,
+            "versions": [contracting.version_out(v) for v in await contracting.versions(db, doc)],
+            "comments": [contracting.comment_out(c) for c in comments],
+            "open_comments": sum(1 for c in comments if not c.resolved)}
+
+
+@router.get("/documents/{document_id}/diff")
+async def document_diff(document_id: uuid.UUID, from_version: int, to_version: int | None = None, db: AsyncSession = Depends(get_db),
+                        p: Principal = Depends(authorize("documents", "read"))):
+    doc = await _doc(db, p, document_id)
+    by_no = {v.version: v for v in await contracting.versions(db, doc)}
+    to_version = to_version or doc.current_version
+    if from_version not in by_no or to_version not in by_no:
+        raise HTTPException(404, "Version not found")
+    lines = contracting.diff(by_no[from_version].body, by_no[to_version].body)
+    return {"from": from_version, "to": to_version, "lines": lines,
+            "stats": {"inserted": sum(l["op"] == "insert" for l in lines), "deleted": sum(l["op"] == "delete" for l in lines)}}
+
+
+@router.post("/documents/{document_id}/versions", status_code=201)
+async def revise(document_id: uuid.UUID, body: VersionIn, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("documents", "update"))):
+    doc = await _doc(db, p, document_id)
+    try:
+        v = await contracting.new_version(db, doc, body.body, body.note, "internal", p.user)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    await db.commit()
+    return contracting.version_out(v)
+
+
+@router.post("/documents/{document_id}/comments", status_code=201)
+async def comment(document_id: uuid.UUID, body: CommentIn, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("documents", "update"))):
+    doc = await _doc(db, p, document_id)
+    try:
+        c = await contracting.add_comment(db, doc, body.body, "company", p.user.full_name, p.user.email, body.clause, p.user)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    await db.commit()
+    return contracting.comment_out(c)
+
+
+@router.post("/documents/{document_id}/comments/{comment_id}/resolve")
+async def resolve_comment(document_id: uuid.UUID, comment_id: uuid.UUID, db: AsyncSession = Depends(get_db),
+                          p: Principal = Depends(authorize("documents", "update"))):
+    await _doc(db, p, document_id)
+    c = await db.get(DocumentComment, comment_id)
+    if c is None or c.document_id != document_id:
+        raise HTTPException(404, "Comment not found")
+    c.resolved, c.resolved_by = True, p.id
+    await db.commit()
+    return contracting.comment_out(c)
+
+
+# ---- external e-signature provider callbacks ------------------------------------------------------------
+@public.post("/esign/webhook/{provider}")
+async def esign_webhook(provider: Literal["docusign", "adobe_sign"], payload: dict, x_cirra_esign_secret: str | None = Header(default=None),
+                        db: AsyncSession = Depends(get_db)):
+    if not settings.esign_webhook_secret or x_cirra_esign_secret != settings.esign_webhook_secret:
+        raise HTTPException(401, "Invalid webhook secret")
+    event = {  # accept normalised events or the providers' common field names
+        "envelope_id": payload.get("envelope_id") or payload.get("envelopeId") or (payload.get("agreement") or {}).get("id"),
+        "status": {"completed": "completed", "AGREEMENT_WORKFLOW_COMPLETED": "completed", "declined": "declined",
+                   "AGREEMENT_REJECTED": "declined", "recipient-completed": "signer_completed", "AGREEMENT_ACTION_COMPLETED": "signer_completed",
+                   "signer_completed": "signer_completed"}.get(payload.get("status") or payload.get("event") or ""),
+        "signer_email": payload.get("signer_email") or payload.get("recipientEmail") or (payload.get("participantUserEmail")),
+        "ip": payload.get("ip"),
+    }
+    if not event["envelope_id"] or not event["status"]:
+        raise HTTPException(422, "Unrecognised provider event")
+    try:
+        doc = await contracting.handle_provider_event(db, provider, event)
+    except LookupError:
+        raise HTTPException(404, "Unknown envelope")
+    await db.commit()
+    return {"document_id": doc.id, "status": doc.status}
+
+
+# ---- customer side of the negotiation (signing link) ------------------------------------------------------
+class CustomerCommentIn(BaseModel):
+    body: str = Field(min_length=3, max_length=4000)
+    clause: str | None = Field(default=None, max_length=200)
+
+
+async def _signer(db: AsyncSession, token: str) -> tuple[SignatureRequest, Document]:
+    req = (await db.execute(select(SignatureRequest).where(SignatureRequest.token == token))).scalars().first()
+    if req is None:
+        raise HTTPException(404, "This signing link is invalid")
+    return req, await db.get(Document, req.document_id)
+
+
+@public.post("/sign/{token}/comments", status_code=201)
+async def customer_comment(token: str, body: CustomerCommentIn, db: AsyncSession = Depends(get_db)):
+    req, doc = await _signer(db, token)
+    if req.signer_party != "customer":
+        raise HTTPException(403, "Company signers comment inside Cirra")
+    try:
+        c = await contracting.add_comment(db, doc, body.body, "customer", req.signer_name, req.signer_email, body.clause)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+    await db.commit()
+    return contracting.comment_out(c)

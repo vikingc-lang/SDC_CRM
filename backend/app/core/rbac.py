@@ -23,7 +23,7 @@ from app.models import Account, Deal, RolePermission, User
 ACTIONS = ("create", "read", "update", "delete", "export")
 RESOURCES = (
     "accounts", "contacts", "deals", "activities", "tasks", "products", "quotes", "approvals", "documents",
-    "contracts", "success", "finance", "partners", "reports", "admin", "audit", "data",
+    "contracts", "success", "finance", "partners", "reports", "admin", "audit", "data", "leads", "orders",
 )
 ROLES = ("super_admin", "sales_manager", "account_executive", "sdr", "auditor", "partner")
 ROLE_LABELS = {
@@ -45,18 +45,19 @@ DEFAULT_MATRIX: dict[str, dict[str, dict]] = {
         **{r: _p("CRUDE") for r in _SALES},
         "products": _p("RE"), "approvals": _p("RU"), "contracts": _p("CRUE"), "success": _p("CRUE"),
         "finance": _p("RE"), "partners": _p("CRUE"), "reports": _p("RE"), "admin": _p("R"), "audit": _p("R"),
-        "data": _p("CRE"),
+        "data": _p("CRE"), "leads": _p("CRUDE"), "orders": _p("CRUE"),
     },
     "account_executive": {
         "accounts": _p("CRU", "own"), "contacts": _p("CRUD", "own"), "deals": _p("CRU", "own"),
         "activities": _p("CRUD", "own"), "tasks": _p("CRUD", "own"), "quotes": _p("CRU", "own"),
         "documents": _p("CRU", "own"), "contracts": _p("R", "own"), "success": _p("R", "own"),
         "finance": _p("R", "own"), "products": _p("R"), "approvals": _p("R", "own"), "partners": _p("R"),
-        "reports": _p("R", "own"),
+        "reports": _p("R", "own"), "leads": _p("CRU", "own"), "orders": _p("CR", "own"),
     },
     "sdr": {
         "accounts": _p("CR", "own"), "contacts": _p("CRU", "own"), "deals": _p("CR", "own"),
         "activities": _p("CRU", "own"), "tasks": _p("CRU", "own"), "products": _p("R"), "reports": _p("R", "own"),
+        "leads": _p("CRUE", "own"),
     },
     "auditor": {**{r: _p("RE") for r in RESOURCES if r not in ("admin",)}, "admin": _p("R")},
     "partner": {},
@@ -134,10 +135,9 @@ async def load_matrix(db: AsyncSession, role: str) -> dict[str, Perm]:
     if hit and time.monotonic() - hit[0] < _TTL:
         return hit[1]
     rows = (await db.execute(select(RolePermission).where(RolePermission.role == role))).scalars().all()
-    if rows:
-        matrix = {r.resource: Perm(r.can_create, r.can_read, r.can_update, r.can_delete, r.can_export, r.scope) for r in rows}
-    else:
-        matrix = {res: Perm(**spec) for res, spec in DEFAULT_MATRIX.get(role, {}).items()}
+    # defaults first, stored overrides on top: resources added in later releases get sensible access
+    matrix = {res: Perm(**spec) for res, spec in DEFAULT_MATRIX.get(role, {}).items()}
+    matrix.update({r.resource: Perm(r.can_create, r.can_read, r.can_update, r.can_delete, r.can_export, r.scope) for r in rows})
     _cache[role] = (time.monotonic(), matrix)
     return matrix
 

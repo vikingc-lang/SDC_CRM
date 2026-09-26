@@ -5,15 +5,15 @@ from typing import Literal
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.rbac import Principal, authorize
 from app.models import (
-    Account, Activity, Contact, Deal, DealAlert, DealPartner, DealStageHistory, Document, Partner, Pipeline, PipelineStage, Quote, Task,
+    Account, Activity, Attachment, Contact, Deal, DealAlert, DealPartner, DealStageHistory, Document, Order, Partner, Pipeline, PipelineStage, Quote, Task,
 )
-from app.services import custom_fields, fx, insights, pipeline_service, scoring
+from app.services import custom_fields, fx, insights, orders, pipeline_service, scoring
 from app.services.clm import document_out
 from app.services.cpq import quote_out
 from app.services.jobs import enqueue
@@ -46,6 +46,14 @@ class DealUpdate(BaseModel):
     owner_id: uuid.UUID | None = None
     deal_type: Literal["new_business", "renewal", "upsell", "partner"] | None = None
     custom_fields: dict | None = None
+    # order data captured before Closed-Won (lead-to-order, step 7)
+    po_number: str | None = Field(default=None, max_length=64)
+    bill_to: dict | None = None
+    ship_to: dict | None = None
+    tax_exempt: bool | None = None
+    tax_exempt_cert_id: uuid.UUID | None = None
+    requested_delivery_date: date | None = None
+    incoterms: str | None = Field(default=None, max_length=10)
 
 
 class StageChange(BaseModel):
@@ -81,13 +89,127 @@ async def list_pipelines(db: AsyncSession = Depends(get_db), _: Principal = Depe
              "stages": [_stage_out(s) for s in p.stages]} for p in pipelines]
 
 
+GATE_TYPES = {"min_contacts", "domain_verified", "role_mapped", "activity_logged", "field_present", "amount_approved", "keyword",
+              "pain_identified", "signed_document", "any_of", "loss_reason", "qualification", "primary_quote", "tax_exempt_cert"}
+
+
+class StageIn(BaseModel):
+    name: str = Field(min_length=2, max_length=100)
+    default_probability: int = Field(ge=0, le=100)
+    after_stage_id: uuid.UUID | None = None  # insert after this stage; default = before Closed-Won
+    gate_rules: list[dict] = []
+
+
+class StagePatch(BaseModel):
+    name: str | None = Field(default=None, min_length=2, max_length=100)
+    default_probability: int | None = Field(default=None, ge=0, le=100)
+    move: Literal["up", "down"] | None = None
+
+
+async def _renumber(db: AsyncSession, stages: list[PipelineStage]) -> None:
+    """Two passes so the (pipeline, stage_order) unique constraint never sees a transient clash."""
+    for i, s in enumerate(stages, start=1):
+        s.stage_order = -i
+    await db.flush()
+    for i, s in enumerate(stages, start=1):
+        s.stage_order = i
+
+
+@router.post("/pipelines/{pipeline_id}/stages", status_code=201)
+async def add_stage(pipeline_id: uuid.UUID, body: StageIn, db: AsyncSession = Depends(get_db), _: Principal = Depends(authorize("admin", "update"))):
+    pipeline = await db.get(Pipeline, pipeline_id)
+    if pipeline is None:
+        raise HTTPException(404, "Pipeline not found")
+    if any(r.get("type") not in GATE_TYPES for r in body.gate_rules):
+        raise HTTPException(422, "Unknown gate rule type")
+    stages = sorted(pipeline.stages, key=lambda s: s.stage_order)
+    if any(s.name.lower() == body.name.strip().lower() for s in stages):
+        raise HTTPException(409, "A stage with this name already exists")
+    open_ = [s for s in stages if not s.is_closed_won and not s.is_closed_lost]
+    closed = [s for s in stages if s.is_closed_won or s.is_closed_lost]
+    idx = next((i + 1 for i, s in enumerate(open_) if s.id == body.after_stage_id), len(open_))
+    stage = PipelineStage(pipeline_id=pipeline.id, name=body.name.strip(), stage_order=0, default_probability=body.default_probability,
+                          gate_rules=body.gate_rules)
+    db.add(stage)
+    await _renumber(db, [*open_[:idx], stage, *open_[idx:], *closed])
+    await db.commit()
+    return _stage_out(stage)
+
+
+@router.patch("/pipelines/stages/{stage_id}")
+async def edit_stage(stage_id: uuid.UUID, body: StagePatch, db: AsyncSession = Depends(get_db), _: Principal = Depends(authorize("admin", "update"))):
+    stage = await db.get(PipelineStage, stage_id)
+    if stage is None:
+        raise HTTPException(404, "Stage not found")
+    pipeline = await db.get(Pipeline, stage.pipeline_id)
+    if body.name:
+        if any(s.id != stage.id and s.name.lower() == body.name.strip().lower() for s in pipeline.stages):
+            raise HTTPException(409, "A stage with this name already exists")
+        stage.name = body.name.strip()
+    if body.default_probability is not None:
+        stage.default_probability = body.default_probability
+    if body.move:
+        if stage.is_closed_won or stage.is_closed_lost:
+            raise HTTPException(422, "Closed stages stay at the end of the pipeline")
+        open_ = [s for s in sorted(pipeline.stages, key=lambda s: s.stage_order) if not s.is_closed_won and not s.is_closed_lost]
+        closed = [s for s in pipeline.stages if s.is_closed_won or s.is_closed_lost]
+        i = open_.index(stage)
+        j = i - 1 if body.move == "up" else i + 1
+        if 0 <= j < len(open_):
+            open_[i], open_[j] = open_[j], open_[i]
+        await _renumber(db, [*open_, *sorted(closed, key=lambda s: s.stage_order)])
+    await db.commit()
+    return _stage_out(stage)
+
+
+@router.delete("/pipelines/stages/{stage_id}", status_code=204)
+async def delete_stage(stage_id: uuid.UUID, db: AsyncSession = Depends(get_db), _: Principal = Depends(authorize("admin", "update"))):
+    stage = await db.get(PipelineStage, stage_id)
+    if stage is None:
+        raise HTTPException(404, "Stage not found")
+    if stage.is_closed_won or stage.is_closed_lost:
+        raise HTTPException(422, "Closed-Won and Closed-Lost stages cannot be removed")
+    in_use = (await db.execute(select(func.count()).select_from(Deal).where(Deal.stage_id == stage.id))).scalar_one()
+    if in_use:
+        raise HTTPException(409, f"{in_use} deal(s) are in this stage; move them first")
+    pipeline = await db.get(Pipeline, stage.pipeline_id)
+    remaining = [s for s in sorted(pipeline.stages, key=lambda s: s.stage_order) if s.id != stage.id]
+    if len([s for s in remaining if not s.is_closed_won and not s.is_closed_lost]) < 1:
+        raise HTTPException(422, "A pipeline needs at least one open stage")
+    history = (await db.execute(select(func.count()).select_from(DealStageHistory).where(
+        or_(DealStageHistory.to_stage_id == stage.id, DealStageHistory.from_stage_id == stage.id)))).scalar_one()
+    if history:
+        raise HTTPException(409, "Deals have passed through this stage; rename it instead so their history stays intact")
+    await db.delete(stage)
+    await _renumber(db, remaining)
+    await db.commit()
+
+
+@router.post("/pipelines/templates/{key}", status_code=201)
+async def install_template(key: str, db: AsyncSession = Depends(get_db), _: Principal = Depends(authorize("admin", "update"))):
+    from app.services.pipeline_templates import PIPELINES
+
+    spec = next((s for s in PIPELINES if s.get("key", s["kind"]) == key), None)
+    if spec is None:
+        raise HTTPException(404, "Unknown pipeline template")
+    if (await db.execute(select(Pipeline).where(Pipeline.name == spec["name"]))).scalars().first():
+        raise HTTPException(409, f"'{spec['name']}' is already installed")
+    p = Pipeline(name=spec["name"], kind=spec["kind"], is_default=False, description=spec["description"])
+    db.add(p)
+    await db.flush()
+    for order, (name, prob, rules) in enumerate(spec["stages"], start=1):
+        db.add(PipelineStage(pipeline_id=p.id, name=name, stage_order=order, default_probability=prob, gate_rules=rules,
+                             is_closed_won=name == "Closed-Won", is_closed_lost=name == "Closed-Lost"))
+    await db.commit()
+    return {"id": p.id, "name": p.name}
+
+
 @router.put("/pipelines/stages/{stage_id}/gates")
 async def update_gate_rules(stage_id: uuid.UUID, body: GateRulesUpdate, db: AsyncSession = Depends(get_db), _: Principal = Depends(authorize("admin", "update"))):
     stage = await db.get(PipelineStage, stage_id)
     if stage is None:
         raise HTTPException(404, "Stage not found")
-    allowed = {"min_contacts", "domain_verified", "role_mapped", "activity_logged", "field_present", "amount_approved", "keyword",
-               "pain_identified", "signed_document", "any_of", "loss_reason"}
+    allowed = GATE_TYPES
     for rule in body.gate_rules:
         if rule.get("type") not in allowed:
             raise HTTPException(422, f"Unknown gate rule type '{rule.get('type')}'")
@@ -183,6 +305,8 @@ async def get_deal(deal_id: uuid.UUID, db: AsyncSession = Depends(get_db), p: Pr
     partners = (await db.execute(select(DealPartner).where(DealPartner.deal_id == deal_id))).scalars().unique().all()
     alerts = (await db.execute(select(DealAlert).where(DealAlert.deal_id == deal_id, DealAlert.resolved_at.is_(None)))).scalars().unique().all()
     roles = [c.buying_role for c in contacts if c.status == "active"]
+    readiness = await orders.readiness(db, deal)
+    deal_orders = (await db.execute(select(Order).where(Order.deal_id == deal_id).order_by(Order.created_at.desc()))).scalars().unique().all()
     return {
         **card,
         "pipeline": {"id": pipeline.id, "name": pipeline.name, "kind": pipeline.kind},
@@ -200,6 +324,12 @@ async def get_deal(deal_id: uuid.UUID, db: AsyncSession = Depends(get_db), p: Pr
         "alerts": [{"id": a.id, "kind": a.kind, "severity": a.severity, "message": a.message, "created_at": a.created_at} for a in alerts],
         "next_best_actions": insights.next_best_actions(card, roles, deal.stage.stage_order),
         "loss_taxonomy": pipeline_service.LOSS_TAXONOMY,
+        "order_details": {"po_number": deal.po_number, "bill_to": deal.bill_to or {}, "ship_to": deal.ship_to or {}, "tax_exempt": deal.tax_exempt,
+                          "tax_exempt_cert_id": deal.tax_exempt_cert_id, "requested_delivery_date": deal.requested_delivery_date,
+                          "incoterms": deal.incoterms, "lead_id": deal.lead_id},
+        "order_readiness": readiness,
+        "orders": [orders.order_out(o) for o in deal_orders],
+        "credit_risk": {"score": deal.account.credit_risk_score, "band": deal.account.credit_risk_band, "credit_hold": deal.account.credit_hold},
     }
 
 
@@ -219,6 +349,15 @@ async def update_deal(deal_id: uuid.UUID, body: DealUpdate, db: AsyncSession = D
         deal.original_close_date = new_close
     if "currency" in data and data["currency"]:
         data["currency"] = data["currency"].upper()
+    if data.get("tax_exempt_cert_id"):
+        cert = await db.get(Attachment, data["tax_exempt_cert_id"])
+        if cert is None or cert.account_id != deal.account_id:
+            raise HTTPException(422, "The tax-exemption certificate must be a file attached to this account")
+    for key in ("bill_to", "ship_to"):
+        if data.get(key):
+            data[key] = {k: str(v).strip()[:200] for k, v in data[key].items() if v not in (None, "")}
+    if "po_number" in data and data["po_number"] is not None:
+        data["po_number"] = data["po_number"].strip() or None
     for field, value in data.items():
         setattr(deal, field, value)
     await db.commit()

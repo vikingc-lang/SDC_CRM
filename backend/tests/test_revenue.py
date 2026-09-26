@@ -51,7 +51,7 @@ async def test_gate_rules_are_configurable(client):
         assert ok.status_code == 200 and ok.json()["default_probability"] == 8
 
 
-async def test_cpq_tiers_tcv_and_two_level_approval_routing(client):
+async def test_cpq_tiers_tcv_and_sequential_approval_chain(client):
     deal, _ = await _new_deal(client, "Quote Routing", amount=0)
     products = {p["sku"]: p for p in (await client.get("/api/v1/products")).json()}
     q = (await client.post(f"/api/v1/deals/{deal['id']}/quotes", json={
@@ -67,8 +67,9 @@ async def test_cpq_tiers_tcv_and_two_level_approval_routing(client):
     q = (await client.post(f"/api/v1/quotes/{q['id']}/submit")).json()
     assert q["status"] == "pending_approval"
     roles = {a["required_role"]: a for a in q["approvals"] if a["status"] == "pending"}
-    assert set(roles) == {"sales_manager", "finance"}
-    assert "NET60" in roles["finance"]["reason"] and "30%" in roles["finance"]["reason"]
+    assert set(roles) == {"sales_manager", "deal_desk", "finance"}  # 30% > 10% and > 20%; NET60 > NET45
+    assert [roles[r]["level"] for r in ("sales_manager", "deal_desk", "finance")] == [1, 2, 3]
+    assert "NET60" in roles["finance"]["reason"] and "30%" in roles["deal_desk"]["reason"]
     async with login_as("priya@cirra.demo") as ae:
         assert (await ae.post(f"/api/v1/approvals/{roles['sales_manager']['id']}/decide", json={"approve": True})).status_code == 403
     assert (await client.post(f"/api/v1/approvals/{roles['finance']['id']}/decide", json={"approve": True})).status_code == 403  # manager isn't finance
@@ -78,9 +79,16 @@ async def test_cpq_tiers_tcv_and_two_level_approval_routing(client):
     async with login_as("diego@cirra.demo") as other_ae:  # row-level scope: not his deal
         theirs = (await other_ae.get("/api/v1/approvals", params={"status": "all"})).json()
         assert all(a["quote"]["deal"]["title"] != "Quote Routing" for a in theirs)
+    async with login_as("dana@cirra.demo") as desk:  # deal desk cannot jump the queue
+        r = await desk.post(f"/api/v1/approvals/{roles['deal_desk']['id']}/decide", json={"approve": True})
+        assert r.status_code == 409 and "Sales Manager" in r.json()["detail"]
     q = (await client.post(f"/api/v1/approvals/{roles['sales_manager']['id']}/decide", json={"approve": True, "comment": "Strategic logo"})).json()
-    assert q["status"] == "pending_approval"
-    async with login_as("admin@cirra.demo") as finance:
+    assert q["status"] == "pending_approval" and q["current_level"] == 2
+    async with login_as("dana@cirra.demo") as desk:
+        q = (await desk.post(f"/api/v1/approvals/{roles['deal_desk']['id']}/decide", json={"approve": True, "comment": "Margin OK"})).json()
+        assert (await desk.post(f"/api/v1/approvals/{roles['finance']['id']}/decide", json={"approve": True})).status_code == 403
+    assert q["current_level"] == 3
+    async with login_as("fiona@cirra.demo") as finance:
         q = (await finance.post(f"/api/v1/approvals/{roles['finance']['id']}/decide", json={"approve": True})).json()
     assert q["status"] == "approved"
     refreshed = (await client.get(f"/api/v1/deals/{deal['id']}")).json()

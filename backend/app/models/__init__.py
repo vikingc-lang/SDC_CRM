@@ -97,6 +97,11 @@ class Account(Base):
     churn_risk: Mapped[int] = mapped_column(Integer, default=0)
     churn_factors: Mapped[dict] = mapped_column(JSONB, default=dict)
     relationship_strength: Mapped[int | None] = mapped_column(Integer)
+    country: Mapped[str | None] = mapped_column(String(64))
+    region: Mapped[str | None] = mapped_column(String(40))
+    credit_risk_score: Mapped[int | None] = mapped_column(Integer)
+    credit_risk_band: Mapped[str | None] = mapped_column(String(10))
+    credit_risk_factors: Mapped[dict] = mapped_column(JSONB, default=dict)
     embedding = mapped_column(Vector(settings.embedding_dim), nullable=True)
     created_at: Mapped[datetime] = _created()
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -214,6 +219,14 @@ class Deal(Base):
     original_close_date: Mapped[date | None] = mapped_column(Date)
     close_date_pushes: Mapped[int] = mapped_column(Integer, default=0)
     custom_fields: Mapped[dict] = mapped_column(JSONB, default=dict)
+    po_number: Mapped[str | None] = mapped_column(String(64))
+    bill_to: Mapped[dict] = mapped_column(JSONB, default=dict)
+    ship_to: Mapped[dict] = mapped_column(JSONB, default=dict)
+    tax_exempt: Mapped[bool] = mapped_column(Boolean, default=False)
+    tax_exempt_cert_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("attachments.id", ondelete="SET NULL", use_alter=True))
+    requested_delivery_date: Mapped[date | None] = mapped_column(Date)
+    incoterms: Mapped[str | None] = mapped_column(String(10))
+    lead_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("leads.id", ondelete="SET NULL", use_alter=True))
     stage_entered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = _created()
@@ -320,5 +333,7 @@ from app.models.platform import *  # noqa: E402,F401,F403
 from app.models.revenue import *  # noqa: E402,F401,F403
 from app.models.success import *  # noqa: E402,F401,F403
 from app.models.partners import *  # noqa: E402,F401,F403
+from app.models.leads import *  # noqa: E402,F401,F403
+from app.models.orders import *  # noqa: E402,F401,F403
 
 import app.core.audit  # noqa: E402,F401  (registers the audit-trail flush listener)

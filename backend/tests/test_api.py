@@ -31,7 +31,8 @@ async def test_accounts_and_360(client):
 
 async def test_kanban_and_stage_gates(client):
     pipelines = (await client.get("/api/v1/pipelines")).json()
-    assert [p["kind"] for p in pipelines] == ["direct", "inbound", "renewal", "partner"]
+    assert [p["kind"] for p in pipelines] == ["direct", "direct", "inbound", "renewal", "partner"]
+    assert pipelines[1]["name"] == "Enterprise Solution Sale"
     pipeline = pipelines[0]
     board = (await client.get(f"/api/v1/pipeline/{pipeline['id']}/kanban")).json()
     names = [c["name"] for c in board["columns"]]

@@ -22,6 +22,17 @@ async def account_ar(account_id: uuid.UUID, db: AsyncSession = Depends(get_db), 
     return await erp.ar_summary(db, account)
 
 
+@router.get("/finance/accounts/{account_id}/credit-risk")
+async def credit_risk(account_id: uuid.UUID, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("finance", "read"))):
+    account = await db.get(Account, account_id)
+    if account is None:
+        raise HTTPException(404, "Account not found")
+    await p.ensure_account(db, account_id, "finance")
+    risk = await erp.assess_credit_risk(db, account)
+    await db.commit()
+    return risk
+
+
 @router.get("/finance/ar-aging")
 async def ar_aging(db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("finance", "read"))):
     accounts = (await db.execute(p.scope_accounts(select(Account), "finance").where(Account.erp_customer_id.is_not(None)))).scalars().unique().all()

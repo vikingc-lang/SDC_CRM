@@ -18,6 +18,8 @@ celery_app.conf.beat_schedule = {
     "risk-scan": _every("risk_scan", crontab(minute=15)),                      # pillar 6: slippage copilot, hourly
     "sla-escalations": _every("escalations", crontab(minute=30)),              # pillar 5: overdue escalation, hourly
     "erp-sync": _every("erp_sync", crontab(minute=45, hour="*/4")),            # pillar 8: customer master + A/R
+    "erp-orders": _every("erp_orders", crontab(minute="*/2")),                # lead-to-order: sales-order push + acks
+    "lead-rescore": _every("lead_rescore", crontab(hour=1, minute=30)),       # lead engagement decay
     "nightly-rescore": _every("rescore_all", crontab(hour=2, minute=0)),       # recency decays daily
     "renewals": _every("renewals", crontab(hour=3, minute=0)),                 # pillar 7: 120-day renewal engine
     "auto-dedup": _every("auto_dedup", crontab(hour=3, minute=30)),            # pillar 1: autonomous dedup

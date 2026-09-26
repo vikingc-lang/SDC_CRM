@@ -1,6 +1,6 @@
 """Contract lifecycle (pillar 4) and renewals (pillar 7).
 
-* Document assembly: NDA / SOW / Order Form templates (Jinja2, sandboxed) are
+* Document assembly: NDA / SOW / Order Form / proposal / MSA / SLA / DPA templates (Jinja2, sandboxed) are
   rendered from CRM entity fields into a lightweight Markdown dialect, shown
   as HTML in the app and rendered to PDF.
 * Built-in e-signature: each signer gets a single-use token link. Customers
@@ -101,13 +101,128 @@ Each milestone is accepted when delivered as described, unless the Customer repo
 ## Products and pricing
 | Item | Qty | Unit price | Discount | Total |
 |---|---|---|---|---|
-{% for l in lines %}| {{ l.name }} ({{ l.unit }}) | {{ l.quantity }} | {{ l.net_unit_price }} | {{ l.discount_pct }}% | {{ l.line_total }} |
+{% for l in lines %}| {{ l.name }} ({{ l.unit }}){% if l.included %}, included{% endif %} | {{ l.quantity }} | {{ l.net_unit_price }} | {{ l.discount_pct }}% | {{ l.line_total }} |
 {% endfor %}
 **Annual contract value (ACV):** {{ quote.acv }}
 **Total contract value (TCV):** {{ quote.tcv }}
 
 ## Terms
-This Order Form is governed by the Master Subscription Agreement between {{ company.name }} and the Customer. Fees are invoiced annually in advance{% if quote.payment_terms %} and payable {{ quote.payment_terms }}{% endif %}. This Order Form becomes binding when signed by both parties.
+This Order Form is governed by the Master Subscription Agreement between {{ company.name }} and the Customer. Fees are invoiced {{ quote.billing_frequency or 'annually' }} in advance{% if quote.payment_terms %} and payable {{ quote.payment_terms }}{% endif %}. This Order Form becomes binding when signed by both parties.
+"""),
+    "proposal": ("Commercial Proposal", """# Commercial Proposal
+
+**Prepared for:** {{ account.legal_name or account.name }}
+**Opportunity:** {{ deal.title }}
+**Proposal reference:** {{ quote.quote_number or "Draft" }}{% if quote.valid_until %} (valid until {{ quote.valid_until }}){% endif %}
+**Prepared by:** {{ owner.full_name or company.name }}, {{ today }}
+
+## 1. Your priorities
+{% if pain_points %}{% for p in pain_points %}- {{ p }}
+{% endfor %}{% else %}- One place for every account, contact, deal and conversation
+- A forecast leadership can trust
+- Less time on data entry, more time selling
+{% endif %}
+## 2. Proposed solution
+| Item | Qty | Unit price | Discount | Total |
+|---|---|---|---|---|
+{% for l in lines %}| {{ l.name }}{% if l.included %} (included){% endif %} | {{ l.quantity }} | {{ l.net_unit_price }} | {{ l.discount_pct }}% | {{ l.line_total }} |
+{% endfor %}
+## 3. Investment
+**Annual contract value (ACV):** {{ quote.acv }}
+**Total contract value (TCV):** {{ quote.tcv }}
+**Term:** {{ quote.term_months }} months, billed {{ quote.billing_frequency }}, payable {{ quote.payment_terms }}{% if quote.promo_code %}
+**Promotion applied:** {{ quote.promo_code }}{% endif %}
+
+## 4. Next steps
+1. Confirm scope and commercial terms
+2. Legal review of the Master Subscription Agreement, SLA and DPA
+3. Sign the Order Form electronically
+4. Kickoff within ten (10) business days of signature
+"""),
+    "msa": ("Master Subscription Agreement", """# Master Subscription Agreement
+
+This Master Subscription Agreement ("Agreement") is made on **{{ today }}** between **{{ company.name }}** ("Provider") and **{{ account.legal_name or account.name }}**{% if account.tax_id %} (Tax ID {{ account.tax_id }}){% endif %}{% if account.address %}, {{ account.address }}{% endif %} ("Customer").
+
+## 1. Subscription
+Provider grants Customer a non-exclusive, non-transferable right to use {{ company.product }} during the subscription term stated in each Order Form, for Customer's internal business purposes.
+
+## 2. Fees and payment
+Customer pays the fees in each Order Form. Invoices are payable **{{ quote.payment_terms or account.payment_terms }}** from the invoice date. Late amounts may accrue interest at the lesser of 1% per month or the maximum lawful rate.
+
+## 3. Customer data
+Customer owns Customer Data. Provider processes it only to provide the service and as described in the Data Processing Agreement, which forms part of this Agreement.
+
+## 4. Confidentiality
+Each party protects the other's Confidential Information with at least reasonable care and uses it only to perform this Agreement.
+
+## 5. Warranties
+Provider warrants that the service will perform materially as described in the documentation and will meet the Service Level Agreement.
+
+## 6. Limitation of liability
+Except for breaches of confidentiality or indemnity obligations, each party's aggregate liability is limited to the fees paid or payable in the twelve (12) months before the claim.
+
+## 7. Term and termination
+This Agreement continues while any Order Form is in effect. Either party may terminate for material breach not cured within thirty (30) days of notice.
+
+## 8. General
+Governing law and venue are as agreed by the parties in writing. This Agreement, with its Order Forms, SLA and DPA, is the entire agreement on its subject.
+{% if custom_terms %}
+## 9. Negotiated terms
+{{ custom_terms }}
+{% endif %}"""),
+    "sla": ("Service Level Agreement", """# Service Level Agreement
+
+This Service Level Agreement applies to {{ company.product }} provided to **{{ account.legal_name or account.name }}** under the Master Subscription Agreement.
+
+## 1. Availability
+Provider targets **99.9%** monthly availability, excluding scheduled maintenance announced at least 48 hours in advance.
+
+## 2. Support response times
+| Severity | Definition | First response | Update cadence |
+|---|---|---|---|
+| Critical | Service unavailable or data at risk | 1 hour | Every 2 hours |
+| High | Major function impaired, no workaround | 4 hours | Daily |
+| Medium | Function impaired, workaround exists | 1 business day | Every 3 business days |
+| Low | Question or cosmetic issue | 2 business days | As needed |
+
+## 3. Service credits
+| Monthly availability | Credit (% of monthly fee) |
+|---|---|
+| Below 99.9% | 5% |
+| Below 99.5% | 10% |
+| Below 99.0% | 25% |
+
+## 4. Exclusions
+Credits do not apply to outages caused by Customer systems, force majeure, or suspension for non-payment. Credits are Customer's sole remedy for missed availability targets.
+"""),
+    "dpa": ("Data Processing Agreement", """# Data Processing Agreement
+
+This Data Processing Agreement ("DPA") supplements the Master Subscription Agreement between **{{ company.name }}** ("Processor") and **{{ account.legal_name or account.name }}** ("Controller"), in line with Article 28 GDPR and the CCPA as applicable.
+
+## 1. Processing details
+- **Subject matter:** provision of {{ company.product }}
+- **Duration:** the term of the Agreement
+- **Data subjects:** Controller's customers, prospects, partners and employees
+- **Personal data:** names, business contact details, communications and activity records
+- **Special categories:** none intended
+
+## 2. Processor obligations
+Processor processes personal data only on documented instructions, ensures personnel confidentiality, and assists the Controller with data subject requests, impact assessments and consultations.
+
+## 3. Security
+Processor maintains appropriate technical and organisational measures, including encryption in transit and at rest, role-based access control, an immutable audit trail, and per-subject encryption keys that support erasure.
+
+## 4. Sub-processors
+Processor uses no sub-processors for the self-hosted deployment. Any new sub-processor requires thirty (30) days' prior notice and a right to object.
+
+## 5. International transfers
+Where personal data leaves the EEA, the parties rely on the EU Standard Contractual Clauses (Module 2).
+
+## 6. Breach notification
+Processor notifies the Controller without undue delay and in any event within **48 hours** of becoming aware of a personal data breach.
+
+## 7. Return and deletion
+At the end of the Agreement, Processor deletes or returns all personal data at the Controller's choice, unless retention is required by law.
 """),
 }
 
@@ -136,9 +251,12 @@ async def build_context(db: AsyncSession, account: Account, deal: Deal | None, q
         "champion": {"name": champion.full_name, "title": champion.job_title or champion.buying_role} if champion else None,
         "pain_points": (deal.ai_insights or {}).get("pain_points", [])[:5] if deal else [],
         "quote": {"quote_number": quote.quote_number, "term_months": quote.term_months, "payment_terms": quote.payment_terms,
-                  "currency": quote.currency, "acv": _fmt_money(quote.acv, cur), "tcv": _fmt_money(quote.tcv, cur)} if quote else {},
-        "lines": [{"name": l.product.name, "unit": l.product.unit, "quantity": f"{float(l.quantity):g}",
-                   "net_unit_price": _fmt_money(l.net_unit_price, cur), "discount_pct": f"{float(l.discount_pct):g}",
+                  "currency": quote.currency, "acv": _fmt_money(quote.acv, cur), "tcv": _fmt_money(quote.tcv, cur),
+                  "billing_frequency": {"annual": "annually", "quarterly": "quarterly", "monthly": "monthly"}.get(quote.billing_frequency, "annually"),
+                  "promo_code": quote.promo_code, "valid_until": quote.valid_until.strftime("%B %d, %Y") if quote.valid_until else None} if quote else {},
+        "custom_terms": quote.custom_terms if quote else None,
+        "lines": [{"name": l.product.name, "unit": l.product.unit, "quantity": f"{float(l.quantity):g}", "included": l.is_included,
+                   "net_unit_price": _fmt_money(l.net_unit_price, cur), "discount_pct": f"{float(1 - (1 - l.discount_pct / 100) * (1 - l.promo_discount_pct / 100)) * 100:g}",
                    "line_total": _fmt_money(l.line_total, cur)} for l in (quote.lines if quote else [])],
     }
 
@@ -314,29 +432,46 @@ async def generate(db: AsyncSession, doc_type: str, account: Account, deal: Deal
     await ensure_templates(db)
     tpl = (await db.execute(select(DocumentTemplate).where(DocumentTemplate.doc_type == doc_type, DocumentTemplate.active.is_(True))
                             .order_by(DocumentTemplate.version.desc()))).scalars().first()
-    if doc_type == "order_form" and quote is None:
-        raise ValueError("An Order Form needs an approved quote")
-    if quote is not None and quote.status not in ("approved", "sent", "accepted"):
+    if doc_type in ("order_form", "proposal") and quote is None:
+        raise ValueError("An Order Form or proposal needs a quote")
+    if doc_type == "order_form" and quote.status not in ("approved", "sent", "accepted"):
         raise ValueError("The quote must be approved before generating an Order Form")
+    if tpl is None:
+        raise ValueError(f"No active {doc_type} template")
     body = render_template(tpl.body, await build_context(db, account, deal, quote))
     doc = Document(template_id=tpl.id, doc_type=doc_type, title=f"{tpl.name}: {account.name}", account_id=account.id,
                    deal_id=deal.id if deal else None, quote_id=quote.id if quote else None, body=body,
                    content_sha256=hashlib.sha256(body.encode()).hexdigest(), status="draft", created_by=user_id)
     db.add(doc)
     await db.flush()
+    from app.models import DocumentVersion
+    db.add(DocumentVersion(document_id=doc.id, version=1, body=body, content_sha256=doc.content_sha256, note="Generated from template",
+                           source="internal", created_by=user_id))
+    await db.flush()
     await db.refresh(doc, ["signers", "account"])
     return doc
 
 
-async def send_for_signature(db: AsyncSession, doc: Document, signers: list[dict]) -> Document:
-    if doc.status not in ("draft",):
+async def send_for_signature(db: AsyncSession, doc: Document, signers: list[dict], provider: str | None = None) -> Document:
+    from app.services import contracting
+
+    if doc.status not in ("draft", "in_negotiation"):
         raise ValueError(f"Document is already {doc.status}")
+    open_comments = await contracting.open_comment_count(db, doc)
+    if open_comments:
+        raise ValueError(f"Resolve {open_comments} open redline comment(s) before sending for signature")
+    await contracting.credit_check(db, doc)
     if not any(s["party"] == "customer" for s in signers) or not any(s["party"] == "company" for s in signers):
         raise ValueError("Add at least one customer signer and one company countersigner")
     for s in sorted(signers, key=lambda s: 0 if s["party"] == "customer" else 1):
         db.add(SignatureRequest(document_id=doc.id, signer_name=s["name"], signer_email=s["email"], signer_party=s["party"],
                                 sign_order=1 if s["party"] == "customer" else 2, token=secrets.token_urlsafe(32)))
     doc.status = "sent"
+    provider = provider or settings.esign_provider
+    if provider != "builtin":
+        await db.flush()
+        await db.refresh(doc, ["signers", "account"])
+        await contracting.send_external(db, doc, provider)
     if doc.quote_id:
         quote = await db.get(Quote, doc.quote_id)
         if quote and quote.status == "approved":
@@ -362,6 +497,10 @@ async def sign(db: AsyncSession, req: SignatureRequest, signature_text: str, sig
     await db.refresh(doc, ["signers"])
     if doc.status in ("completed", "voided"):
         raise ValueError(f"Document is {doc.status}")
+    if doc.status == "in_negotiation":
+        raise ValueError("Changes were requested; wait for the revised document")
+    if doc.esign_provider != "builtin":
+        raise ValueError(f"This document is being signed through {doc.esign_provider.replace('_', ' ').title()}")
     if req.status != "pending":
         raise ValueError("This signature request was already used")
     if not is_turn(req, doc):
@@ -487,7 +626,8 @@ def document_out(d: Document, include_body: bool = True) -> dict:
     return {
         "id": d.id, "doc_type": d.doc_type, "title": d.title, "status": d.status, "account": {"id": d.account.id, "name": d.account.name},
         "deal_id": d.deal_id, "quote_id": d.quote_id, "content_sha256": d.content_sha256, "pdf_attachment_id": d.pdf_attachment_id,
-        "created_at": d.created_at, "completed_at": d.completed_at,
+        "created_at": d.created_at, "completed_at": d.completed_at, "current_version": d.current_version,
+        "esign_provider": d.esign_provider, "envelope_id": d.envelope_id,
         "body_html": to_html(d.body) if include_body else None, "body": d.body if include_body else None,
         "signers": [{"id": s.id, "name": s.signer_name, "email": s.signer_email, "party": s.signer_party, "order": s.sign_order,
                      "status": s.status, "signed_at": s.signed_at, "signed_ip": s.signed_ip, "signature_text": s.signature_text,

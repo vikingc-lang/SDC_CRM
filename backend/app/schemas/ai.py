@@ -9,7 +9,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
-BuyingRole = Literal["Champion", "Decision Maker", "Economic Buyer", "Blocker", "Evaluator", "Influencer"]
+BuyingRole = Literal["Champion", "Decision Maker", "Economic Buyer", "Blocker", "Evaluator", "Influencer", "Legal Counsel", "Procurement"]
 Sentiment = Literal["positive", "neutral", "negative"]
 ActivityType = Literal["meeting", "call", "note", "email"]
 SuggestedStage = Literal["Discovery", "Pain Fit", "Solution Demo", "Proposal/InfoSec"]

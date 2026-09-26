@@ -54,6 +54,17 @@ class Settings(BaseSettings):
     # JSON map of SDC module -> webhook URL for ecosystem event delivery, e.g. {"yield": "http://yield/api/events"}
     ecosystem_webhooks: str = "{}"
 
+    # Lead enrichment: 'internal' (existing accounts/leads, no network) | 'rest' (provider or MDM proxy) | 'disabled'
+    enrichment_provider: Literal["internal", "rest", "disabled"] = "internal"
+    enrichment_rest_url: str | None = None
+    enrichment_rest_token: str | None = None
+
+    # E-signature: 'builtin' (default, no egress) or an external provider for execution packets
+    esign_provider: Literal["builtin", "docusign", "adobe_sign"] = "builtin"
+    esign_api_url: str | None = None          # e.g. https://demo.docusign.net/restapi/v2.1/accounts/<id>
+    esign_api_token: str | None = None
+    esign_webhook_secret: str | None = None   # shared secret expected in the provider callback header
+
     # 'hash' (offline feature-hashing) | 'ollama' | 'aws_bedrock'
     embedding_provider: Literal["hash", "ollama", "aws_bedrock"] = "hash"
     embedding_dim: int = 1536
