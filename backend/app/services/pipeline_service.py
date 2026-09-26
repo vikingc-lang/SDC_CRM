@@ -73,9 +73,20 @@ def trigger_for(stage: PipelineStage) -> str | None:
 
 
 class GateError(Exception):
+    status_code = 409
+
     def __init__(self, message: str, gates: list[dict]):
         super().__init__(message)
         self.gates = gates
+
+
+class GateOverrideDenied(GateError):
+    """Only managers may push a deal past unmet entry criteria; the override is logged in the stage history."""
+
+    status_code = 403
+
+
+OVERRIDE_ROLES = ("sales_manager", "super_admin")
 
 
 async def default_pipeline(db: AsyncSession, kind: str | None = None) -> Pipeline:
@@ -229,6 +240,8 @@ async def change_stage(
         raise GateError("A loss reason from the taxonomy and a rep debrief (15+ characters) are required", gates)
     if moving_forward and unmet and not override_gates:
         raise GateError("Stage-gate entry criteria not met", gates)
+    if moving_forward and unmet and user is not None and user.role not in OVERRIDE_ROLES:
+        raise GateOverrideDenied("Only a sales manager can override unmet stage-gate criteria", gates)
 
     rates = await fx.rates(db)
     before = _deal_weighted(deal, old_stage, rates)

@@ -168,3 +168,29 @@ def test_billing_schedule_periods():
     s = billing_schedule("recurring", Decimal("10"), Decimal("1"), 7, "quarterly", date(2027, 1, 31))
     assert [i["amount"] for i in s] == [30.0, 30.0, 10.0] and s[1]["invoice_date"] == "2027-04-30"
     assert billing_schedule("one_time", Decimal("250"), Decimal("2"), 12, "monthly", date(2027, 1, 1))[0]["amount"] == 500.0
+
+
+async def test_only_managers_can_override_stage_gates(client):
+    """Regression: a rep could force Closed-Won past the order checks, leaving a won deal with no order."""
+    async with login_as("diego@cirra.demo") as ae:
+        deal = next(d for d in (await ae.get("/api/v1/deals", params={"status": "all"})).json() if d["title"].startswith("Crescent"))
+        stages = {s["name"]: s["id"] for s in (await ae.get(f"/api/v1/deals/{deal['id']}")).json()["stages"]}
+        r = await ae.patch(f"/api/v1/deals/{deal['id']}/stage", json={"stage_id": stages["Closed-Won"], "override_gates": True})
+        assert r.status_code == 403 and r.json()["gates"]
+        assert (await ae.get(f"/api/v1/deals/{deal['id']}")).json()["stage"] != "Closed-Won"
+    # the manager may still override; the override is recorded on the stage history
+    r = await client.patch(f"/api/v1/deals/{deal['id']}/stage", json={"stage_id": stages["Solution Design / Demo"], "override_gates": True})
+    assert r.status_code == 200
+    history = (await client.get(f"/api/v1/deals/{deal['id']}")).json()["history"]
+    assert history[-1]["gate_overridden"] is True
+
+
+async def test_account_360_with_legal_and_procurement_contacts(client):
+    """Regression: the Account 360 crashed when a contact had one of the new buying roles."""
+    acc = (await client.post("/api/v1/accounts", json={"name": "Role Sort Co", "domain": "rolesort.example.com", "force": True})).json()
+    for first, role in (("Lee", "Legal Counsel"), ("Pat", "Procurement"), ("Cam", "Champion")):
+        await client.post("/api/v1/contacts", json={"account_id": acc["id"], "first_name": first, "last_name": "Sort",
+                                                    "email": f"{first.lower()}@rolesort.example.com", "buying_role": role})
+    r = await client.get(f"/api/v1/accounts/{acc['id']}/360")
+    assert r.status_code == 200
+    assert [c["buying_role"] for c in r.json()["contacts"]][:3] == ["Champion", "Legal Counsel", "Procurement"]

@@ -16,6 +16,7 @@ import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Avatar } from "@/components/ui/misc";
 import { api, errorMessage } from "@/lib/api";
+import { useMe } from "@/lib/me";
 import type { Deal, GateCheck, Kanban, KanbanColumn, LossReason } from "@/lib/types";
 import { fmtMoney } from "@/components/ui/extra";
 import { cn, money, shortDate } from "@/lib/utils";
@@ -94,6 +95,8 @@ function StageMoveDialog({ pending, busy, onCancel, onConfirm }: {
   const [competitor, setCompetitor] = useState("");
   const debriefOk = debrief.trim().length >= 15;
   const unmet = pending?.gates?.filter((g) => !g.met) ?? [];
+  const { me } = useMe();
+  const canOverride = me?.role === "sales_manager" || me?.role === "super_admin";
   return (
     <Dialog open={!!pending} onOpenChange={(o) => !o && onCancel()}>
       <DialogContent title="Stage gate" className="max-w-md">
@@ -140,7 +143,7 @@ function StageMoveDialog({ pending, busy, onCancel, onConfirm }: {
             )}
             {unmet.length > 0 && !pending.needsReason && (
               <p className="mt-4 rounded-md bg-muted px-3 py-2 text-[12.5px] text-muted-foreground">
-                Moving anyway is recorded in the audit trail as a gate override.
+                {canOverride ? "Moving anyway is recorded in the audit trail as a gate override." : "Complete the criteria above, or ask your sales manager to override the gate."}
               </p>
             )}
             <div className="mt-5 flex justify-end gap-2">
@@ -149,7 +152,7 @@ function StageMoveDialog({ pending, busy, onCancel, onConfirm }: {
                 <Button variant="destructive" size="sm" disabled={!reason || !debriefOk} loading={busy}
                   onClick={() => onConfirm({ reason: reason as LossReason, debrief, competitor }, true)}>Close as lost</Button>
               ) : (
-                <Button size="sm" loading={busy} onClick={() => onConfirm(undefined, true)}>Move anyway</Button>
+                canOverride && <Button size="sm" loading={busy} onClick={() => onConfirm(undefined, true)}>Move anyway</Button>
               )}
             </div>
           </div>

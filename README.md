@@ -120,7 +120,15 @@ cd backend && TEST_DATABASE_URL=postgresql+asyncpg://cirra_user:cirra_secure_pas
 cd frontend && npm run typecheck && npm run lint && npm run build
 ```
 
-The backend suite (68 tests) covers the scoring formulas, the extractor and LLM fallback, and every pillar end to end:
+Browser end-to-end test of the lead-to-order flow (62 checks across 12 journeys: web form → lead → conversion → stage
+gates → CPQ and approvals → redlines and e-signature → Closed-Won → order → ERP, plus admin, role access, an error sweep
+of every screen for five roles, and mobile layout). Run it against freshly seeded demo data with the API and web app up:
+
+```bash
+npm i playwright && node e2e/lead-to-order.mjs ./e2e-output   # writes e2e-output/e2e/results.json
+```
+
+The backend suite (70 tests) covers the scoring formulas, the extractor and LLM fallback, and every pillar end to end:
 RBAC and row-level scope, the append-only audit trail, crypto-shredding erasure, dedup and merge, hierarchy rollups,
 all pipelines' gates, CPQ pricing, price books, promotions, bundles and the sequential approval chain, document generation,
 redlining and e-signature (built-in and provider webhooks), lead capture, scoring, routing and conversion, order generation

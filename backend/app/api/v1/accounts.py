@@ -225,8 +225,9 @@ async def account_360(account_id: uuid.UUID, db: AsyncSession = Depends(get_db),
     defs = (await db.execute(select(CustomFieldDefinition).where(CustomFieldDefinition.entity == "account").order_by(CustomFieldDefinition.label))).scalars().all()
     parent = await db.get(Account, account.parent_id) if account.parent_id else None
     children = (await db.execute(select(Account.id, Account.name, Account.health_score).where(Account.parent_id == account_id))).all()
-    role_order = ("Champion", "Decision Maker", "Economic Buyer", "Influencer", "Evaluator", "Blocker")
-    contacts = sorted(account.contacts, key=lambda c: (c.status != "active", role_order.index(c.buying_role)))
+    role_order = ("Champion", "Decision Maker", "Economic Buyer", "Legal Counsel", "Procurement", "Influencer", "Evaluator", "Blocker")
+    rank = {r: i for i, r in enumerate(role_order)}
+    contacts = sorted(account.contacts, key=lambda c: (c.status != "active", rank.get(c.buying_role, len(rank))))
     cards = [deal_card(d, rates) for d in deals]
     open_cards = [c for c in cards if not c["is_won"] and not c["is_lost"]]
     ar = await erp.ar_summary(db, account)

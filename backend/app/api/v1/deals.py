@@ -376,7 +376,7 @@ async def change_deal_stage(deal_id: uuid.UUID, body: StageChange, background: B
         deal, delta, gates, action = await pipeline_service.change_stage(
             db, deal, stage, p.user, body.loss_reason, body.override_gates, body.loss_debrief, body.loss_competitor, body.win_debrief)
     except pipeline_service.GateError as exc:
-        return JSONResponse(status_code=409, content={"detail": str(exc), "gates": exc.gates, "stage": stage.name,
+        return JSONResponse(status_code=exc.status_code, content={"detail": str(exc), "gates": exc.gates, "stage": stage.name,
                                                       "loss_taxonomy": pipeline_service.LOSS_TAXONOMY if stage.is_closed_lost else None})
     except ValueError as exc:
         raise HTTPException(422, str(exc))
