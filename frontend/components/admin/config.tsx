@@ -26,7 +26,7 @@ export function CustomFieldsPanel() {
   const [f, setF] = useState({ entity: "account", key: "", label: "", field_type: "text", options: "", required: false });
   const create = useMutation({
     mutationFn: async () => (await api.post("/admin/custom-fields", { ...f, options: f.options.split(",").map((s) => s.trim()).filter(Boolean) })).data,
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["custom-fields"] }); setF({ ...f, key: "", label: "", options: "" }); toast.success("Field added"); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["custom-fields"] }); setF((x) => ({ ...x, key: "", label: "", options: "" })); toast.success("Field added"); },
     onError: (e) => toast.error(errorMessage(e)),
   });
   const remove = useMutation({

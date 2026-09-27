@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, BookOpen, Building2, Copy, Lock, MessageSquare, Star, User } from "lucide-react";
+import { ArrowLeft, BookOpen, Building2, Copy, Lock, Mail, MessageSquare, Star, User } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
@@ -20,7 +20,9 @@ interface CaseDetail extends CaseRow {
   description: string | null; resolved_at: string | null; first_responded_at: string | null;
   account_detail: { id: string; name: string; tier: string; health_score: number };
   contact: { id: string; name: string; email: string | null; phone: string | null; job_title: string | null } | null;
-  comments: { id: string; author: string | null; body: string; internal: boolean; created_at: string }[];
+  comments: { id: string; author: string | null; body: string; internal: boolean; created_at: string; from_customer?: boolean; emailed?: boolean }[];
+  supplied: { email: string; name: string | null } | null;
+  replies_by_email: boolean;
   suggested_articles: { id: string; title: string; category: string | null }[];
   other_cases: { id: string; case_number: string; subject: string; status: string }[];
   csat: { score: number | null; comment: string | null; at: string | null; survey_url: string | null };
@@ -39,8 +41,14 @@ export default function CasePage() {
     onSuccess: refresh, onError: (e) => toast.error(errorMessage(e)),
   });
   const post = useMutation({
-    mutationFn: async () => (await api.post(`/cases/${id}/comments`, { body: reply, internal })).data,
-    onSuccess: () => { setReply(""); refresh(); toast.success(internal ? "Note added" : "Reply sent"); },
+    mutationFn: async () => (await api.post<{ id: string; email: string }>(`/cases/${id}/comments`, { body: reply, internal })).data,
+    onSuccess: (r) => {
+      setReply(""); refresh();
+      if (internal) toast.success("Note added");
+      else if (r.email === "sent") toast.success("Reply sent and emailed to the customer");
+      else if (r.email === "failed") toast.error("Reply saved, but the email couldn't be sent");
+      else toast.success("Reply sent");
+    },
     onError: (e) => toast.error(errorMessage(e)),
   });
   if (c.isError) return <p className="text-sm text-muted-foreground">Case not found or outside your scope. <Link href="/cases" className="text-primary hover:underline">Back to cases</Link></p>;
@@ -77,10 +85,13 @@ export default function CasePage() {
                 </div>
               )}
               {d.comments.map((x) => (
-                <div key={x.id} className={cn("rounded-lg border p-3.5", x.internal && "border-dashed bg-[color-mix(in_srgb,var(--status-warning)_6%,transparent)]")}>
+                <div key={x.id} className={cn("rounded-lg border p-3.5", x.internal && "border-dashed bg-[color-mix(in_srgb,var(--status-warning)_6%,transparent)]",
+                  x.from_customer && "bg-muted/40")}>
                   <p className="mb-1 flex items-center gap-1.5 text-[12px] text-muted-foreground">
-                    {x.internal ? <Lock className="h-3 w-3" /> : <MessageSquare className="h-3 w-3" />}
-                    <span className="font-medium text-foreground">{x.author ?? "Unknown"}</span>{x.internal ? " · internal note" : " · reply"} · {relativeDays(x.created_at)}
+                    {x.internal ? <Lock className="h-3 w-3" /> : x.from_customer ? <Mail className="h-3 w-3" /> : <MessageSquare className="h-3 w-3" />}
+                    <span className="font-medium text-foreground">{x.author ?? "Unknown"}</span>
+                    {x.internal ? " · internal note" : x.from_customer ? " · customer reply" : " · reply"} · {relativeDays(x.created_at)}
+                    {x.emailed && <Badge tone="outline" className="ml-1">Emailed</Badge>}
                   </p>
                   <p className="whitespace-pre-wrap text-[13.5px]">{x.body}</p>
                 </div>
@@ -101,7 +112,8 @@ export default function CasePage() {
                   <Textarea id="case-reply" aria-label={internal ? "Internal note" : "Reply"} rows={4} required value={reply} onChange={(e) => setReply(e.target.value)}
                     placeholder={internal ? "Only your team sees this" : "Write your reply"} />
                   <div className="flex items-center justify-between gap-2">
-                    <p className="text-[12px] text-subtle">{internal ? "Notes don't stop the response clock." : d.first_responded_at ? "Sets the case to Pending (waiting on the customer)." : "The first reply stops the first-response clock."}</p>
+                    <p className="text-[12px] text-subtle">{internal ? "Notes don't stop the response clock." : d.first_responded_at ? "Sets the case to Pending (waiting on the customer)." : "The first reply stops the first-response clock."}
+                      {!internal && d.replies_by_email && ` Emailed to ${d.contact?.email ?? d.supplied?.email}.`}</p>
                     <Button type="submit" size="sm" loading={post.isPending}>{internal ? "Add note" : "Send reply"}</Button>
                   </div>
                 </form>
@@ -132,6 +144,8 @@ export default function CasePage() {
             <CardBody className="space-y-2 pt-0 text-[13px]">
               <Link href={`/accounts/${d.account_detail.id}`} className="font-medium hover:text-primary hover:underline">{d.account_detail.name}</Link>
               <p className="text-muted-foreground">{d.account_detail.tier} · health {d.account_detail.health_score}</p>
+              {!d.contact && d.supplied && <p className="flex items-center gap-1.5 border-t pt-2"><Mail className="h-3.5 w-3.5" />{d.supplied.name ? `${d.supplied.name} · ` : ""}{d.supplied.email}
+                <span className="text-[12px] text-subtle">(not a contact yet)</span></p>}
               {d.contact && <div className="border-t pt-2"><p className="flex items-center gap-1.5 font-medium"><User className="h-3.5 w-3.5" />{d.contact.name}</p>
                 {d.contact.job_title && <p className="text-muted-foreground">{d.contact.job_title}</p>}
                 {d.contact.email && <p className="select-all">{d.contact.email}</p>}{d.contact.phone && <p className="select-all">{d.contact.phone}</p>}</div>}

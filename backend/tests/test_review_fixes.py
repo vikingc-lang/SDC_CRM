@@ -83,7 +83,7 @@ async def test_campaign_send_keeps_progress_when_smtp_fails(client, monkeypatch)
 
         calls = {"n": 0}
 
-        async def flaky(db, user, to, subject, body, in_reply_to=None):
+        async def flaky(db, user, to, subject, body, in_reply_to=None, html=None):
             calls["n"] += 1
             if calls["n"] == 3:
                 raise smtplib.SMTPServerDisconnected("connection lost")

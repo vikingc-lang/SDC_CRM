@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.rbac import Principal
-from app.models import Account, Campaign, CampaignMember, Contact, Deal, Lead, PipelineStage, User
+from app.models import Account, Campaign, CampaignMember, Contact, Deal, EmailSend, Lead, PipelineStage, User
 from app.services import fx, privacy, reporting
 from app.services.notify import emit
 
@@ -172,6 +172,11 @@ def render(template: str, person: dict, token: str | None) -> str:
     return f"{out.rstrip()}\n\n--\nYou received this because of your interest in our events and content. Unsubscribe: {url}"
 
 
+def render_subject(template: str, person: dict) -> str:
+    """A subject line: placeholders filled, on one line, without the unsubscribe footer."""
+    return " ".join(render(template, person, None).split("\n--\n")[0].split())[:200]
+
+
 def _lead_blocked(lead: Lead) -> str | None:
     if lead.consent_email == "denied":
         return "Opted out"
@@ -180,25 +185,29 @@ def _lead_blocked(lead: Lead) -> str | None:
     return None
 
 
+async def person_for(db: AsyncSession, member: CampaignMember, lead: Lead | None = None, contact: Contact | None = None) -> dict:
+    """Who a member is for email (name, company, address) and why they can't be emailed, if they can't."""
+    lead = lead or (await db.get(Lead, member.lead_id) if member.lead_id else None)
+    contact = contact or (await db.get(Contact, member.contact_id) if member.contact_id else None)
+    if lead is not None:
+        person = {"first_name": lead.first_name, "last_name": lead.last_name, "company": lead.company_name, "email": lead.email}
+        blocked = (None if lead.email else "No email address") or _lead_blocked(lead)
+    elif contact is not None:
+        acct = await db.get(Account, contact.account_id)
+        person = {"first_name": contact.first_name, "last_name": contact.last_name, "company": acct.name if acct else None, "email": contact.email}
+        ok, why = privacy.can_contact(contact, "email")
+        blocked = (None if contact.email else "No email address") or (None if ok else why)
+    else:
+        person, blocked = {}, "The person no longer exists"
+    return {"member": member, "lead": lead, "contact": contact, "person": person, "blocked": blocked}
+
+
 async def recipients(db: AsyncSession, campaign: Campaign) -> list[dict]:
     """Every 'targeted' member with whether they can be emailed, and why not."""
     rows = (await db.execute(select(CampaignMember, Lead, Contact)
                              .outerjoin(Lead, Lead.id == CampaignMember.lead_id).outerjoin(Contact, Contact.id == CampaignMember.contact_id)
                              .where(CampaignMember.campaign_id == campaign.id, CampaignMember.status == "targeted"))).unique().all()
-    out = []
-    for m, lead, contact in rows:
-        if lead is not None:
-            person = {"first_name": lead.first_name, "last_name": lead.last_name, "company": lead.company_name, "email": lead.email}
-            blocked = None if lead.email else "No email address"
-            blocked = blocked or _lead_blocked(lead)
-        else:
-            acct = await db.get(Account, contact.account_id)
-            person = {"first_name": contact.first_name, "last_name": contact.last_name, "company": acct.name if acct else None, "email": contact.email}
-            ok, why = privacy.can_contact(contact, "email")
-            blocked = None if contact.email else "No email address"
-            blocked = blocked or (None if ok else why)
-        out.append({"member": m, "lead": lead, "contact": contact, "person": person, "blocked": blocked})
-    return out
+    return [await person_for(db, m, lead, contact) for m, lead, contact in rows]
 
 
 async def send(db: AsyncSession, campaign: Campaign, sender: User) -> dict:
@@ -208,7 +217,7 @@ async def send(db: AsyncSession, campaign: Campaign, sender: User) -> dict:
     import smtplib
 
     from app.models import Activity
-    from app.services import mail
+    from app.services import tracking
 
     if not (campaign.email_subject and campaign.email_body):
         raise CampaignError("Write the email subject and body first")
@@ -222,10 +231,11 @@ async def send(db: AsyncSession, campaign: Campaign, sender: User) -> dict:
             skipped[r["blocked"]] = skipped.get(r["blocked"], 0) + 1
             continue
         m, person = r["member"], r["person"]
-        subject = render(campaign.email_subject, person, m.token).split("\n--\n")[0][:200]
+        subject = render_subject(campaign.email_subject, person)
         body = render(campaign.email_body, person, m.token)
         try:
-            message_id, ok = await mail.deliver(db, sender, person["email"], subject, body)
+            tracked = await tracking.deliver_tracked(db, campaign=campaign, member=m, person=person, sender=sender, subject=subject, body=body)
+            message_id, ok = tracked.message_id, tracked.delivered
         except smtplib.SMTPRecipientsRefused:
             m.status = "bounced"
             await db.commit()
@@ -277,6 +287,14 @@ async def _deal_rows(db: AsyncSession, stmt) -> list:
                              .join(PipelineStage, PipelineStage.id == Deal.stage_id))).all()
 
 
+async def email_stats(db: AsyncSession, *where) -> dict:
+    """Tracked email totals: sends, unique opens and clicks, and their rates (opens are indicative, see tracking.py)."""
+    sent, opened, clicked = (await db.execute(select(func.count(EmailSend.id), func.count(EmailSend.opened_at), func.count(EmailSend.clicked_at))
+                                              .where(*where))).one()
+    return {"sent": sent, "opened": opened, "clicked": clicked, "open_rate": round(opened / sent * 100, 1) if sent else None,
+            "click_rate": round(clicked / sent * 100, 1) if sent else None, "click_to_open": round(clicked / opened * 100, 1) if opened else None}
+
+
 async def metrics(db: AsyncSession, campaign: Campaign, rates: dict | None = None, deals: bool = False) -> dict:
     rates = rates or await fx.rates(db)
     status_counts = dict((await db.execute(select(CampaignMember.status, func.count()).where(CampaignMember.campaign_id == campaign.id)
@@ -317,6 +335,7 @@ async def metrics(db: AsyncSession, campaign: Campaign, rates: dict | None = Non
         "cost_per_lead": round(cost / len(lead_ids), 2) if lead_ids and cost else None,
         "cost_per_response": round(cost / responses, 2) if responses and cost else None,
         "roi_pct": round((won - cost) / cost * 100, 1) if cost else None,
+        "email": await email_stats(db, EmailSend.campaign_id == campaign.id),
     }
     if deals:
         src = {r.id for r in sourced}

@@ -16,7 +16,10 @@ export interface Metrics {
   sourced_pipeline: number; sourced_won: number; sourced_deals: number; influenced_pipeline: number; influenced_won: number; influenced_deals: number;
   cost: number; budget: number; budget_used_pct: number | null; cost_per_lead: number | null; cost_per_response: number | null; roi_pct: number | null;
   deals?: { id: string; title: string; amount_usd: number; status: "Open" | "Won" | "Lost"; attribution: "sourced" | "influenced" }[];
+  email?: EmailStats;
 }
+/** Tracked email results (opens are indicative: some mail clients pre-load images). */
+export interface EmailStats { sent: number; opened: number; clicked: number; open_rate: number | null; click_rate: number | null; click_to_open: number | null }
 export interface Campaign {
   id: string; name: string; code: string; type: string; status: CampaignStatus; description: string | null; owner_id: string | null; owner: string | null;
   start_date: string | null; end_date: string | null; budget: number; actual_cost: number; expected_revenue: number;

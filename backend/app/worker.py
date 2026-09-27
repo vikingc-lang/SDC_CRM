@@ -29,6 +29,9 @@ celery_app.conf.beat_schedule = {
     "territories": _every("territories", crontab(hour=2, minute=30)),          # nightly territory realignment
     "webhooks": _every("webhooks", crontab()),                                 # signed webhook fan-out and retries, every minute
     "report-subscriptions": _every("report_subscriptions", crontab(minute=0)),  # scheduled report deliveries, hourly
+    "journeys": _every("journeys", crontab(minute="*/5")),                     # nurture journey steps
+    "case-routing": _every("case_routing", crontab()),                         # push waiting cases to free agents, every minute
+    "support-mail": _every("support_mail", crontab(minute="*/2")),            # email-to-case from the support mailbox
 }
 
 

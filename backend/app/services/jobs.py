@@ -135,6 +135,28 @@ async def job_report_subscriptions() -> None:
         await subscriptions.deliver_due(db)
 
 
+async def job_journeys() -> None:
+    from app.services import journeys
+
+    async with SessionLocal() as db:
+        await journeys.run(db)
+
+
+async def job_case_routing() -> None:
+    from app.services import routing
+
+    async with SessionLocal() as db:
+        if await routing.assign_waiting(db):
+            await db.commit()
+
+
+async def job_support_mail() -> None:
+    from app.services import email_to_case
+
+    async with SessionLocal() as db:
+        await email_to_case.poll_support_mailbox(db)
+
+
 JOBS = {
     "embed_activity": job_embed_activity,
     "rescore_account": job_rescore_account,
@@ -155,6 +177,9 @@ JOBS = {
     "territories": job_territories,
     "webhooks": job_webhooks,
     "report_subscriptions": job_report_subscriptions,
+    "journeys": job_journeys,
+    "case_routing": job_case_routing,
+    "support_mail": job_support_mail,
 }
 
 

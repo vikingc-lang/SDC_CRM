@@ -18,6 +18,7 @@ import { api, errorMessage, get } from "@/lib/api";
 import { useMe } from "@/lib/me";
 import { BulkBar, RowBox, SelectAllBox, useSelection } from "@/components/bulk";
 import { ListViewPicker, useListView, ViewGrid } from "@/components/listviews";
+import { PresenceControl, ServiceOpsLinks } from "@/components/serviceops";
 import type { AccountListItem } from "@/lib/types";
 import { relativeDays } from "@/lib/utils";
 
@@ -41,7 +42,11 @@ export default function CasesPage() {
   return (
     <div className="mx-auto max-w-7xl">
       <PageHeader title="Service" description="Customer cases with SLA clocks, queues and a shared knowledge base."
-        actions={can("cases", "create") && <Button size="sm" onClick={() => setCreating(true)}><Plus className="h-3.5 w-3.5" />New case</Button>} />
+        actions={<div className="flex flex-wrap items-center gap-2">
+          {can("cases", "update") && <PresenceControl />}
+          <ServiceOpsLinks />
+          {can("cases", "create") && <Button size="sm" onClick={() => setCreating(true)}><Plus className="h-3.5 w-3.5" />New case</Button>}
+        </div>} />
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatTile label="My open cases" value={s ? String(s.mine) : "…"} />
         <StatTile label="Unassigned" value={s ? String(s.unassigned) : "…"} sub={s ? `of ${s.open} open` : undefined} />

@@ -265,7 +265,7 @@ async def email_preview(campaign_id: uuid.UUID, db: AsyncSession = Depends(get_d
     sample = next((r for r in rec if not r["blocked"]), None)
     return {"eligible": sum(1 for r in rec if not r["blocked"]), "blocked": blocked,
             "sample": {"to": sample["person"]["email"],
-                       "subject": svc.render(c.email_subject or "", sample["person"], None).split("\n--\n")[0],
+                       "subject": svc.render_subject(c.email_subject or "", sample["person"]),
                        "body": svc.render(c.email_body or "", sample["person"], None)} if sample else None}  # inert link: a click here unsubscribes nobody
 
 

@@ -4,15 +4,15 @@ from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.rbac import Perm, Principal, authorize, load_matrix
-from app.models import Account, CaseComment, Contact, KbArticle, SupportQueue, SupportTicket, User
-from app.services import app_settings
+from app.models import Account, CaseComment, Contact, InboundEmail, KbArticle, SupportQueue, SupportTicket, User
+from app.services import app_settings, email_to_case, mailer, routing
 from app.services import cases as svc
 
 router = APIRouter(tags=["service"])
@@ -58,6 +58,18 @@ class QueueIn(BaseModel):
     member_ids: list[uuid.UUID] = []
     auto_assign: bool = True
     is_default: bool = False
+    email_address: EmailStr | None = None  # email-to-case: mail sent to this address opens cases in this queue
+    routing: Literal["least_loaded", "presence"] = "least_loaded"
+
+
+class PresenceIn(BaseModel):
+    status: Literal["available", "busy", "away", "offline"] | None = None
+    capacity: int | None = Field(default=None, ge=1, le=50)
+
+
+class FileIn(BaseModel):
+    account_id: uuid.UUID
+    contact_id: uuid.UUID | None = None
 
 
 class ArticleIn(BaseModel):
@@ -115,6 +127,94 @@ async def meta(db: AsyncSession = Depends(get_db), p: Principal = Depends(author
     return {"queues": [{"id": q.id, "name": q.name} for q in queues], "agents": [{"id": u.id, "name": u.full_name, "role": u.role} for u in agents],
             "priorities": list(svc.PRIORITIES), "statuses": list(svc.STATUSES), "channels": list(svc.CHANNELS),
             "sla": await app_settings.get(db, "case_sla"), "can_edit": p.can("cases", "update")}
+
+
+@router.get("/cases/routing")
+async def routing_console(db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("cases", "read"))):
+    """Agents' presence, load and capacity, and what waits unassigned in each queue."""
+    return await routing.console(db)
+
+
+def _presence_out(pr) -> dict:
+    return {"status": pr.status, "capacity": pr.capacity, "last_assigned_at": pr.last_assigned_at, "updated_at": pr.updated_at}
+
+
+@router.get("/cases/presence/me")
+async def my_presence(db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("cases", "update"))):
+    from app.models import AgentPresence
+
+    pr = await db.get(AgentPresence, p.id)
+    return _presence_out(pr) if pr else {"status": "offline", "capacity": 5, "last_assigned_at": None, "updated_at": None}
+
+
+@router.put("/cases/presence/me")
+async def set_my_presence(body: PresenceIn, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("cases", "update"))):
+    """Go available (waiting cases in your presence-routed queues are pushed to you), busy, away or offline."""
+    pr = await routing.set_presence(db, p.user, body.status, body.capacity)
+    await db.commit()
+    await db.refresh(pr)  # updated_at is server-set when routing touched the row
+    return _presence_out(pr)
+
+
+@router.put("/cases/presence/{user_id}")
+async def set_agent_presence(user_id: uuid.UUID, body: PresenceIn, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("admin", "update"))):
+    """A supervisor sets an agent's status or capacity (e.g. offline for someone who left without signing out)."""
+    await _check_owner(db, user_id)
+    pr = await routing.set_presence(db, await db.get(User, user_id), body.status, body.capacity)
+    await db.commit()
+    await db.refresh(pr)
+    return _presence_out(pr)
+
+
+@router.get("/cases/inbound")
+async def inbound_tray(status: Literal["unmatched", "ignored", "case_created", "appended", "converted", "dismissed", "all"] = "unmatched",
+                       db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("cases", "update"))):
+    """Support email as it arrived, with what became of each message. Unmatched mail waits here to be filed."""
+    stmt = select(InboundEmail).order_by(InboundEmail.received_at.desc()).limit(200)
+    if status != "all":
+        stmt = stmt.where(InboundEmail.status == status)
+    rows = (await db.execute(stmt)).scalars().all()
+    numbers = dict((await db.execute(select(SupportTicket.id, SupportTicket.case_number).where(
+        SupportTicket.id.in_([r.case_id for r in rows if r.case_id])))).all()) if any(r.case_id for r in rows) else {}
+    return {"email_enabled": mailer.configured(), "inbound_enabled": bool(settings.inbound_email_secret or settings.support_imap_host),
+            "messages": [{"id": r.id, "from_email": r.from_email, "from_name": r.from_name, "to_email": r.to_email, "subject": r.subject,
+                          "body": r.body[:2000], "status": r.status, "detail": r.detail, "case_id": r.case_id, "case_number": numbers.get(r.case_id),
+                          "received_at": r.received_at} for r in rows]}
+
+
+async def _inbound(db: AsyncSession, message_id: uuid.UUID) -> InboundEmail:
+    rec = await db.get(InboundEmail, message_id)
+    if rec is None:
+        raise HTTPException(404, "Message not found")
+    return rec
+
+
+@router.post("/cases/inbound/{message_id}/file", status_code=201)
+async def file_inbound(message_id: uuid.UUID, body: FileIn, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("cases", "create"))):
+    rec = await _inbound(db, message_id)
+    account = await db.get(Account, body.account_id)
+    if account is None:
+        raise HTTPException(422, "Account not found")
+    await p.ensure_account(db, account.id, "cases")
+    contact = await db.get(Contact, body.contact_id) if body.contact_id else None
+    if body.contact_id and (contact is None or contact.account_id != account.id):
+        raise HTTPException(422, "The contact must belong to the account")
+    try:
+        case = await email_to_case.file_unmatched(db, rec, account, contact)
+    except email_to_case.InboundError as e:
+        raise HTTPException(422, str(e))
+    await db.commit()
+    return {"case_id": case.id, "case_number": case.case_number}
+
+
+@router.post("/cases/inbound/{message_id}/dismiss")
+async def dismiss_inbound(message_id: uuid.UUID, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("cases", "update"))):
+    rec = await _inbound(db, message_id)
+    if rec.status != "unmatched":
+        raise HTTPException(422, "Only unmatched messages can be dismissed")
+    rec.status, rec.detail = "dismissed", f"Dismissed by {p.user.full_name}"
+    await db.commit()
+    return {"status": rec.status}
 
 
 @router.get("/cases/stats")
@@ -191,7 +291,10 @@ async def get_case(case_id: uuid.UUID, db: AsyncSession = Depends(get_db), p: Pr
         "account_detail": {"id": account.id, "name": account.name, "tier": account.tier, "health_score": account.health_score, "owner_id": account.owner_id},
         "contact": {"id": contact.id, "name": f"{contact.first_name} {contact.last_name}", "email": contact.email, "phone": contact.phone,
                     "job_title": contact.job_title} if contact else None,
-        "comments": [{"id": x.id, "author": names.get(x.author_id), "body": x.body, "internal": x.internal, "created_at": x.created_at} for x in comments],
+        "comments": [{"id": x.id, "author": names.get(x.author_id) or (x.from_email and f"{x.from_email} (by email)"), "from_customer": x.author_id is None,
+                      "body": x.body, "internal": x.internal, "emailed": x.emailed, "created_at": x.created_at} for x in comments],
+        "supplied": {"email": c.supplied_email, "name": c.supplied_name} if c.supplied_email else None,
+        "replies_by_email": c.channel == "email" and mailer.configured() and bool((contact and contact.email) or c.supplied_email),
         "suggested_articles": await svc.suggest_articles(db, f"{c.subject} {c.category or ''}"),
         "other_cases": [{"id": h.id, "case_number": h.case_number, "subject": h.subject, "status": h.status} for h in history],
         "csat": {"score": c.csat_score, "comment": c.csat_comment, "at": c.csat_at,
@@ -223,8 +326,10 @@ async def patch_case(case_id: uuid.UUID, body: CasePatch, db: AsyncSession = Dep
 async def comment(case_id: uuid.UUID, body: CommentIn, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("cases", "update"))):
     c = await _case(db, p, case_id)
     x = await svc.add_comment(db, c, p.user, body.body.strip(), body.internal)
+    await db.flush()
+    emailed = await email_to_case.email_reply(db, c, x)  # email cases: the customer gets the reply by email
     await db.commit()
-    return {"id": x.id}
+    return {"id": x.id, "email": emailed}
 
 
 # ---- service settings: queues & SLA ---------------------------------------------------------------
@@ -235,7 +340,7 @@ async def list_queues(db: AsyncSession = Depends(get_db), _: Principal = Depends
     open_counts = dict((await db.execute(select(SupportTicket.queue_id, func.count()).where(SupportTicket.status.in_(svc.OPEN))
                                          .group_by(SupportTicket.queue_id))).all())
     return [{"id": q.id, "name": q.name, "description": q.description, "member_ids": q.member_ids, "auto_assign": q.auto_assign,
-             "is_default": q.is_default, "open_cases": open_counts.get(q.id, 0)} for q in qs]
+             "is_default": q.is_default, "open_cases": open_counts.get(q.id, 0), "email_address": q.email_address, "routing": q.routing} for q in qs]
 
 
 async def _save_queue(db: AsyncSession, q: SupportQueue, body: QueueIn) -> None:
@@ -244,8 +349,12 @@ async def _save_queue(db: AsyncSession, q: SupportQueue, body: QueueIn) -> None:
     if body.is_default:
         for other in (await db.execute(select(SupportQueue).where(SupportQueue.id != q.id))).scalars():
             other.is_default = False
+    address = body.email_address.lower() if body.email_address else None
+    if address and (await db.execute(select(SupportQueue.id).where(func.lower(SupportQueue.email_address) == address, SupportQueue.id != q.id))).first():
+        raise HTTPException(409, "Another queue already uses this email address")
     q.name, q.description, q.auto_assign, q.is_default = body.name.strip(), body.description, body.auto_assign, body.is_default
     q.member_ids = [str(u) for u in dict.fromkeys(body.member_ids)]
+    q.email_address, q.routing = address, body.routing
 
 
 @router.post("/service/queues", status_code=201)
@@ -265,6 +374,8 @@ async def update_queue(queue_id: uuid.UUID, body: QueueIn, db: AsyncSession = De
     if q is None:
         raise HTTPException(404, "Queue not found")
     await _save_queue(db, q, body)
+    await db.flush()
+    await routing.assign_waiting(db, [q.id])  # switching to presence routing, or adding members, may free waiting cases
     await db.commit()
     return {"status": "ok"}
 

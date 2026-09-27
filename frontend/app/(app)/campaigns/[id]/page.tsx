@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/AppShell";
 import { type Campaign, CampaignDialog, CampaignStatusBadge, type MemberStatus, TYPE_LABELS, pctText } from "@/components/campaigns";
+import { JourneysTab } from "@/components/journeys";
 import { StatTile } from "@/components/charts";
 import { type CatalogueField, FilterRow, nice } from "@/components/filters";
 import type { Filter } from "@/components/reportviz";
@@ -29,7 +30,7 @@ interface Sources { sources: { key: string; label: string; fields: CatalogueFiel
 
 const MEMBER_STATUSES: MemberStatus[] = ["targeted", "sent", "responded", "registered", "attended", "unsubscribed", "bounced"];
 const FUNNEL: MemberStatus[] = ["targeted", "sent", "responded", "registered", "attended"];
-type TabKey = "overview" | "members" | "email";
+type TabKey = "overview" | "members" | "email" | "journeys";
 
 export default function CampaignPage() {
   const { id } = useParams<{ id: string }>();
@@ -57,10 +58,11 @@ export default function CampaignPage() {
           {can("campaigns", "delete") && <Button size="sm" variant="ghost" aria-label="Delete campaign" onClick={() => confirm(`Delete ${cp.name} and its member list?`) && del.mutate()}><Trash2 className="h-3.5 w-3.5" /></Button>}
         </div>} />
       {cp.description && <p className="-mt-3 mb-4 max-w-3xl text-[13.5px] text-muted-foreground">{cp.description}</p>}
-      <Tabs value={tab} onChange={setTab} tabs={[{ value: "overview", label: "Overview" }, { value: "members", label: `Members (${cp.metrics.members})` }, { value: "email", label: "Email" }]} />
+      <Tabs value={tab} onChange={setTab} tabs={[{ value: "overview", label: "Overview" }, { value: "members", label: `Members (${cp.metrics.members})` }, { value: "email", label: "Email" }, { value: "journeys", label: "Nurture journeys" }]} />
       {tab === "overview" && <Overview cp={cp} />}
       {tab === "members" && <Members cp={cp} editable={editable} />}
       {tab === "email" && <EmailTab cp={cp} editable={editable} />}
+      {tab === "journeys" && <JourneysTab campaignId={cp.id} editable={editable} />}
       {editing && <CampaignDialog campaign={cp} onClose={() => setEditing(false)} />}
     </div>
   );
@@ -77,6 +79,14 @@ function Overview({ cp }: { cp: Campaign }) {
         <StatTile label="Won (influenced)" value={money(m.influenced_won, { compact: true })} sub={`${m.influenced_deals} influenced deal${m.influenced_deals === 1 ? "" : "s"}`} />
         <StatTile label="ROI" value={pctText(m.roi_pct)} sub={m.cost ? `on ${money(m.cost)} spent` : "Add the actual cost to see ROI"} />
       </div>
+      {m.email && m.email.sent > 0 && (
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <StatTile label="Emails sent" value={m.email.sent.toLocaleString()} sub="campaign sends and journey steps" />
+          <StatTile label="Open rate" value={pctText(m.email.open_rate)} sub={`${m.email.opened} opened (indicative)`} />
+          <StatTile label="Click rate" value={pctText(m.email.click_rate)} sub={`${m.email.clicked} clicked`} />
+          <StatTile label="Click-to-open" value={pctText(m.email.click_to_open)} sub="clicks among openers" />
+        </div>
+      )}
       <div className="grid gap-4 lg:grid-cols-[1fr_340px]">
         <Card className="min-w-0">
           <CardHeader title="Attributed deals" description="Sourced: created from a member lead. Influenced: opened on a member contact's account after they joined." />

@@ -14,12 +14,16 @@ import { Skeleton } from "@/components/ui/misc";
 import { api, errorMessage, get } from "@/lib/api";
 
 type Sla = ServiceMeta["sla"];
-interface Queue { id: string; name: string; description: string | null; member_ids: string[]; auto_assign: boolean; is_default: boolean; open_cases: number }
+interface Queue {
+  id: string; name: string; description: string | null; member_ids: string[]; auto_assign: boolean; is_default: boolean; open_cases: number;
+  email_address: string | null; routing: "least_loaded" | "presence";
+}
 type QueueBody = Omit<Queue, "id" | "open_cases">;
 
 const PRIORITIES: Priority[] = ["critical", "high", "medium", "low"];
 const body = (q: Queue, patch: Partial<QueueBody> = {}): QueueBody =>
-  ({ name: q.name, description: q.description, member_ids: q.member_ids, auto_assign: q.auto_assign, is_default: q.is_default, ...patch });
+  ({ name: q.name, description: q.description, member_ids: q.member_ids, auto_assign: q.auto_assign, is_default: q.is_default,
+     email_address: q.email_address, routing: q.routing, ...patch });
 
 // ---- SLA targets ------------------------------------------------------------------------------------------------
 
@@ -86,7 +90,7 @@ function QueuesCard() {
   const name = (id: string) => meta.agents.find((a) => a.id === id)?.name ?? "Inactive user";
   return (
     <Card>
-      <CardHeader title="Queues" description="New cases land in the default queue unless another is chosen. With auto-assign on, each case goes to the member with the fewest open cases." />
+      <CardHeader title="Queues" description="New cases land in the default queue unless another is chosen, and email to a queue's support address opens cases there. With auto-assign on, each case goes to the member with the fewest open cases; with presence routing only to members who are Available and under their capacity (otherwise it waits and is pushed to the next free agent)." />
       <CardBody className="space-y-3">
         {queues.map((q) => (
           <div key={q.id} className="grid gap-3 rounded-md border p-3 md:grid-cols-[220px_1fr_auto]">
@@ -114,7 +118,13 @@ function QueuesCard() {
                   onChange={() => update.mutate({ id: q.id, body: body(q, { auto_assign: !q.auto_assign }) })} />Auto-assign</label>
                 <label className="flex items-center gap-2"><input id={`queue-default-${q.id}`} type="radio" name="default-queue" checked={q.is_default} disabled={update.isPending}
                   onChange={() => update.mutate({ id: q.id, body: body(q, { is_default: true }) })} />Default queue</label>
+                <label className="flex items-center gap-2">Routing
+                  <Select aria-label={`Routing for ${q.name}`} className="h-7 w-44 text-[12px]" value={q.routing} disabled={update.isPending}
+                    onChange={(e) => update.mutate({ id: q.id, body: body(q, { routing: e.target.value as Queue["routing"] }) })}>
+                    <option value="least_loaded">Least loaded</option><option value="presence">Presence &amp; capacity</option>
+                  </Select></label>
               </div>
+              <QueueEmail q={q} onSave={(email_address) => update.mutate({ id: q.id, body: body(q, { email_address }) })} saving={update.isPending} />
             </div>
             <div>
               <Button variant="ghost" size="icon" aria-label={`Delete ${q.name}`} disabled={q.is_default}
@@ -139,5 +149,18 @@ export function ServicePanel() {
       <SlaCard />
       <QueuesCard />
     </div>
+  );
+}
+
+function QueueEmail({ q, onSave, saving }: { q: Queue; onSave: (v: string | null) => void; saving: boolean }) {
+  const [v, setV] = useState(q.email_address ?? "");
+  useEffect(() => setV(q.email_address ?? ""), [q.email_address]);
+  const dirty = v.trim() !== (q.email_address ?? "");
+  return (
+    <form className="flex flex-wrap items-center gap-2 text-[13px]" onSubmit={(e) => { e.preventDefault(); onSave(v.trim() || null); }}>
+      <label htmlFor={`queue-email-${q.id}`} className="text-muted-foreground">Support address</label>
+      <Input id={`queue-email-${q.id}`} type="email" className="h-7 w-64 text-[12.5px]" placeholder="support@yourcompany.com" value={v} onChange={(e) => setV(e.target.value)} />
+      {dirty && <Button type="submit" size="sm" variant="outline" className="h-7" loading={saving}>Save</Button>}
+    </form>
   );
 }

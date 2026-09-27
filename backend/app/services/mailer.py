@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import smtplib
 from email.message import EmailMessage
+from email.utils import make_msgid
 
 from app.core.config import settings
 
@@ -26,13 +27,23 @@ def _send(msg: EmailMessage) -> None:
         s.send_message(msg)
 
 
-async def send(to: str, subject: str, text: str, attachments: list[tuple[str, bytes, str]] = ()) -> None:
-    """Send one message; attachments are (filename, content, mime type). Raises MailError on any failure."""
+async def send(to: str, subject: str, text: str, attachments: list[tuple[str, bytes, str]] = (), *, in_reply_to: str | None = None,
+               references: str | None = None, reply_to: str | None = None, html: str | None = None) -> str:
+    """Send one message and return its Message-ID; attachments are (filename, content, mime type). Raises MailError
+    on any failure."""
     if not configured():
         raise MailError("System email isn't configured")
     msg = EmailMessage()
     msg["From"], msg["To"], msg["Subject"] = settings.smtp_from, to, subject
+    msg["Message-ID"] = make_msgid(domain=settings.smtp_from.split("@")[-1] if "@" in settings.smtp_from else "cirra.local")
+    if in_reply_to:
+        msg["In-Reply-To"] = in_reply_to
+        msg["References"] = references or in_reply_to
+    if reply_to:
+        msg["Reply-To"] = reply_to
     msg.set_content(text)
+    if html:
+        msg.add_alternative(html, subtype="html")
     for name, content, mime in attachments:
         main, _, sub = mime.partition("/")
         msg.add_attachment(content, maintype=main, subtype=sub or "octet-stream", filename=name)
@@ -40,3 +51,4 @@ async def send(to: str, subject: str, text: str, attachments: list[tuple[str, by
         await asyncio.to_thread(_send, msg)
     except (OSError, smtplib.SMTPException) as e:
         raise MailError(type(e).__name__) from e  # never the server's reply text: it can echo addresses or credentials
+    return str(msg["Message-ID"])

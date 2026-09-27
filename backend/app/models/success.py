@@ -77,6 +77,8 @@ class SupportTicket(Base):
     csat_token: Mapped[str | None] = mapped_column(String(64), unique=True)
     csat_score: Mapped[int | None] = mapped_column(Integer)
     csat_comment: Mapped[str | None] = mapped_column(Text)
+    supplied_email: Mapped[str | None] = mapped_column(String(255))  # email-to-case sender when no contact matched
+    supplied_name: Mapped[str | None] = mapped_column(String(200))
     csat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -90,6 +92,8 @@ class SupportQueue(Base):
     member_ids: Mapped[list] = mapped_column(JSONB, default=list)
     auto_assign: Mapped[bool] = mapped_column(Boolean, default=True)
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+    email_address: Mapped[str | None] = mapped_column(String(255), unique=True)  # email-to-case: mail to this address opens cases here
+    routing: Mapped[str] = mapped_column(String(12), default="least_loaded")  # least_loaded | presence (see services/routing.py)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -102,6 +106,9 @@ class CaseComment(Base):
     author_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     body: Mapped[str] = mapped_column(Text)
     internal: Mapped[bool] = mapped_column(Boolean, default=False)
+    message_id: Mapped[str | None] = mapped_column(String(500))  # email thread id (inbound message or the reply we sent)
+    from_email: Mapped[str | None] = mapped_column(String(255))  # a customer's emailed reply (author_id is null)
+    emailed: Mapped[bool] = mapped_column(Boolean, default=False)  # a public reply that went out by email
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

@@ -73,6 +73,16 @@ class Settings(BaseSettings):
     smtp_from: str = "cirra@localhost"
     smtp_starttls: bool = True
 
+    # Public base URL of this API (email open/click tracking links point here).
+    public_api_url: str = "http://localhost:8000"
+    # Email-to-case: shared secret for POST /api/v1/inbound/email (unset = endpoint disabled), and an
+    # optional support mailbox polled over IMAP every two minutes.
+    inbound_email_secret: str | None = None
+    support_imap_host: str | None = None
+    support_imap_port: int = 993
+    support_imap_user: str | None = None
+    support_imap_password: str | None = None
+
     # 'hash' (offline feature-hashing) | 'ollama' | 'aws_bedrock'
     embedding_provider: Literal["hash", "ollama", "aws_bedrock"] = "hash"
     embedding_dim: int = 1536

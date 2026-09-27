@@ -365,5 +365,6 @@ from app.models.orders import *  # noqa: E402,F401,F403
 from app.models.performance import *  # noqa: E402,F401,F403
 from app.models.marketing import *  # noqa: E402,F401,F403
 from app.models.developer import *  # noqa: E402,F401,F403
+from app.models.engagement import *  # noqa: E402,F401,F403
 
 import app.core.audit  # noqa: E402,F401  (registers the audit-trail flush listener)

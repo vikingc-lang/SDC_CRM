@@ -49,15 +49,10 @@ async def apply_sla(db: AsyncSession, case: SupportTicket, from_time: datetime |
 
 
 async def _pick_agent(db: AsyncSession, queue: SupportQueue) -> uuid.UUID | None:
-    """Least-loaded active member of the queue (by open cases), ties broken by name."""
-    ids = [uuid.UUID(str(i)) for i in queue.member_ids or []]
-    if not ids:
-        return None
-    load = func.count(SupportTicket.id)
-    rows = (await db.execute(
-        select(User.id).outerjoin(SupportTicket, (SupportTicket.owner_id == User.id) & SupportTicket.status.in_(OPEN))
-        .where(User.id.in_(ids), User.is_active.is_(True)).group_by(User.id, User.full_name).order_by(load, User.full_name).limit(1))).first()
-    return rows[0] if rows else None
+    """The queue's routing rule decides (services/routing.py)."""
+    from app.services import routing
+
+    return await routing.pick(db, queue)
 
 
 async def default_queue(db: AsyncSession) -> SupportQueue | None:
@@ -131,6 +126,9 @@ async def update(db: AsyncSession, case: SupportTicket, data: dict) -> SupportTi
         setattr(case, k, v)
     case.updated_at = now
     await db.flush()
+    from app.services import routing
+
+    await routing.assign_waiting(db, [case.queue_id])  # a resolved or handed-off case may have freed an agent
     await scoring.rescore_account(db, case.account_id)
     return case
 

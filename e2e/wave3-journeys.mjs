@@ -67,7 +67,9 @@ await step("objects", "admin adds typed fields to it", async () => {
     await a.fill("#cf-l", label); await a.fill("#cf-k", key); await a.selectOption("#cf-t", type);
     if (options) await a.fill("#cf-o", options);
     await a.getByRole("button", { name: "Add", exact: true }).click();
-    await toast(a, "Field added");
+    // wait for this field's row (an earlier "Field added" toast may still be showing) and for the form to clear
+    await a.locator("tbody tr", { hasText: LABEL }).filter({ hasText: label }).waitFor();
+    await a.waitForFunction(() => (document.querySelector("#cf-l")?.value ?? "") === "");
   }
   await a.locator("tbody tr", { hasText: LABEL }).filter({ hasText: "Cost estimate" }).waitFor();
   const rows = await a.locator("tbody tr", { hasText: LABEL }).count();

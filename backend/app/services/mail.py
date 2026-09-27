@@ -134,7 +134,8 @@ async def sync_mailbox(db: AsyncSession, conn: MailboxConnection) -> dict:
     return {"status": "ok", "fetched": len(messages), "logged": created}
 
 
-async def deliver(db: AsyncSession, user: User, to: str, subject: str, body: str, in_reply_to: str | None = None) -> tuple[str, bool]:
+async def deliver(db: AsyncSession, user: User, to: str, subject: str, body: str, in_reply_to: str | None = None,
+                  html: str | None = None) -> tuple[str, bool]:
     """Send through the user's connected mailbox (SMTP). Returns (Message-ID, delivered); without SMTP it's recorded only."""
     conn = (await db.execute(select(MailboxConnection).where(MailboxConnection.user_id == user.id, MailboxConnection.status != "disabled"))).scalars().first()
     msg = EmailMessage()
@@ -145,6 +146,8 @@ async def deliver(db: AsyncSession, user: User, to: str, subject: str, body: str
     if in_reply_to:
         msg["In-Reply-To"] = msg["References"] = in_reply_to
     msg.set_content(body)
+    if html:
+        msg.add_alternative(html, subtype="html")
     if not (conn and conn.smtp_host):
         return str(msg["Message-ID"]), False
     import asyncio
