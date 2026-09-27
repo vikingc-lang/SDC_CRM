@@ -20,7 +20,7 @@ from app.services.reporting import ReportError
 
 router = APIRouter(prefix="/views", tags=["views"])
 
-Source = Literal["leads", "accounts", "contacts", "cases", "deals"]
+SOURCE_PATTERN = r"^(leads|accounts|contacts|cases|deals|obj_[a-z][a-z0-9_]{1,30})$"  # the main lists and every custom object
 PUBLISHERS = ("super_admin", "sales_manager")  # may share views with everyone, as with reports
 MAX_COLUMNS = 12
 
@@ -37,19 +37,21 @@ class ViewSpec(BaseModel):
 
 
 class ViewIn(ViewSpec):
-    source: Source
+    source: str = Field(pattern=SOURCE_PATTERN)
     name: str = Field(min_length=1, max_length=120)
     visibility: Literal["private", "shared"] = "private"
 
 
 class RunIn(ViewSpec):
-    source: Source
+    source: str = Field(pattern=SOURCE_PATTERN)
     limit: int = Field(default=200, ge=1, le=reporting.MAX_ROWS)
 
 
 async def _source(db: AsyncSession, p: Principal, key: str) -> reporting.Source:
     await reporting.refresh_custom_fields(db)
-    src = reporting.src_of(key)
+    src = reporting.src_for(key, p)
+    if src is None:
+        raise HTTPException(404, "No such list")
     if not p.can(src.resource, "read"):
         raise HTTPException(403, f"Your role can't read {src.label.lower()}")
     return src
@@ -82,7 +84,7 @@ async def _view(db: AsyncSession, p: Principal, view_id: uuid.UUID, edit: bool =
 
 
 @router.get("")
-async def list_views(source: Source = Query(...), db: AsyncSession = Depends(get_db), p: Principal = Depends(get_principal)):
+async def list_views(source: str = Query(..., pattern=SOURCE_PATTERN), db: AsyncSession = Depends(get_db), p: Principal = Depends(get_principal)):
     """The views of one list the caller can use, plus what the view editor needs: the fields and the in-place edits."""
     src = await _source(db, p, source)
     rows = (await db.execute(select(ListView).where(ListView.source == source, or_(ListView.owner_id == p.id, ListView.visibility == "shared"))
@@ -91,7 +93,7 @@ async def list_views(source: Source = Query(...), db: AsyncSession = Depends(get
     names = {u.id: u.full_name for u in (await db.execute(select(User).where(User.id.in_(owners)))).scalars()} if owners else {}
     inline = {col: spec for col, spec in bulk.INLINE.get(source, {}).items()} if p.can(src.resource, "update") else {}
     return {"views": [_out(v, p, names) for v in rows], "default_columns": src.default_columns, "inline": inline,
-            "can_share": p.user.role in PUBLISHERS, "link": reporting.LINKS.get(source),
+            "can_share": p.user.role in PUBLISHERS, "link": reporting.link_for(source),
             "fields": [{"key": k, "label": f.label, "type": f.type, "options": f.options, "ops": list(reporting.OPS[f.type])}
                        for k, f in src.fields.items()], "periods": list(reporting.RELATIVE)}
 
@@ -99,8 +101,11 @@ async def list_views(source: Source = Query(...), db: AsyncSession = Depends(get
 @router.post("/run")
 async def run_view(body: RunIn, db: AsyncSession = Depends(get_db), p: Principal = Depends(get_principal)):
     src = await _source(db, p, body.source)
-    _check(src, body)
-    defn = {"source": src.key, "columns": body.columns, "filters": body.filters, "limit": body.limit, "with_ids": True,
+    full = reporting.src_of(body.source)
+    # a shared view's columns that are hidden from this role are simply not shown
+    columns = [c for c in body.columns if c in src.fields or c not in full.fields] or src.default_columns
+    _check(src, body.model_copy(update={"columns": columns, "filters": [], "sort": body.sort if body.sort.by in src.fields else Sort()}))
+    defn = {"source": src.key, "columns": columns, "filters": body.filters, "limit": body.limit, "with_ids": True,
             "sort": body.sort.model_dump() if body.sort.by else {}}
     try:
         return await reporting.run(db, p, defn)

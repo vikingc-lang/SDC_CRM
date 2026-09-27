@@ -178,7 +178,13 @@ export interface Registration { id: UUID; partner: { id: UUID; name: string; tie
   status: string; exclusivity_expires_at: string | null; conflicts: { type: string; severity: string; account?: string; partner?: string; open_deals?: number; expires?: string }[];
   decision_note: string | null; deal_id: UUID | null; created_at: string }
 export interface Notification { id: UUID; kind: string; title: string; body: string | null; link: string | null; read: boolean; created_at: string }
-export interface CustomFieldDef { id?: UUID; entity?: string; key: string; label: string; field_type: "text" | "number" | "date" | "select" | "boolean" | "url"; options: string[]; required?: boolean }
+export interface CustomFieldDef {
+  id?: UUID; entity?: string; key: string; label: string; field_type: "text" | "number" | "date" | "select" | "boolean" | "url"; options: string[]; required?: boolean;
+  /** Field security for the signed-in user: visible but not editable. */
+  read_only?: boolean;
+  /** Admin view: per-role field security (roles not listed can edit). */
+  access?: Record<string, "read" | "hidden">;
+}
 
 // ---- lead-to-order ------------------------------------------------------------------------------------------
 export type LeadStatus = "new" | "working" | "mql" | "sql" | "recycled" | "converted" | "disqualified";

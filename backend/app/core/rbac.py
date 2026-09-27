@@ -24,7 +24,7 @@ ACTIONS = ("create", "read", "update", "delete", "export")
 RESOURCES = (
     "accounts", "contacts", "deals", "activities", "tasks", "products", "quotes", "approvals", "documents",
     "contracts", "success", "finance", "partners", "reports", "admin", "audit", "data", "leads", "orders",
-    "cases", "knowledge", "campaigns",
+    "cases", "knowledge", "campaigns", "custom_objects",
 )
 ROLES = ("super_admin", "sales_manager", "account_executive", "sdr", "auditor", "partner", "support_agent", "marketing")
 ROLE_LABELS = {
@@ -47,6 +47,7 @@ DEFAULT_MATRIX: dict[str, dict[str, dict]] = {
         "products": _p("RE"), "approvals": _p("RU"), "contracts": _p("CRUE"), "success": _p("CRUE"),
         "finance": _p("RE"), "partners": _p("CRUE"), "reports": _p("RE"), "admin": _p("R"), "audit": _p("R"),
         "data": _p("CRE"), "leads": _p("CRUDE"), "orders": _p("CRUE"), "cases": _p("CRUDE"), "knowledge": _p("CRUDE"), "campaigns": _p("CRUDE"),
+        "custom_objects": _p("CRUDE"),
     },
     "account_executive": {
         "accounts": _p("CRU", "own"), "contacts": _p("CRUD", "own"), "deals": _p("CRU", "own"),
@@ -54,22 +55,23 @@ DEFAULT_MATRIX: dict[str, dict[str, dict]] = {
         "documents": _p("CRU", "own"), "contracts": _p("R", "own"), "success": _p("R", "own"),
         "finance": _p("R", "own"), "products": _p("R"), "approvals": _p("R", "own"), "partners": _p("R"),
         "reports": _p("R", "own"), "leads": _p("CRU", "own"), "orders": _p("CR", "own"),
-        "cases": _p("CRU", "own"), "knowledge": _p("R"), "campaigns": _p("R"),
+        "cases": _p("CRU", "own"), "knowledge": _p("R"), "campaigns": _p("R"), "custom_objects": _p("CRUD", "own"),
     },
     "sdr": {
         "accounts": _p("CR", "own"), "contacts": _p("CRU", "own"), "deals": _p("CR", "own"),
         "activities": _p("CRU", "own"), "tasks": _p("CRU", "own"), "products": _p("R"), "reports": _p("R", "own"),
-        "leads": _p("CRUE", "own"), "cases": _p("R", "own"), "knowledge": _p("R"), "campaigns": _p("R"),
+        "leads": _p("CRUE", "own"), "cases": _p("R", "own"), "knowledge": _p("R"), "campaigns": _p("R"), "custom_objects": _p("CR", "own"),
     },
     # Service desk: every case, read-only view of customers, their own follow-ups
     "support_agent": {
         "cases": _p("CRUE"), "knowledge": _p("CRU"), "accounts": _p("R"), "contacts": _p("CRU"), "activities": _p("CR"),
-        "tasks": _p("CRU", "own"), "products": _p("R"), "success": _p("R"), "reports": _p("R", "own"),
+        "tasks": _p("CRU", "own"), "products": _p("R"), "success": _p("R"), "reports": _p("R", "own"), "custom_objects": _p("CRU"),
     },
     # Demand generation: campaigns and every lead; read-only view of customers and the pipeline they influence
     "marketing": {
         "campaigns": _p("CRUDE"), "leads": _p("CRUE"), "contacts": _p("RU"), "accounts": _p("R"), "deals": _p("R"),
         "activities": _p("R"), "tasks": _p("CRU", "own"), "products": _p("R"), "reports": _p("RE", "own"), "knowledge": _p("R"),
+        "custom_objects": _p("R"),
     },
     "auditor": {**{r: _p("RE") for r in RESOURCES if r not in ("admin",)}, "admin": _p("R")},
     "partner": {},
@@ -93,6 +95,7 @@ class Perm:
 class Principal:
     user: User
     matrix: dict[str, Perm] = field(default_factory=dict)
+    shares: list[list[dict]] = field(default_factory=list)  # criteria of the account sharing rules for this role
 
     @property
     def id(self) -> uuid.UUID:
@@ -109,10 +112,13 @@ class Principal:
 
     # ---- row-level ownership --------------------------------------------------
     def owned_account_ids(self):
-        """Subquery of account ids this user owns or sells into."""
-        return select(Account.id).where(
-            or_(Account.owner_id == self.user.id, Account.id.in_(select(Deal.account_id).where(Deal.owner_id == self.user.id)))
-        )
+        """Subquery of account ids this user owns, sells into, or sees through an account sharing rule."""
+        visible = [Account.owner_id == self.user.id, Account.id.in_(select(Deal.account_id).where(Deal.owner_id == self.user.id))]
+        if self.shares:
+            from app.services import reporting
+
+            visible += [Account.id.in_(q) for q in (reporting.criteria_ids("accounts", c) for c in self.shares) if q is not None]
+        return select(Account.id).where(or_(*visible))
 
     def scope_accounts(self, stmt, resource: str = "accounts", column=None):
         """Restrict ``stmt`` to visible accounts when the role's scope is ``own``."""
@@ -154,10 +160,43 @@ async def load_matrix(db: AsyncSession, role: str) -> dict[str, Perm]:
     return matrix
 
 
+_share_cache: dict[str, tuple[float, list]] = {}
+
+
+def invalidate_shares() -> None:
+    _share_cache.clear()
+
+
+async def load_shares(db: AsyncSession, role: str) -> list[list[dict]]:
+    """Criteria of the active account sharing rules that include ``role``."""
+    from app.models import SharingRule
+
+    hit = _share_cache.get(role)
+    if hit and time.monotonic() - hit[0] < _TTL:
+        return hit[1]
+    rules = (await db.execute(select(SharingRule).where(SharingRule.active.is_(True)))).scalars().all()
+    out = [list(r.criteria or []) for r in rules if role in (r.roles or [])]
+    _share_cache[role] = (time.monotonic(), out)
+    return out
+
+
+async def principal_for(db: AsyncSession, user: User) -> Principal:
+    """The principal a user acts as: role permissions plus the sharing rules that apply to the role. Also brings
+    the live field catalogue (custom fields, objects, field security) up to date for this request."""
+    from app.services import reporting
+
+    await reporting.refresh_custom_fields(db)
+    return Principal(user, await load_matrix(db, user.role), await load_shares(db, user.role))
+
+
 async def get_principal(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> Principal:
+    from app.core.context import current_principal
+
     if user.role == "partner":
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Partner accounts can only use the partner portal")
-    return Principal(user, await load_matrix(db, user.role))
+    p = await principal_for(db, user)
+    current_principal.set(p)
+    return p
 
 
 def authorize(resource: str, action: str = "read"):

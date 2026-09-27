@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.rbac import Principal, authorize
 from app.models import (
-    Account, Activity, Attachment, Contact, Contract, CustomFieldDefinition, Deal, DealAlert, DealStageHistory, OnboardingProject,
+    Account, Activity, Attachment, Contact, Contract, Deal, DealAlert, DealStageHistory, OnboardingProject,
     PipelineStage, ProductUsage, SupportTicket, Task, Territory,
 )
 from app.services import custom_fields, dedup, erp, fx, hierarchy, performance, scoring
@@ -226,7 +226,6 @@ async def account_360(account_id: uuid.UUID, db: AsyncSession = Depends(get_db),
     tickets = (await db.execute(select(SupportTicket).where(SupportTicket.account_id == account_id).order_by(SupportTicket.opened_at.desc()).limit(20))).scalars().all()
     usage = (await db.execute(select(ProductUsage).where(ProductUsage.account_id == account_id).order_by(ProductUsage.metric_date.desc()).limit(12))).scalars().all()
     alerts = (await db.execute(select(DealAlert).join(Deal, DealAlert.deal_id == Deal.id).where(Deal.account_id == account_id, DealAlert.resolved_at.is_(None)))).scalars().unique().all()
-    defs = (await db.execute(select(CustomFieldDefinition).where(CustomFieldDefinition.entity == "account").order_by(CustomFieldDefinition.label))).scalars().all()
     parent = await db.get(Account, account.parent_id) if account.parent_id else None
     territory = await db.get(Territory, account.territory_id) if account.territory_id else None
     children = (await db.execute(select(Account.id, Account.name, Account.health_score).where(Account.parent_id == account_id))).all()
@@ -250,12 +249,12 @@ async def account_360(account_id: uuid.UUID, db: AsyncSession = Depends(get_db),
             "customer_master": {"legal_name": account.legal_name, "tax_id": account.tax_id, "billing_address": account.billing_address,
                                 "payment_terms": account.payment_terms, "credit_limit": float(account.credit_limit) if account.credit_limit is not None else None,
                                 "credit_hold": account.credit_hold, "erp_customer_id": account.erp_customer_id, "erp_synced_at": account.erp_synced_at},
-            "custom_fields": {k: v for k, v in meta.items() if k not in ("health_breakdown",)},
+            "custom_fields": custom_fields.redact("account", {k: v for k, v in meta.items() if k not in ("health_breakdown",)}),
             "parent": {"id": parent.id, "name": parent.name} if parent else None,
             "territory": {"id": territory.id, "name": territory.name} if territory else None,
             "subsidiaries": [{"id": c.id, "name": c.name, "health_score": c.health_score} for c in children],
         },
-        "custom_field_definitions": [{"key": d.key, "label": d.label, "field_type": d.field_type, "options": d.options, "required": d.required} for d in defs],
+        "custom_field_definitions": custom_fields.definitions_out("account"),
         "contacts": [contact_out(c) for c in contacts],
         "deals": cards,
         "recent_activities": [activity_out(a, attachments=att_by_activity.get(a.id)) for a in activities],

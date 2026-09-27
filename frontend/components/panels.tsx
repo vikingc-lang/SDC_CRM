@@ -186,18 +186,18 @@ export function CustomFieldsEditor({ defs, values, onSave, canEdit, saving }: {
         <form className="grid gap-3 sm:grid-cols-2" onSubmit={(e) => { e.preventDefault(); onSave(draft); setEditing(false); }}>
           {defs.map((d) => (
             <div key={d.key}>
-              <Label>{d.label}{d.required && " *"}</Label>
+              <Label>{d.label}{d.required && " *"}{d.read_only && <span className="ml-1 font-normal text-subtle">(read-only)</span>}</Label>
               {d.field_type === "select" ? (
-                <Select value={String(draft[d.key] ?? "")} onChange={(e) => setDraft({ ...draft, [d.key]: e.target.value || null })}>
+                <Select disabled={d.read_only} value={String(draft[d.key] ?? "")} onChange={(e) => setDraft({ ...draft, [d.key]: e.target.value || null })}>
                   <option value="">—</option>
                   {d.options.map((o) => <option key={o}>{o}</option>)}
                 </Select>
               ) : d.field_type === "boolean" ? (
-                <Select value={draft[d.key] === true ? "true" : draft[d.key] === false ? "false" : ""} onChange={(e) => setDraft({ ...draft, [d.key]: e.target.value === "" ? null : e.target.value === "true" })}>
+                <Select disabled={d.read_only} value={draft[d.key] === true ? "true" : draft[d.key] === false ? "false" : ""} onChange={(e) => setDraft({ ...draft, [d.key]: e.target.value === "" ? null : e.target.value === "true" })}>
                   <option value="">—</option><option value="true">Yes</option><option value="false">No</option>
                 </Select>
               ) : (
-                <Input type={d.field_type === "number" ? "number" : d.field_type === "date" ? "date" : d.field_type === "url" ? "url" : "text"}
+                <Input type={d.field_type === "number" ? "number" : d.field_type === "date" ? "date" : d.field_type === "url" ? "url" : "text"} disabled={d.read_only}
                   value={String(draft[d.key] ?? "")} onChange={(e) => setDraft({ ...draft, [d.key]: e.target.value || null })} />
               )}
             </div>
@@ -208,7 +208,7 @@ export function CustomFieldsEditor({ defs, values, onSave, canEdit, saving }: {
           </div>
         </form>
       )}
-      {canEdit && !editing && defs.length > 0 && (
+      {canEdit && !editing && defs.some((d) => !d.read_only) && (
         <Button size="sm" variant="ghost" className="mt-3" onClick={() => { setDraft({ ...values }); setEditing(true); }}><Pencil className="h-3.5 w-3.5" />Edit fields</Button>
       )}
     </div>

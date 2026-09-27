@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from app.models import Activity, Contact, Deal, Task
-from app.services import fx
+from app.services import custom_fields, fx
 from app.services.scoring import weighted_value
 
 
@@ -31,7 +31,7 @@ def contact_out(c: Contact, account_name: str | None = None) -> dict:
             "email": c.consent_email, "basis": c.consent_basis, "regime": c.privacy_regime, "updated_at": c.consent_updated_at,
             "do_not_sell": c.do_not_sell, "opt_out": {"email": c.opt_out_email, "phone": c.opt_out_phone, "sms": c.opt_out_sms},
         },
-        "custom_fields": c.custom_fields or {},
+        "custom_fields": custom_fields.redact("contact", c.custom_fields),
         "account_name": account_name,
     }
 
@@ -75,7 +75,7 @@ def deal_card(d: Deal, rates: dict | None = None) -> dict:
         "loss_debrief": d.loss_debrief,
         "loss_competitor": d.loss_competitor,
         "win_debrief": d.win_debrief,
-        "custom_fields": d.custom_fields or {},
+        "custom_fields": custom_fields.redact("deal", d.custom_fields),
         "ai_insights": d.ai_insights or {},
         "created_at": d.created_at,
     }

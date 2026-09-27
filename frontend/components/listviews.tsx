@@ -23,7 +23,8 @@ import { cn } from "@/lib/utils";
    and row-level access always applies. Columns the server marks as inline-editable (owner, status, priority,
    tier) can be changed in place; the change goes through the same bulk endpoint as a one-record selection. */
 
-export type ViewSource = BulkEntity | "deals";
+export type ViewSource = BulkEntity | "deals" | `obj_${string}`;
+const BULK: string[] = ["leads", "accounts", "contacts", "cases"];
 export interface ListView {
   id: string; source: ViewSource; name: string; visibility: "private" | "shared"; columns: string[]; filters: Filter[];
   sort: { by?: string | null; dir: "asc" | "desc" }; owner: string | null; can_edit: boolean;
@@ -45,12 +46,15 @@ const writeStored = (s: string, v: string) => { try { if (v) window.localStorage
 /** Drop filters the user hasn't finished filling in, so saving never fails on them. */
 const finished = (fs: Filter[]) => fs.filter((f) => NO_VALUE.includes(f.op) || (Array.isArray(f.value) ? f.value.every((v) => v !== "") : f.value !== "" && f.value != null));
 
-/** The views of one list and which one is showing (remembered per browser; "" is the standard list). */
-export function useListView(source: ViewSource) {
+/** The views of one list and which one is showing (remembered per browser; "" is the standard list). Lists
+    without a hand-built page (custom objects) pass ``standard`` to get a default view of the source's columns. */
+export function useListView(source: ViewSource, standard = false) {
   const meta = useQuery({ queryKey: ["views", source], queryFn: () => get<ViewsMeta>("/views", { source }) });
   const [viewId, setViewId] = useState("");
   useEffect(() => { setViewId(readStored(source)); }, [source]);
-  const view = meta.data?.views.find((v) => v.id === viewId) ?? null;
+  const view = meta.data?.views.find((v) => v.id === viewId)
+    ?? (standard && meta.data ? { id: "", source, name: "Standard list", visibility: "shared" as const, columns: meta.data.default_columns, filters: [],
+      sort: { by: null, dir: "asc" as const }, owner: null, can_edit: false } : null);
   const select = (id: string) => { setViewId(id); writeStored(source, id); };
   return { source, meta: meta.data, view, select };
 }
@@ -70,7 +74,7 @@ export function ListViewPicker({ lv, className }: { lv: ListViewState; className
         {mine.length > 0 && <optgroup label="My views">{mine.map((v) => <option key={v.id} value={v.id}>{v.name}{v.visibility === "shared" ? " (shared)" : ""}</option>)}</optgroup>}
         {team.length > 0 && <optgroup label="Team views">{team.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}</optgroup>}
       </Select>
-      {lv.view?.can_edit && <Button size="sm" variant="ghost" onClick={() => setEditing("edit")}><Pencil className="h-3.5 w-3.5" />Edit view</Button>}
+      {lv.view?.can_edit && lv.view.id && <Button size="sm" variant="ghost" onClick={() => setEditing("edit")}><Pencil className="h-3.5 w-3.5" />Edit view</Button>}
       <Button size="sm" variant="outline" onClick={() => setEditing("new")}><Plus className="h-3.5 w-3.5" />New view</Button>
       {editing && <ViewEditor lv={lv} view={editing === "edit" ? lv.view : null} onClose={() => setEditing(null)} />}
     </div>
@@ -94,7 +98,7 @@ export function ViewGrid({ lv }: { lv: ListViewState }) {
   const r = run.data;
   const ids = r?.ids ?? [];
   const sel = useSelection(ids);
-  const bulkEntity = lv.source === "deals" ? null : lv.source;
+  const bulkEntity = BULK.includes(lv.source) ? (lv.source as BulkEntity) : null;
   const selectable = !!bulkEntity;  // the bulk bar itself hides when the role has no bulk action here
   const needUsers = Object.values(meta.inline).some((s) => s.kind === "user");
   const users = useQuery({ queryKey: ["users"], queryFn: () => get<{ id: string; full_name: string; role: string; is_active?: boolean }[]>("/users"), enabled: needUsers });
@@ -112,7 +116,7 @@ export function ViewGrid({ lv }: { lv: ListViewState }) {
           </span>
           <span className="flex flex-wrap items-center gap-1.5">
             {view.filters.length > 0 && <span>{view.filters.length} filter{view.filters.length > 1 ? "s" : ""}</span>}
-            <Badge tone={view.visibility === "shared" ? "primary" : "neutral"}>{view.visibility === "shared" ? "Shared with team" : "Only you"}</Badge>
+            {view.id && <Badge tone={view.visibility === "shared" ? "primary" : "neutral"}>{view.visibility === "shared" ? "Shared with team" : "Only you"}</Badge>}
             {view.owner && !view.can_edit && <span>by {view.owner}</span>}
           </span>
         </div>

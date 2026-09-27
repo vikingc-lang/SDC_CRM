@@ -14,6 +14,7 @@ import { NewContactDialog, NewDealDialog, NewTaskDialog } from "@/components/for
 import { HealthMeter, HealthRing, RiskBadge, RoleBadge } from "@/components/indicators";
 import { LogActivityDialog } from "@/components/LogActivityDialog";
 import { AlertsBanner, ContractList, CustomFieldsEditor } from "@/components/panels";
+import { RelatedObjectRecords } from "@/components/objects";
 import { TaskRow } from "@/components/TaskList";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -193,6 +194,7 @@ function Overview({ data, brief, onDialog }: { data: Account360; brief?: string;
             {tasks.slice(0, 8).map((t) => <TaskRow key={t.id} task={t} showContext={false} />)}
           </CardBody>
         </Card>
+        <RelatedObjectRecords accountId={account.id} accountName={account.name} />
       </div>
     </div>
   );

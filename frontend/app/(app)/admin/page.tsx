@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { PageHeader } from "@/components/AppShell";
 import { RbacPanel, UsersPanel } from "@/components/admin/access";
 import { CustomFieldsPanel, GatesPanel } from "@/components/admin/config";
+import { ConfigTransferPanel, ObjectsPanel, SharingRulesPanel, ValidationRulesPanel } from "@/components/admin/platform";
 import { DataPanel } from "@/components/admin/data";
 import { AuditPanel, CompliancePanel, DedupPanel } from "@/components/admin/governance";
 import { JobsPanel } from "@/components/admin/integrations";
@@ -16,7 +17,7 @@ import { SecurityPanel } from "@/components/security";
 import { Tabs } from "@/components/ui/extra";
 import { useMe } from "@/lib/me";
 
-type Tab = "users" | "security" | "rbac" | "audit" | "privacy" | "dedup" | "fields" | "leads" | "workflows" | "service" | "territories" | "chain" | "stages" | "gates" | "data" | "developer" | "jobs";
+type Tab = "users" | "security" | "rbac" | "audit" | "privacy" | "dedup" | "fields" | "leads" | "workflows" | "service" | "territories" | "chain" | "stages" | "gates" | "data" | "developer" | "jobs" | "objects" | "rules" | "sharing" | "config";
 
 export default function AdminPage() {
   const { can } = useMe();
@@ -27,7 +28,10 @@ export default function AdminPage() {
     { value: "audit", label: "Audit trail", show: can("audit", "read") },
     { value: "privacy", label: "Privacy & consent", show: can("audit", "read") },
     { value: "dedup", label: "Duplicates", show: can("accounts", "update") },
+    { value: "objects", label: "Custom objects", show: can("admin", "create") },
     { value: "fields", label: "Custom fields", show: can("admin", "create") },
+    { value: "rules", label: "Validation rules", show: can("admin", "update") },
+    { value: "sharing", label: "Sharing rules", show: can("admin", "update") },
     { value: "leads", label: "Lead management", show: can("admin", "update") },
     { value: "workflows", label: "Workflows", show: can("admin", "read") },
     { value: "service", label: "Service", show: can("admin", "update") },
@@ -38,6 +42,7 @@ export default function AdminPage() {
     { value: "data", label: "Import / export", show: can("data", "create") || can("data", "export") },
     { value: "developer", label: "API & webhooks", show: can("admin", "update") },
     { value: "jobs", label: "Jobs", show: can("admin", "update") },
+    { value: "config", label: "Configuration", show: can("admin", "read") },
   ];
   const visible = tabs.filter((t) => t.show);
   const [tab, setTab] = useState<Tab | null>(null);
@@ -53,7 +58,11 @@ export default function AdminPage() {
       {current === "audit" && <AuditPanel />}
       {current === "privacy" && <CompliancePanel />}
       {current === "dedup" && <DedupPanel />}
+      {current === "objects" && <ObjectsPanel onFields={() => setTab("fields")} />}
       {current === "fields" && <CustomFieldsPanel />}
+      {current === "rules" && <ValidationRulesPanel />}
+      {current === "sharing" && <SharingRulesPanel />}
+      {current === "config" && <ConfigTransferPanel />}
       {current === "leads" && <LeadManagementPanel />}
       {current === "workflows" && <WorkflowsPanel />}
       {current === "service" && <ServicePanel />}

@@ -21,7 +21,8 @@ from sqlalchemy.orm import aliased
 
 from app.core.rbac import Principal
 from app.models import (
-    Account, Activity, Campaign, CampaignMember, Contact, Deal, FxRate, Lead, Order, Pipeline, PipelineStage, Quote, SupportQueue, SupportTicket, Task, Territory, User,
+    Account, Activity, Campaign, CampaignMember, Contact, CustomRecord, Deal, FxRate, Lead, Order, Pipeline, PipelineStage, Quote, SupportQueue, SupportTicket,
+    Task, Territory, User,
 )
 
 MAX_ROWS = 2000
@@ -374,33 +375,113 @@ def _custom_expr(col, defn):
     return raw
 
 
-async def refresh_custom_fields(db: AsyncSession, force: bool = False) -> None:
-    """Rebuild the live catalogue when the definitions change. A one-row signature query (count + latest
-    creation) runs per call, so every API replica sees a new or deleted field on its very next request."""
-    global _live, _live_at, _live_sig
-    from app.models import CustomFieldDefinition
+OBJECT_PREFIX = "obj_"
+_hidden: dict[str, dict[str, set[str]]] = {}  # source -> role -> field keys the role can't see
 
-    sig = tuple((await db.execute(select(func.count(CustomFieldDefinition.id), func.max(CustomFieldDefinition.created_at)))).one())
+
+def _cf_field(d, col) -> F:
+    typ = {"number": "number", "date": "date", "boolean": "bool", "select": "enum"}.get(d.field_type, "text")
+    return F(d.label, typ, _custom_expr(col, d), list(d.options or []) if typ == "enum" else None,
+             groupable=typ in ("text", "enum", "date", "bool"))
+
+
+def _object_source(obj, defs) -> Source:
+    """A report source for one custom object: its records, their account and owner, and its fields."""
+    owner, acct = aliased(User), aliased(Account)
+    obj_id = obj.id
+    fields = {
+        "name": F("Name", "text", CustomRecord.name, groupable=False),
+        "account": F("Account", "text", acct.name),
+        "owner": F("Owner", "text", owner.full_name),
+        "created": F("Created", "date", CustomRecord.created_at),
+        "updated": F("Last modified", "date", CustomRecord.updated_at),
+    }
+    for d in defs:
+        fields[f"cf_{d.key}"] = _cf_field(d, CustomRecord.data)
+
+    def base():
+        return (select().select_from(CustomRecord).outerjoin(acct, acct.id == CustomRecord.account_id)
+                .outerjoin(owner, owner.id == CustomRecord.owner_id).where(CustomRecord.object_id == obj_id))
+
+    def scope(p: Principal, stmt):
+        if not p.is_own_scope("custom_objects"):
+            return stmt
+        return stmt.where(or_(CustomRecord.owner_id == p.id, CustomRecord.account_id.in_(p.owned_account_ids())))
+    return Source(f"{OBJECT_PREFIX}{obj.key}", obj.plural_label, "custom_objects", obj.description or f"{obj.plural_label} (custom object)",
+                  fields, base, scope, ["name", "account", "owner", *[f"cf_{d.key}" for d in defs[:3]]], id_col=CustomRecord.id)
+
+
+async def refresh_custom_fields(db: AsyncSession, force: bool = False) -> None:
+    """Rebuild the live catalogue when field definitions, field security or custom objects change. A one-row
+    signature query runs per call, so every API replica sees a change on its very next request."""
+    global _live, _live_at, _live_sig, _hidden
+    from app.models import CustomFieldDefinition, CustomObject
+    from app.services import custom_fields
+
+    sig = tuple((await db.execute(select(
+        select(func.count(CustomFieldDefinition.id)).scalar_subquery(), select(func.max(CustomFieldDefinition.updated_at)).scalar_subquery(),
+        select(func.count(CustomObject.id)).scalar_subquery(), select(func.max(CustomObject.updated_at)).scalar_subquery()))).one())
     if not force and sig == _live_sig and time.monotonic() - _live_at < CF_TTL:
         return
     defs = (await db.execute(select(CustomFieldDefinition).order_by(CustomFieldDefinition.label))).scalars().all()
+    objects = (await db.execute(select(CustomObject).order_by(CustomObject.plural_label))).scalars().all()
     live = {}
     for key, src in SOURCES.items():
         ent = CF_ENTITY.get(key)
-        extra = {}
-        if ent:
-            for d in (x for x in defs if x.entity == ent[0]):
-                typ = {"number": "number", "date": "date", "boolean": "bool", "select": "enum"}.get(d.field_type, "text")
-                extra[f"cf_{d.key}"] = F(d.label, typ, _custom_expr(ent[1](), d), list(d.options or []) if typ == "enum" else None,
-                                         groupable=typ in ("text", "enum", "date", "bool"))
+        extra = {f"cf_{d.key}": _cf_field(d, ent[1]()) for d in defs if ent and d.entity == ent[0]}
         live[key] = replace(src, fields={**src.fields, **extra}) if extra else src
-    _live, _live_at, _live_sig = live, time.monotonic(), sig
+    for o in objects:
+        live[f"{OBJECT_PREFIX}{o.key}"] = _object_source(o, [d for d in defs if d.entity == f"object:{o.key}"])
+    hidden: dict[str, dict[str, set[str]]] = {}
+    source_of_entity = {v[0]: k for k, v in CF_ENTITY.items()} | {f"object:{o.key}": f"{OBJECT_PREFIX}{o.key}" for o in objects}
+    for d in defs:
+        src_key = source_of_entity.get(d.entity)
+        for role, level in (d.access or {}).items():
+            if src_key and level == "hidden":
+                hidden.setdefault(src_key, {}).setdefault(role, set()).add(f"cf_{d.key}")
+    custom_fields.set_cache(defs)
+    _live, _live_at, _live_sig, _hidden = live, time.monotonic(), sig, hidden
+
+
+def src_for(key: str, p: Principal | None) -> Source | None:
+    """The source as ``p`` may use it: custom fields hidden from their role are left out (super admins see all)."""
+    src = src_of(key)
+    if src is None or p is None or p.user.role == "super_admin":
+        return src
+    gone = _hidden.get(key, {}).get(p.user.role)
+    if not gone:
+        return src
+    return replace(src, fields={k: f for k, f in src.fields.items() if k not in gone},
+                   default_columns=[c for c in src.default_columns if c not in gone])
+
+
+def source_keys() -> list[str]:
+    return list(_live or SOURCES)
+
+
+def link_for(key: str) -> str | None:
+    if key.startswith(OBJECT_PREFIX):
+        return f"/objects/{key[len(OBJECT_PREFIX):]}/{{id}}"
+    return LINKS.get(key)
+
+
+def criteria_ids(source: str, filters: list[dict]):
+    """Subquery of the ids of every ``source`` record matching ``filters`` (no user scope): sharing rules. A
+    rule that no longer compiles (e.g. its custom field was deleted) matches nothing rather than failing."""
+    src = src_of(source)
+    try:
+        stmt = src.base().add_columns(src.id_col)
+        for flt in filters or []:
+            stmt = stmt.where(_condition(src.fields[flt["field"]], flt.get("op", "eq"), flt.get("value")))
+        return stmt
+    except (KeyError, ReportError):
+        return None
 
 
 def catalogue(p: Principal) -> list[dict]:
     out = []
-    for key in SOURCES:
-        s = src_of(key)
+    for key in source_keys():
+        s = src_for(key, p)
         if not p.can(s.resource, "read"):
             continue
         out.append({"key": s.key, "label": s.label, "description": s.description, "default_columns": s.default_columns,
@@ -545,8 +626,8 @@ def _bucketed(f: F, bucket: str | None):
     return cast(func.date_trunc(b, f.expr), Date)
 
 
-def validate(defn: dict) -> dict:
-    src = src_of(defn.get("source") or "")
+def validate(defn: dict, src: Source | None = None) -> dict:
+    src = src or src_of(defn.get("source") or "")
     if src is None:
         raise ReportError("Choose a data source")
     groups = defn.get("group_by") or []
@@ -602,8 +683,17 @@ def _json(v):
 
 async def run(db: AsyncSession, p: Principal, defn: dict) -> dict:
     await refresh_custom_fields(db)
-    validate(defn)
-    src = src_of(defn["source"])
+    full = src_of(defn.get("source") or "")
+    src = src_for(defn.get("source") or "", p)
+    if full is not None and len(src.fields) < len(full.fields):  # some custom fields are hidden from this role
+        hidden = set(full.fields) - set(src.fields)
+        used = ({g.get("field") for g in defn.get("group_by") or []} | {m.get("field") for m in defn.get("measures") or []}
+                | {f.get("field") for f in defn.get("filters") or []} | {(defn.get("sort") or {}).get("by")})
+        if used & hidden:
+            raise ReportError("This report uses a field your role can't see")
+        if defn.get("columns"):  # list reports simply lose the hidden columns
+            defn = {**defn, "columns": [c for c in defn["columns"] if c not in hidden] or src.default_columns}
+    validate(defn, src)
     if not p.can(src.resource, "read"):
         raise ReportError(f"Your role can't read {src.label.lower()}")
     stmt = src.scope(p, src.base())
@@ -656,7 +746,7 @@ async def run(db: AsyncSession, p: Principal, defn: dict) -> dict:
            "row_count": len(data), "generated_at": datetime.now(timezone.utc).isoformat()}
     if defn.get("with_ids") and not (groups or measures) and src.id_col is not None:
         out["ids"] = [r.pop() for r in data]  # the trailing _id column
-        out["link"] = LINKS.get(src.key)
+        out["link"] = link_for(src.key)
     if defn.get("compare") and (groups or measures):
         prev_defn, window = previous_period_definition(defn)
         prev = await run(db, p, prev_defn)
@@ -682,7 +772,7 @@ def with_dashboard_filters(defn: dict, period: str | None, owner: str | None) ->
     if period:
         if period not in RELATIVE:
             raise ReportError("Unknown period")
-        date_field = DASH_DATE.get(src.key)
+        date_field = DASH_DATE.get(src.key) or ("created" if src.key.startswith(OBJECT_PREFIX) else None)
         if date_field and date_field in src.fields:
             extra.append({"field": date_field, "op": "within", "value": period})
         else:

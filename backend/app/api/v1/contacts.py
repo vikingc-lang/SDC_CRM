@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.rbac import Principal, authorize
-from app.models import Account, Activity, ConsentEvent, Contact, CustomFieldDefinition, ErasureLog
+from app.models import Account, Activity, ConsentEvent, Contact, ErasureLog
 from app.schemas.ai import BuyingRole
 from app.services import custom_fields, privacy, scoring
 from app.services.notify import emit
@@ -105,7 +105,6 @@ async def get_contact(contact_id: uuid.UUID, db: AsyncSession = Depends(get_db),
     acts = (await db.execute(select(Activity).where(Activity.contact_id == contact_id).order_by(Activity.occurred_at.desc()).limit(40))).scalars().unique().all()
     events = (await db.execute(select(ConsentEvent).where(ConsentEvent.contact_id == contact_id).order_by(ConsentEvent.created_at.desc()))).scalars().all()
     erasure = (await db.execute(select(ErasureLog).where(ErasureLog.contact_id == contact_id))).scalars().first()
-    defs = (await db.execute(select(CustomFieldDefinition).where(CustomFieldDefinition.entity == "contact"))).scalars().all()
     allowed = {ch: dict(zip(("allowed", "reason"), privacy.can_contact(contact, ch))) for ch in privacy.CHANNELS}
     return {
         **contact_out(contact, account.name),
@@ -115,7 +114,7 @@ async def get_contact(contact_id: uuid.UUID, db: AsyncSession = Depends(get_db),
         "erasure": {"subject_hash": erasure.subject_hash, "fields_erased": erasure.fields_erased, "regulation": erasure.regulation,
                     "created_at": erasure.created_at} if erasure else None,
         "channel_permissions": allowed,
-        "custom_field_definitions": [{"key": d.key, "label": d.label, "field_type": d.field_type, "options": d.options} for d in defs],
+        "custom_field_definitions": custom_fields.definitions_out("contact"),
     }
 
 

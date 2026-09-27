@@ -51,13 +51,24 @@ class UserUpdate(BaseModel):
     password: str | None = Field(default=None, min_length=8)
 
 
-class CustomFieldIn(BaseModel):
-    entity: Literal["account", "contact", "deal"]
-    key: str = Field(pattern=r"^[a-z][a-z0-9_]{0,63}$")
+class CustomFieldEdit(BaseModel):
     label: str = Field(min_length=1, max_length=120)
-    field_type: Literal["text", "number", "date", "select", "boolean", "url"]
     options: list[str] = []
     required: bool = False
+    access: dict[str, Literal["read", "hidden"]] = {}  # field security per role; roles not listed can edit
+
+
+class CustomFieldIn(CustomFieldEdit):
+    entity: str = Field(pattern=r"^(account|contact|deal|lead|object:[a-z][a-z0-9_]{1,30})$")
+    key: str = Field(pattern=r"^[a-z][a-z0-9_]{0,63}$")
+    field_type: Literal["text", "number", "date", "select", "boolean", "url"]
+
+
+def _check_access(access: dict) -> dict:
+    bad = [r for r in access if r not in ROLES or r == "super_admin"]
+    if bad:
+        raise HTTPException(422, f"Unknown or protected role: {', '.join(bad)}")
+    return access
 
 
 class MergeIn(BaseModel):
@@ -248,7 +259,8 @@ async def compliance(db: AsyncSession = Depends(get_db), _: Principal = Depends(
 @router.get("/custom-fields")
 async def list_custom_fields(db: AsyncSession = Depends(get_db), _: Principal = Depends(authorize("accounts", "read"))):
     rows = (await db.execute(select(CustomFieldDefinition).order_by(CustomFieldDefinition.entity, CustomFieldDefinition.label))).scalars().all()
-    return [{"id": d.id, "entity": d.entity, "key": d.key, "label": d.label, "field_type": d.field_type, "options": d.options, "required": d.required} for d in rows]
+    return [{"id": d.id, "entity": d.entity, "key": d.key, "label": d.label, "field_type": d.field_type, "options": d.options, "required": d.required,
+             "access": d.access or {}} for d in rows]
 
 
 @router.post("/custom-fields", status_code=201)
@@ -259,11 +271,32 @@ async def create_custom_field(body: CustomFieldIn, db: AsyncSession = Depends(ge
         raise HTTPException(422, "Reserved key")
     if (await db.execute(select(CustomFieldDefinition.id).where(CustomFieldDefinition.entity == body.entity, CustomFieldDefinition.key == body.key))).first():
         raise HTTPException(409, "Field already exists")
+    if body.entity.startswith("object:"):
+        from app.models import CustomObject
+
+        if not (await db.execute(select(CustomObject.id).where(CustomObject.key == body.entity[7:]))).first():
+            raise HTTPException(422, "No such custom object")
+    _check_access(body.access)
     d = CustomFieldDefinition(**body.model_dump())
     db.add(d)
     await db.commit()
     reporting.invalidate_custom_fields()  # new field is reportable straight away
     return {"id": d.id}
+
+
+@router.put("/custom-fields/{field_id}")
+async def update_custom_field(field_id: uuid.UUID, body: CustomFieldEdit, db: AsyncSession = Depends(get_db),
+                              _: Principal = Depends(authorize("admin", "update"))):
+    """Change a field's label, options, required flag or field security. Its key and type are fixed."""
+    d = await db.get(CustomFieldDefinition, field_id)
+    if d is None:
+        raise HTTPException(404, "Field not found")
+    if d.field_type == "select" and not body.options:
+        raise HTTPException(422, "Select fields need options")
+    d.label, d.options, d.required, d.access = body.label, body.options, body.required, _check_access(body.access)
+    await db.commit()
+    reporting.invalidate_custom_fields()
+    return {"id": d.id, "access": d.access}
 
 
 @router.delete("/custom-fields/{field_id}", status_code=204)

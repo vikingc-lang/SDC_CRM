@@ -6,11 +6,12 @@ in Q2" finds both paraphrased notes (vector) and exact terms (keyword).
 """
 from __future__ import annotations
 
-from sqlalchemy import Text, cast, func, literal_column, or_, select
+from sqlalchemy import Text, cast, func, literal, literal_column, or_, select
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Account, Activity
-from app.services import embeddings
+from app.services import custom_fields, embeddings
 from app.services.serializers import activity_out
 
 RRF_K = 60
@@ -44,8 +45,9 @@ async def hybrid_search(db: AsyncSession, query: str, limit: int = 10, principal
         add(("activity", a.id), rank, "activity", prev["payload"] if prev else (a, None), "keyword")
 
     if not account_id:
-        acc_doc = func.to_tsvector("english", func.concat_ws(" ", Account.name, Account.industry, Account.legal_name,
-                                                             cast(Account.custom_metadata, Text)))
+        hidden = custom_fields.hidden_keys("account", principal.user.role if principal is not None else None)
+        meta = Account.custom_metadata.op("-")(literal(hidden, ARRAY(Text))) if hidden else Account.custom_metadata  # field security
+        acc_doc = func.to_tsvector("english", func.concat_ws(" ", Account.name, Account.industry, Account.legal_name, cast(meta, Text)))
         acc_base = select(Account)
         if principal is not None:
             acc_base = principal.scope_accounts(acc_base)
@@ -76,6 +78,7 @@ async def hybrid_search(db: AsyncSession, query: str, limit: int = 10, principal
 
 
 def account_document(acc: Account) -> str:
-    fields = " ".join(f"{k} {v}" for k, v in (acc.custom_metadata or {}).items() if k != "health_breakdown")
+    restricted = custom_fields.restricted_keys("account")  # the embedding is shared by every role
+    fields = " ".join(f"{k} {v}" for k, v in (acc.custom_metadata or {}).items() if k != "health_breakdown" and k not in restricted)
     locs = " ".join(str(l.get("city", "")) for l in (acc.locations or []) if isinstance(l, dict))
     return f"{acc.name} {acc.legal_name or ''} {acc.industry or ''} {acc.tier} {locs} {fields}"

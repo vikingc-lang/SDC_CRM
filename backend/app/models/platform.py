@@ -12,7 +12,7 @@ __all__ = [
     "RolePermission", "AuditLog", "CustomFieldDefinition", "MergeLog", "DedupDismissal", "SubjectKey",
     "ConsentEvent", "ErasureLog", "Notification", "Attachment", "MailboxConnection", "DealAlert", "FxRate",
     "IntegrationEvent", "ErpSyncRun", "SsoLoginState", "SavedReport", "Dashboard", "WorkflowRule", "WorkflowRun", "ForecastSubmission", "ForecastAdjustment",
-    "ListView", "ReportSubscription",
+    "ListView", "ReportSubscription", "CustomObject", "CustomRecord", "ValidationRule", "SharingRule",
 ]
 
 
@@ -58,13 +58,15 @@ class CustomFieldDefinition(Base):
     __tablename__ = "custom_field_definitions"
 
     id: Mapped[uuid.UUID] = _pk()
-    entity: Mapped[str] = mapped_column(String(20))
+    entity: Mapped[str] = mapped_column(String(80))  # account | contact | deal | lead | object:<key>
     key: Mapped[str] = mapped_column(String(64))
     label: Mapped[str] = mapped_column(String(120))
     field_type: Mapped[str] = mapped_column(String(20))
     options: Mapped[list] = mapped_column(JSONB, default=list)
     required: Mapped[bool] = mapped_column(Boolean, default=False)
+    access: Mapped[dict] = mapped_column(JSONB, default=dict)  # field security: {role: "read" | "hidden"}; absent = editable
     created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
 class MergeLog(Base):
@@ -360,3 +362,61 @@ class ReportSubscription(Base):
     last_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_status: Mapped[str | None] = mapped_column(String(200))
     created_at: Mapped[datetime] = _ts()
+
+
+class CustomObject(Base):
+    """An admin-defined record type. Its fields are custom field definitions with entity "object:<key>"."""
+    __tablename__ = "custom_objects"
+
+    id: Mapped[uuid.UUID] = _pk()
+    key: Mapped[str] = mapped_column(String(40), unique=True)
+    label: Mapped[str] = mapped_column(String(80))
+    plural_label: Mapped[str] = mapped_column(String(80))
+    description: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class CustomRecord(Base):
+    """One record of a custom object: a name, an optional account, an owner and typed field values."""
+    __tablename__ = "custom_records"
+
+    id: Mapped[uuid.UUID] = _pk()
+    object_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("custom_objects.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(200))
+    account_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("accounts.id", ondelete="SET NULL"))
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    data: Mapped[dict] = mapped_column(JSONB, default=dict)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class ValidationRule(Base):
+    """Blocks a save when every condition (report filter syntax) matches the saved record."""
+    __tablename__ = "validation_rules"
+
+    id: Mapped[uuid.UUID] = _pk()
+    entity: Mapped[str] = mapped_column(String(60))  # a report source key: accounts, deals, ..., obj_<key>
+    name: Mapped[str] = mapped_column(String(150))
+    description: Mapped[str | None] = mapped_column(Text)
+    conditions: Mapped[list] = mapped_column(JSONB, default=list)
+    message: Mapped[str] = mapped_column(String(300))
+    applies_on: Mapped[str] = mapped_column(String(10), default="both")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class SharingRule(Base):
+    """Accounts matching the criteria (and everything on them) are visible to the listed own-scope roles."""
+    __tablename__ = "sharing_rules"
+
+    id: Mapped[uuid.UUID] = _pk()
+    name: Mapped[str] = mapped_column(String(150), unique=True)
+    description: Mapped[str | None] = mapped_column(Text)
+    criteria: Mapped[list] = mapped_column(JSONB, default=list)
+    roles: Mapped[list] = mapped_column(JSONB, default=list)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

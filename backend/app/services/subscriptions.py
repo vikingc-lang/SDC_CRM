@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.rbac import Principal, load_matrix
+from app.core.rbac import principal_for
 from app.models import ReportSubscription, SavedReport, User
 from app.services import mailer, reporting
 from app.services.notify import notify
@@ -105,7 +105,7 @@ async def deliver(db: AsyncSession, sub: ReportSubscription, now: datetime | Non
         if not (report.owner_id == user.id or report.visibility == "shared"):
             problems.append(f"{user.full_name} can't see the report")
             continue
-        p = Principal(user, await load_matrix(db, user.role))
+        p = await principal_for(db, user)
         if not p.can("reports", "read"):
             problems.append(f"{user.full_name} can't use reports")
             continue

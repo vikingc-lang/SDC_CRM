@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { BarChart3, Bell, BookOpen, Building2, CheckSquare, ChevronsUpDown, Columns3, FileSignature, Handshake, HeartHandshake, Home, Landmark, LifeBuoy, LogOut, Magnet, Megaphone, Menu, Monitor, Moon, Package, PackageCheck, Search, Settings, ShieldCheck, Sparkles, Stamp, Sun, Target, Users, X } from "lucide-react";
+import { BarChart3, Bell, BookOpen, Boxes, Building2, CheckSquare, ChevronsUpDown, Columns3, FileSignature, Handshake, HeartHandshake, Home, Landmark, LifeBuoy, LogOut, Magnet, Megaphone, Menu, Monitor, Moon, Package, PackageCheck, Search, Settings, ShieldCheck, Sparkles, Stamp, Sun, Target, Users, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
@@ -124,6 +124,7 @@ function Sidebar({ user, onNavigate }: { user?: Me; onNavigate?: () => void }) {
             </div>
           );
         })}
+        <CustomObjectsNav pathname={pathname} onNavigate={onNavigate} />
       </nav>
       <div className="space-y-1 border-t p-3">
         <Dropdown>
@@ -306,5 +307,28 @@ function NotificationBell() {
         </div>
       </DropdownContent>
     </Dropdown>
+  );
+}
+
+/** Admin-defined record types, listed under their own heading for users who can read them. */
+function CustomObjectsNav({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
+  const { can } = useMe();
+  const objects = useQuery({ queryKey: ["objects"], queryFn: () => get<{ key: string; plural_label: string }[]>("/objects"),
+    enabled: can("custom_objects", "read"), staleTime: 60_000 });
+  if (!objects.data?.length) return null;
+  return (
+    <div className="space-y-0.5">
+      <p className="px-2.5 pb-1 text-[11px] font-medium uppercase tracking-wide text-subtle">Custom objects</p>
+      {objects.data.map((o) => {
+        const href = `/objects/${o.key}`, active = pathname.startsWith(href);
+        return (
+          <Link key={o.key} href={href} onClick={onNavigate}
+            className={cn("flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm transition-colors",
+              active ? "bg-surface font-medium text-foreground shadow-card ring-1 ring-border" : "text-muted-foreground hover:bg-muted hover:text-foreground")}>
+            <Boxes className={cn("h-4 w-4", active && "text-primary")} />{o.plural_label}
+          </Link>
+        );
+      })}
+    </div>
   );
 }

@@ -1,9 +1,11 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Save, Trash2 } from "lucide-react";
+import { Pencil, Plus, Save, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { accessSummary, FieldSecurityDialog } from "@/components/admin/platform";
+import type { CustomObjectDef } from "@/components/objects";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
@@ -16,6 +18,11 @@ import type { CustomFieldDef, GateRule, PipelineFull } from "@/lib/types";
 export function CustomFieldsPanel() {
   const qc = useQueryClient();
   const { data } = useQuery({ queryKey: ["custom-fields"], queryFn: () => get<CustomFieldDef[]>("/admin/custom-fields") });
+  const objects = useQuery({ queryKey: ["objects"], queryFn: () => get<CustomObjectDef[]>("/objects") });
+  const [securing, setSecuring] = useState<CustomFieldDef | null>(null);
+  const entities = [["account", "Account"], ["contact", "Contact"], ["deal", "Opportunity"], ["lead", "Lead"],
+    ...(objects.data ?? []).map((o) => [`object:${o.key}`, o.label])];
+  const entityLabel = (e?: string) => entities.find(([k]) => k === e)?.[1] ?? e;
   const [f, setF] = useState({ entity: "account", key: "", label: "", field_type: "text", options: "", required: false });
   const create = useMutation({
     mutationFn: async () => (await api.post("/admin/custom-fields", { ...f, options: f.options.split(",").map((s) => s.trim()).filter(Boolean) })).data,
@@ -28,9 +35,9 @@ export function CustomFieldsPanel() {
   });
   return (
     <Card>
-      <CardHeader title="Custom fields" description="Typed fields stored in each record's JSONB metadata, validated on save and searchable." />
-      <form className="grid gap-2 border-b px-5 pb-4 sm:grid-cols-[110px_1fr_1fr_110px_1fr_auto] sm:items-end" onSubmit={(e) => { e.preventDefault(); create.mutate(); }}>
-        <div><Label htmlFor="cf-e">Record</Label><Select id="cf-e" value={f.entity} onChange={(e) => setF({ ...f, entity: e.target.value })}>{["account", "contact", "deal"].map((x) => <option key={x}>{x}</option>)}</Select></div>
+      <CardHeader title="Custom fields" description="Typed fields on standard records and custom objects: validated on save, reportable, and secured per role (edit, read-only or hidden)." />
+      <form className="grid gap-2 border-b px-5 pb-4 sm:grid-cols-[180px_1fr_1fr_110px_1fr_auto] sm:items-end" onSubmit={(e) => { e.preventDefault(); create.mutate(); }}>
+        <div><Label htmlFor="cf-e">Record</Label><Select id="cf-e" value={f.entity} onChange={(e) => setF({ ...f, entity: e.target.value })}>{entities.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</Select></div>
         <div><Label htmlFor="cf-l">Label</Label><Input id="cf-l" required value={f.label} onChange={(e) => setF({ ...f, label: e.target.value, key: f.key || "" })} /></div>
         <div><Label htmlFor="cf-k">Key</Label><Input id="cf-k" required pattern="[a-z][a-z0-9_]*" placeholder={f.label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || "snake_case"} value={f.key} onChange={(e) => setF({ ...f, key: e.target.value })} /></div>
         <div><Label htmlFor="cf-t">Type</Label><Select id="cf-t" value={f.field_type} onChange={(e) => setF({ ...f, field_type: e.target.value })}>{["text", "number", "date", "select", "boolean", "url"].map((x) => <option key={x}>{x}</option>)}</Select></div>
@@ -38,16 +45,21 @@ export function CustomFieldsPanel() {
         <Button type="submit" size="sm" loading={create.isPending}><Plus className="h-3.5 w-3.5" />Add</Button>
       </form>
       {!data ? <Skeleton className="m-5 h-24" /> : (
-        <Table head={["Record", "Label", "Key", "Type", "Options", ""]}>
+        <Table head={["Record", "Label", "Key", "Type", "Options", "Security", ""]}>
           {data.map((d) => (
             <tr key={d.id}>
-              <Td className="capitalize">{d.entity}</Td><Td className="font-medium">{d.label}</Td><Td className="font-mono text-[12px]">{d.key}</Td>
+              <Td>{entityLabel(d.entity)}</Td><Td className="font-medium">{d.label}</Td><Td className="font-mono text-[12px]">{d.key}</Td>
               <Td><Badge>{d.field_type}</Badge></Td><Td className="text-[12.5px]">{d.options.join(", ") || "—"}</Td>
-              <Td><Button size="sm" variant="ghost" aria-label={`Delete ${d.label}`} onClick={() => remove.mutate(d.id!)}><Trash2 className="h-3.5 w-3.5" /></Button></Td>
+              <Td className="text-[12px] text-muted-foreground">{accessSummary(d.access)}</Td>
+              <Td className="whitespace-nowrap text-right">
+                <Button size="sm" variant="ghost" aria-label={`Edit ${d.label}`} onClick={() => setSecuring(d)}><Pencil className="h-3.5 w-3.5" /></Button>
+                <Button size="sm" variant="ghost" aria-label={`Delete ${d.label}`} onClick={() => remove.mutate(d.id!)}><Trash2 className="h-3.5 w-3.5" /></Button>
+              </Td>
             </tr>
           ))}
         </Table>
       )}
+      {securing && <FieldSecurityDialog field={securing} onClose={() => setSecuring(null)} />}
     </Card>
   );
 }
