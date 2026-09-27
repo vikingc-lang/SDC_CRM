@@ -87,6 +87,7 @@ async def add_from_filter(db: AsyncSession, p: Principal, campaign: Campaign, so
         raise CampaignError("Build the list from leads or contacts")
     if not p.can(source, "read") or p.is_own_scope(source):
         raise CampaignError(f"Building lists needs read access to every {source[:-1]}")
+    await reporting.refresh_custom_fields(db)
     try:
         reporting.validate_filters(source, filters)
     except reporting.ReportError as e:

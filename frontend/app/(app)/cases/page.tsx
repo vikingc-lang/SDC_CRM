@@ -16,6 +16,7 @@ import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { EmptyState, Skeleton } from "@/components/ui/misc";
 import { api, errorMessage, get } from "@/lib/api";
 import { useMe } from "@/lib/me";
+import { BulkBar, RowBox, SelectAllBox, useSelection } from "@/components/bulk";
 import type { AccountListItem } from "@/lib/types";
 import { relativeDays } from "@/lib/utils";
 
@@ -33,6 +34,8 @@ export default function CasesPage() {
   const list = useQuery({ queryKey: ["cases", "list", view, queue, search], placeholderData: (p) => p,
     queryFn: () => get<CaseRow[]>("/cases", { view, queue_id: queue || undefined, search: search || undefined }) });
   const s = stats.data;
+  const sel = useSelection((list.data ?? []).map((c) => c.id));
+  const bulk = can("cases", "update");
   return (
     <div className="mx-auto max-w-7xl">
       <PageHeader title="Service" description="Customer cases with SLA clocks, queues and a shared knowledge base."
@@ -55,13 +58,15 @@ export default function CasesPage() {
           <option value="">All queues</option>{meta.data?.queues.map((q) => <option key={q.id} value={q.id}>{q.name}</option>)}
         </Select>
       </div>
+      <BulkBar entity="cases" sel={sel} />
       <Card>
         {!list.data ? <Skeleton className="m-5 h-48" /> : !list.data.length ? (
           <EmptyState icon={<LifeBuoy className="h-4 w-4" />} title="No cases here" description={view === "mine" ? "Nothing assigned to you right now." : undefined} />
         ) : (
-          <Table head={["Case", "Account", "Priority", "Status", "SLA", "Owner", "Updated"]} minWidth={900}>
+          <Table head={[...(bulk ? [<SelectAllBox key="all" sel={sel} label="Select all cases" />] : []), "Case", "Account", "Priority", "Status", "SLA", "Owner", "Updated"]} minWidth={900}>
             {list.data.map((c) => (
-              <tr key={c.id}>
+              <tr key={c.id} className={sel.has(c.id) ? "bg-primary-soft/40" : undefined}>
+                {bulk && <Td className="w-8"><RowBox sel={sel} id={c.id} label={c.case_number} /></Td>}
                 <Td><Link href={`/cases/${c.id}`} className="font-medium hover:text-primary hover:underline">{c.subject}</Link>
                   <span className="block text-[12px] text-muted-foreground tabular">{c.case_number}{c.queue ? ` · ${c.queue}` : ""}</span></Td>
                 <Td className="text-[13px]">{c.account}</Td>

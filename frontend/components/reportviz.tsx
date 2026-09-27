@@ -9,7 +9,9 @@ import { cn, money, shortDate } from "@/lib/utils";
    change never repaints a series; <=24px bars with 4px data-ends; 2px surface gaps between stacked
    segments; 2px lines; hairline grid; per-mark tooltips; a legend for 2+ series; the data table below. */
 
-export type ChartType = "table" | "bar" | "column" | "line" | "stacked" | "number";
+export type ChartType = "table" | "bar" | "column" | "line" | "stacked" | "matrix" | "number";
+/** Called with one value per grouping when a bar, point, segment, cell or summary row is clicked. */
+export type DrillFn = (values: unknown[], label: string) => void;
 export interface RCol { key: string; label: string; type: string; role: "dimension" | "measure" | "column"; bucket?: string | null }
 export interface RResult { source: string; source_label: string; columns: RCol[]; rows: unknown[][]; truncated: boolean; row_count: number; generated_at: string }
 
@@ -24,7 +26,7 @@ export interface SavedReport {
 }
 
 export const CHART_LABELS: Record<ChartType, string> = {
-  table: "Table", bar: "Bar", column: "Column", line: "Line", stacked: "Stacked bar", number: "Headline number",
+  table: "Table", bar: "Bar", column: "Column", line: "Line", stacked: "Stacked bar", matrix: "Matrix (pivot)", number: "Headline number",
 };
 const MAX_SERIES = 7;
 const MAX_BARS = 15;
@@ -54,21 +56,89 @@ export function effectiveChart(r: RResult, requested: ChartType | undefined): Ch
   if (!measures.length || requested === "table") return "table";
   if (!dims.length) return "number";
   if (requested === "number") return "number";
-  if (dims.length === 2) return "stacked";
+  if (dims.length === 2) return requested === "matrix" ? "matrix" : "stacked";
+  if (requested === "matrix") return "bar";
   if (requested === "line" || requested === "column") return dims[0].type === "date" ? requested : "bar";
   if (requested === "stacked") return "bar";
   return requested ?? (dims[0].type === "date" ? "column" : "bar");
 }
 
-export function ReportViz({ result, chart, compact = false }: { result: RResult; chart?: ChartType; compact?: boolean }) {
+export function ReportViz({ result, chart, compact = false, onDrill }: { result: RResult; chart?: ChartType; compact?: boolean; onDrill?: DrillFn }) {
   const type = effectiveChart(result, chart);
+  const dims = result.columns.filter((c) => c.role === "dimension").length;
+  const drill = dims ? onDrill : undefined;  // only summaries have groups to drill into
   if (!result.rows.length) return <p className="py-8 text-center text-sm text-muted-foreground">No records match this report.</p>;
   if (type === "number") return <Headline result={result} />;
-  if (type === "table") return <ResultTable result={result} maxRows={compact ? 8 : undefined} />;
-  if (type === "stacked") return <StackedBars result={result} />;
-  if (type === "line") return <LineChart result={result} />;
-  if (type === "column") return <Columns result={result} />;
-  return <Bars result={result} />;
+  if (type === "table") return <ResultTable result={result} maxRows={compact ? 8 : undefined} onDrill={drill} />;
+  if (type === "matrix") return <Matrix result={result} onDrill={drill} />;
+  if (type === "stacked") return <StackedBars result={result} onDrill={drill} />;
+  if (type === "line") return <LineChart result={result} onDrill={drill} />;
+  if (type === "column") return <Columns result={result} onDrill={drill} />;
+  return <Bars result={result} onDrill={drill} />;
+}
+
+/** Two groupings as a cross-tab of the first measure, with row and column totals. */
+function Matrix({ result, onDrill }: { result: RResult; onDrill?: DrillFn }) {
+  const { i, col } = measure(result);
+  const [d0, d1] = result.columns;
+  const key = (v: unknown) => JSON.stringify(v ?? null);
+  const rowsRaw = new Map<string, unknown>(), colsRaw = new Map<string, unknown>(), cell = new Map<string, number>();
+  const rowTot = new Map<string, number>(), colTot = new Map<string, number>();
+  for (const r of result.rows) {
+    const a = key(r[0]), b = key(r[1]), v = Number(r[i] ?? 0);
+    rowsRaw.set(a, r[0]); colsRaw.set(b, r[1]);
+    cell.set(`${a}|${b}`, (cell.get(`${a}|${b}`) ?? 0) + v);
+    rowTot.set(a, (rowTot.get(a) ?? 0) + v); colTot.set(b, (colTot.get(b) ?? 0) + v);
+  }
+  const byTotal = (m: Map<string, number>) => [...m.keys()].sort((x, y) => (m.get(y) ?? 0) - (m.get(x) ?? 0));
+  const inDateOrder = (keys: string[], dim: RCol, raw: Map<string, unknown>) =>
+    dim.type === "date" ? [...keys].sort((x, y) => String(raw.get(x) ?? "").localeCompare(String(raw.get(y) ?? ""))) : keys;
+  const rows = inDateOrder(byTotal(rowTot).slice(0, 40), d0, rowsRaw);
+  const cols = inDateOrder(byTotal(colTot).slice(0, 12), d1, colsRaw);
+  const grand = [...rowTot.values()].reduce((a, b) => a + b, 0);
+  const max = Math.max(1, ...[...cell.values()]);
+  const num = "px-2.5 py-1.5 text-right tabular";
+  return (
+    <div className="overflow-x-auto">
+      <table className="min-w-full border-collapse text-[12.5px]">
+        <thead>
+          <tr className="border-b">
+            <th className="px-2.5 py-1.5 text-left font-medium text-muted-foreground">{d0.label} / {d1.label}</th>
+            {cols.map((c) => <th key={c} className="px-2.5 py-1.5 text-right font-medium text-muted-foreground">{fmtValue(colsRaw.get(c), d1)}</th>)}
+            <th className="px-2.5 py-1.5 text-right font-semibold">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r} className="border-b last:border-b-0">
+              <td className="px-2.5 py-1.5 text-muted-foreground">{fmtValue(rowsRaw.get(r), d0)}</td>
+              {cols.map((c) => {
+                const v = cell.get(`${r}|${c}`);
+                const clickable = v !== undefined && !!onDrill;
+                return (
+                  <td key={c} className={cn(num, clickable && "cursor-pointer hover:underline")}
+                    style={v ? { background: `color-mix(in srgb, var(--series-1) ${Math.round((v / max) * 22)}%, transparent)` } : undefined}
+                    onClick={clickable ? () => onDrill!([rowsRaw.get(r), colsRaw.get(c)], `${fmtValue(rowsRaw.get(r), d0)} · ${fmtValue(colsRaw.get(c), d1)}`) : undefined}
+                    title={clickable ? "Show these records" : undefined}>
+                    {v === undefined ? <span className="text-subtle">·</span> : fmtValue(v, col)}
+                  </td>
+                );
+              })}
+              <td className={cn(num, "font-medium")}>{fmtValue(rowTot.get(r), col)}</td>
+            </tr>
+          ))}
+          <tr className="border-t-2">
+            <td className="px-2.5 py-1.5 font-semibold">Total</td>
+            {cols.map((c) => <td key={c} className={cn(num, "font-medium")}>{fmtValue(colTot.get(c), col)}</td>)}
+            <td className={cn(num, "font-semibold")}>{fmtValue(grand, col)}</td>
+          </tr>
+        </tbody>
+      </table>
+      {(rowTot.size > rows.length || colTot.size > cols.length) && (
+        <p className="mt-2 text-[12px] text-subtle">Showing the largest {rows.length} rows and {cols.length} columns; totals include everything.</p>
+      )}
+    </div>
+  );
 }
 
 function measure(r: RResult) {
@@ -96,7 +166,7 @@ function Headline({ result }: { result: RResult }) {
   );
 }
 
-function Bars({ result }: { result: RResult }) {
+function Bars({ result, onDrill }: { result: RResult; onDrill?: DrillFn }) {
   const [hover, setHover] = useState<number | null>(null);
   const { i, col } = measure(result);
   const dim = result.columns[0];
@@ -109,7 +179,8 @@ function Bars({ result }: { result: RResult }) {
         {rows.map((r, k) => {
           const v = Math.max(0, Number(r[i] ?? 0));
           return (
-            <div key={k} className="relative grid grid-cols-[minmax(0,9rem)_1fr_4.5rem] items-center gap-3" onMouseEnter={() => setHover(k)} onMouseLeave={() => setHover(null)}>
+            <div key={k} className={cn("relative grid grid-cols-[minmax(0,9rem)_1fr_4.5rem] items-center gap-3", onDrill && "cursor-pointer")}
+              onMouseEnter={() => setHover(k)} onMouseLeave={() => setHover(null)} onClick={onDrill ? () => onDrill([r[0]], fmtValue(r[0], dim)) : undefined}>
               <div className="truncate text-[13px] text-muted-foreground" title={fmtValue(r[0], dim)}>{fmtValue(r[0], dim)}</div>
               <div className="relative h-5">
                 <div className={cn("absolute inset-y-0.5 left-0 rounded-r bg-series-1 transition-opacity", hover !== null && hover !== k && "opacity-60")} style={{ width: `${Math.max(0.5, (v / max) * 100)}%` }} />
@@ -165,7 +236,7 @@ function every(n: number, room: number) {
   return Math.max(1, Math.ceil(n / Math.max(1, room)));
 }
 
-function Columns({ result }: { result: RResult }) {
+function Columns({ result, onDrill }: { result: RResult; onDrill?: DrillFn }) {
   const [hover, setHover] = useState<number | null>(null);
   const [ref, w] = useWidth<HTMLDivElement>();
   const { i, col } = measure(result);
@@ -187,7 +258,8 @@ function Columns({ result }: { result: RResult }) {
           {rows.map((r, k) => {
             const v = Math.max(0, Number(r[i] ?? 0));
             return (
-              <div key={k} className="relative flex h-full min-w-0 flex-1 items-end justify-center" onMouseEnter={() => setHover(k)} onMouseLeave={() => setHover(null)}>
+              <div key={k} className={cn("relative flex h-full min-w-0 flex-1 items-end justify-center", onDrill && "cursor-pointer")}
+                onMouseEnter={() => setHover(k)} onMouseLeave={() => setHover(null)} onClick={onDrill ? () => onDrill([r[0]], fmtValue(r[0], dim)) : undefined}>
                 <div className={cn("w-full max-w-[24px] rounded-t bg-series-1 transition-opacity", hover !== null && hover !== k && "opacity-60")} style={{ height: Math.max(2, (v / top) * H) }} />
                 {hover === k && (
                   <Tip style={{ bottom: (v / top) * H + 8, left: "50%", transform: "translateX(-50%)" }}>
@@ -208,7 +280,7 @@ function Columns({ result }: { result: RResult }) {
   );
 }
 
-function LineChart({ result }: { result: RResult }) {
+function LineChart({ result, onDrill }: { result: RResult; onDrill?: DrillFn }) {
   const [hover, setHover] = useState<number | null>(null);
   const [ref, w] = useWidth<HTMLDivElement>();
   const { i, col } = measure(result);
@@ -237,7 +309,8 @@ function LineChart({ result }: { result: RResult }) {
       <YAxis ticks={ticks} top={top} H={H} col={col} />
       <div ref={ref} className="relative min-w-0 flex-1">
         {w > 0 && <>
-        <svg width={w} height={H} className="block overflow-visible" onMouseMove={onMove} onMouseLeave={() => setHover(null)} role="img" aria-label={`${col.label} by ${dim.label}`}>
+        <svg width={w} height={H} className={cn("block overflow-visible", onDrill && "cursor-pointer")} onMouseMove={onMove} onMouseLeave={() => setHover(null)}
+          onClick={onDrill && hover !== null ? () => onDrill([rows[hover][0]], fmtValue(rows[hover][0], dim)) : undefined} role="img" aria-label={`${col.label} by ${dim.label}`}>
           {ticks.map((t) => <line key={t} x1={0} x2={w} y1={y(t)} y2={y(t)} stroke="hsl(var(--border))" strokeWidth={1} />)}
           <path d={area} fill="var(--series-1)" fillOpacity={0.1} />
           <path d={path} fill="none" stroke="var(--series-1)" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
@@ -266,7 +339,7 @@ function Undated({ n }: { n: number }) {
   return n ? <p className="mt-2 text-[12px] text-subtle">{n} group{n === 1 ? "" : "s"} with no date not plotted; see the table.</p> : null;
 }
 
-function StackedBars({ result }: { result: RResult }) {
+function StackedBars({ result, onDrill }: { result: RResult; onDrill?: DrillFn }) {
   const [hover, setHover] = useState<string | null>(null);
   const { i, col } = measure(result);
   const [d0, d1] = result.columns;
@@ -279,7 +352,9 @@ function StackedBars({ result }: { result: RResult }) {
   const hasOther = ranked.length > kept.length;
   const color = (s: string) => (s === "Other" ? "var(--cat-other)" : `var(--cat-${series.indexOf(s) + 1})`);
   const cats = new Map<string, Map<string, number>>();
+  const rawCat = new Map<string, unknown>(), rawSeries = new Map<string, unknown>();
   for (const r of result.rows) {
+    rawCat.set(fmtValue(r[0], d0), r[0]); rawSeries.set(fmtValue(r[1], d1), r[1]);
     const c = fmtValue(r[0], d0), sRaw = fmtValue(r[1], d1), s = kept.includes(sRaw) ? sRaw : "Other";
     const m = cats.get(c) ?? new Map<string, number>();
     m.set(s, (m.get(s) ?? 0) + Math.max(0, Number(r[i] ?? 0)));
@@ -302,8 +377,10 @@ function StackedBars({ result }: { result: RResult }) {
               {order.filter((s) => (m.get(s) ?? 0) > 0).map((s, k, arr) => {
                 const v = m.get(s)!, id = `${c}|${s}`;
                 return (
-                  <div key={s} className={cn("relative h-full transition-opacity", k === arr.length - 1 && "rounded-r", hover && hover !== id && "opacity-60")}
-                    style={{ flexGrow: v, flexBasis: 0, background: color(s), minWidth: 2 }} onMouseEnter={() => setHover(id)} onMouseLeave={() => setHover(null)}>
+                  <div key={s} className={cn("relative h-full transition-opacity", k === arr.length - 1 && "rounded-r", hover && hover !== id && "opacity-60",
+                    onDrill && s !== "Other" && "cursor-pointer")}
+                    style={{ flexGrow: v, flexBasis: 0, background: color(s), minWidth: 2 }} onMouseEnter={() => setHover(id)} onMouseLeave={() => setHover(null)}
+                    onClick={onDrill && s !== "Other" ? () => onDrill([rawCat.get(c), rawSeries.get(s)], `${c} · ${s}`) : undefined}>
                     {hover === id && (
                       <Tip style={{ bottom: "100%", left: "50%", transform: "translateX(-50%)", marginBottom: 6 }}>
                         <div className="font-medium">{c} · {s}</div>
@@ -322,14 +399,17 @@ function StackedBars({ result }: { result: RResult }) {
   );
 }
 
-export function ResultTable({ result, maxRows }: { result: RResult; maxRows?: number }) {
+export function ResultTable({ result, maxRows, onDrill }: { result: RResult; maxRows?: number; onDrill?: DrillFn }) {
   const rows = maxRows ? result.rows.slice(0, maxRows) : result.rows;
   const numeric = (c: RCol) => c.type === "money" || c.type === "number";
+  const dimIdx = result.columns.map((c, j) => (c.role === "dimension" ? j : -1)).filter((j) => j >= 0);
+  const drill = dimIdx.length ? onDrill : undefined;
   return (
     <div>
       <Table head={result.columns.map((c) => <span key={c.key} className={cn(numeric(c) && "block text-right")}>{c.label}</span>)} minWidth={Math.max(480, result.columns.length * 130)}>
         {rows.map((r, k) => (
-          <tr key={k}>
+          <tr key={k} className={cn(drill && "cursor-pointer hover:bg-muted/50")} title={drill ? "Show these records" : undefined}
+            onClick={drill ? () => drill(dimIdx.map((j) => r[j]), dimIdx.map((j) => fmtValue(r[j], result.columns[j])).join(" · ")) : undefined}>
             {result.columns.map((c, j) => <Td key={c.key} className={cn("text-[13px]", numeric(c) && "tabular text-right")}>{fmtValue(r[j], c)}</Td>)}
           </tr>
         ))}

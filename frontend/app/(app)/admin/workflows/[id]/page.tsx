@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Bell, FlaskConical, ListChecks, PenLine, Plus, Radio, Save, Trash2, Zap } from "lucide-react";
+import { ArrowLeft, Bell, FlaskConical, Globe, ListChecks, MessageSquare, PenLine, Plus, Radio, Save, Trash2, Zap } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -34,6 +34,8 @@ const ACTION_META: Record<Action["type"], { label: string; icon: typeof Bell }> 
   notify: { label: "Send a notification", icon: Bell },
   update_field: { label: "Update a field", icon: PenLine },
   emit_event: { label: "Send an event to connected systems", icon: Radio },
+  http_request: { label: "Call a webhook (HTTP POST)", icon: Globe },
+  post_message: { label: "Post to Slack or Microsoft Teams", icon: MessageSquare },
 };
 
 function blank(entity: Entity): Omit<Rule, "id"> {
@@ -45,6 +47,8 @@ function newAction(type: Action["type"], entity: Entity): Action {
   if (type === "create_task") return { type, title: "", due_in_days: 1, priority: "normal", assign_to: "owner" };
   if (type === "notify") return { type, to: ["owner"], title: "" };
   if (type === "update_field") { const s = entity.settable[0]; return { type, field: s?.key ?? "", value: s?.options?.[0] ?? "" }; }
+  if (type === "http_request") return { type, url: "" };
+  if (type === "post_message") return { type, channel: "slack", webhook_url: "", text: "" };
   return { type, event: "" };
 }
 
@@ -275,6 +279,28 @@ function ActionFields({ idp, a, entity, people, meta, onChange }: {
       </div>
     );
   }
+  if (a.type === "http_request") return (
+    <div>
+      <Label htmlFor={`${idp}-url`}>Endpoint URL</Label>
+      <Input id={`${idp}-url`} type="url" value={a.url} onChange={(e) => onChange({ ...a, url: e.target.value.trim() })} placeholder="https://erp.example.com/hooks/cirra" />
+      <p className="mt-1 text-[12px] text-subtle">Cirra POSTs the record as JSON: workflow name, record id, trigger and every field. Any 2xx response counts as success; the response is shown in the run log.</p>
+    </div>
+  );
+  if (a.type === "post_message") return (
+    <div className="space-y-2">
+      <div className="grid gap-2 sm:grid-cols-[150px_1fr]">
+        <div><Label htmlFor={`${idp}-chan`}>Where</Label>
+          <Select id={`${idp}-chan`} value={a.channel} onChange={(e) => onChange({ ...a, channel: e.target.value as "slack" | "teams" })}>
+            <option value="slack">Slack</option><option value="teams">Microsoft Teams</option></Select></div>
+        <div><Label htmlFor={`${idp}-hook`}>Incoming webhook URL</Label>
+          <Input id={`${idp}-hook`} type="url" value={a.webhook_url} onChange={(e) => onChange({ ...a, webhook_url: e.target.value.trim() })}
+            placeholder={a.channel === "slack" ? "https://hooks.slack.com/services/…" : "https://….webhook.office.com/…"} /></div>
+      </div>
+      <div><Label htmlFor={`${idp}-text`}>Message</Label>
+        <Textarea id={`${idp}-text`} rows={2} value={a.text} onChange={(e) => onChange({ ...a, text: e.target.value })} placeholder="{{title}} moved to {{stage}} ({{amount_usd}})" /></div>
+      <p className="text-[12px] text-subtle">Create the incoming webhook in the {a.channel === "slack" ? "Slack app's settings" : "Teams channel's Workflows"} and paste its https URL. Placeholders fill in record values.</p>
+    </div>
+  );
   return (
     <div>
       <Label htmlFor={`${idp}-event`}>Event name</Label>

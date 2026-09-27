@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import csv
 import io
-from dataclasses import dataclass, field
+import time
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Callable
 
-from sqlalchemy import Date, Numeric, and_, case, cast, func, literal, not_, or_, select
+from sqlalchemy import Boolean, Date, Numeric, and_, case, cast, func, literal, not_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -33,7 +34,7 @@ OPS = {
     "number": ("eq", "neq", "gt", "gte", "lt", "lte", "between", "is_empty", "not_empty"),
     "money": ("eq", "neq", "gt", "gte", "lt", "lte", "between", "is_empty", "not_empty"),
     "date": ("on", "before", "after", "between", "within", "is_empty", "not_empty"),
-    "bool": ("is_true", "is_false"),
+    "bool": ("is_true", "is_false", "is_empty", "not_empty"),
 }
 RELATIVE = ("today", "yesterday", "this_week", "last_week", "this_month", "last_month", "this_quarter", "last_quarter",
             "next_quarter", "this_year", "last_year", "last_7_days", "last_30_days", "last_90_days", "next_30_days", "next_90_days")
@@ -337,9 +338,69 @@ def _cases() -> Source:
 SOURCES: dict[str, Source] = {s.key: s for s in (_deals(), _accounts(), _contacts(), _leads(), _activities(), _tasks(), _quotes(), _orders(), _cases(), _campaigns())}
 
 
+# ---- custom fields ---------------------------------------------------------------------------------
+# Tenant-defined fields live in each record's JSONB column. They are merged into the static catalogue as
+# "cf_<key>" fields, typed from their definition, so they can be filtered, grouped, summed, charted and used
+# in workflow conditions like any built-in field. Refreshed every CF_TTL seconds and whenever an admin
+# changes a definition (invalidate_custom_fields).
+CF_TTL = 30.0  # safety net; changes are normally picked up through the definition signature below
+CF_ENTITY = {"accounts": ("account", lambda: Account.custom_metadata), "contacts": ("contact", lambda: Contact.custom_fields),
+             "deals": ("deal", lambda: Deal.custom_fields), "leads": ("lead", lambda: Lead.custom_fields)}
+_live: dict[str, Source] = {}
+_live_at = 0.0
+_live_sig: tuple | None = None
+
+
+def src_of(key: str) -> Source | None:
+    """The source with its custom fields (static catalogue if custom fields haven't been loaded yet)."""
+    return _live.get(key) or SOURCES.get(key)
+
+
+def invalidate_custom_fields() -> None:
+    global _live_at
+    _live_at = 0.0
+
+
+def _custom_expr(col, defn):
+    """Typed read of a JSONB custom value. Values that don't parse (stored before the field was defined, or by a
+    sync) read as empty instead of failing the whole query."""
+    raw = col[defn.key].astext
+    if defn.field_type == "number":
+        return case((raw.op("~")(r"^\s*-?[0-9]+(\.[0-9]+)?\s*$"), cast(raw, Numeric)), else_=None)
+    if defn.field_type == "date":
+        return case((raw.op("~")(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}"), cast(func.substr(raw, 1, 10), Date)), else_=None)
+    if defn.field_type == "boolean":
+        return case((func.lower(raw) == "true", literal(True)), (func.lower(raw) == "false", literal(False)), else_=None)
+    return raw
+
+
+async def refresh_custom_fields(db: AsyncSession, force: bool = False) -> None:
+    """Rebuild the live catalogue when the definitions change. A one-row signature query (count + latest
+    creation) runs per call, so every API replica sees a new or deleted field on its very next request."""
+    global _live, _live_at, _live_sig
+    from app.models import CustomFieldDefinition
+
+    sig = tuple((await db.execute(select(func.count(CustomFieldDefinition.id), func.max(CustomFieldDefinition.created_at)))).one())
+    if not force and sig == _live_sig and time.monotonic() - _live_at < CF_TTL:
+        return
+    defs = (await db.execute(select(CustomFieldDefinition).order_by(CustomFieldDefinition.label))).scalars().all()
+    live = {}
+    for key, src in SOURCES.items():
+        ent = CF_ENTITY.get(key)
+        extra = {}
+        if ent:
+            for d in (x for x in defs if x.entity == ent[0]):
+                typ = {"number": "number", "date": "date", "boolean": "bool", "select": "enum"}.get(d.field_type, "text")
+                extra[f"cf_{d.key}"] = F(d.label, typ, _custom_expr(ent[1](), d), list(d.options or []) if typ == "enum" else None,
+                                         groupable=typ in ("text", "enum", "date", "bool"))
+        live[key] = replace(src, fields={**src.fields, **extra}) if extra else src
+    _live, _live_at, _live_sig = live, time.monotonic(), sig
+
+
 def catalogue(p: Principal) -> list[dict]:
     out = []
-    for s in SOURCES.values():
+    for key in SOURCES:
+        s = src_of(key)
         if not p.can(s.resource, "read"):
             continue
         out.append({"key": s.key, "label": s.label, "description": s.description, "default_columns": s.default_columns,
@@ -446,7 +507,7 @@ def _bucketed(f: F, bucket: str | None):
 
 
 def validate(defn: dict) -> dict:
-    src = SOURCES.get(defn.get("source") or "")
+    src = src_of(defn.get("source") or "")
     if src is None:
         raise ReportError("Choose a data source")
     groups = defn.get("group_by") or []
@@ -492,8 +553,9 @@ def _json(v):
 
 
 async def run(db: AsyncSession, p: Principal, defn: dict) -> dict:
+    await refresh_custom_fields(db)
     validate(defn)
-    src = SOURCES[defn["source"]]
+    src = src_of(defn["source"])
     if not p.can(src.resource, "read"):
         raise ReportError(f"Your role can't read {src.label.lower()}")
     stmt = src.scope(p, src.base())
@@ -531,6 +593,8 @@ async def run(db: AsyncSession, p: Principal, defn: dict) -> dict:
     else:
         columns = defn.get("columns") or src.default_columns
         stmt = stmt.add_columns(*[src.fields[c].expr.label(c) for c in columns])
+        if defn.get("with_ids") and src.id_col is not None:
+            stmt = stmt.add_columns(src.id_col.label("_id"))
         by = sort.get("by")
         if by in src.fields:
             e = src.fields[by].expr
@@ -540,14 +604,83 @@ async def run(db: AsyncSession, p: Principal, defn: dict) -> dict:
     rows = (await db.execute(stmt.limit(limit + 1))).all()
     truncated = len(rows) > limit
     data = [[_json(v) for v in r] for r in rows[:limit]]
-    return {"source": src.key, "source_label": src.label, "columns": cols, "rows": data, "truncated": truncated,
-            "row_count": len(data), "generated_at": datetime.now(timezone.utc).isoformat()}
+    out = {"source": src.key, "source_label": src.label, "columns": cols, "rows": data, "truncated": truncated,
+           "row_count": len(data), "generated_at": datetime.now(timezone.utc).isoformat()}
+    if defn.get("with_ids") and not (groups or measures) and src.id_col is not None:
+        out["ids"] = [r.pop() for r in data]  # the trailing _id column
+        out["link"] = LINKS.get(src.key)
+    return out
+
+
+# ---- dashboard filters and drill-down ------------------------------------------------------------
+# The date field a dashboard's period applies to, and where a record opens, per source.
+DASH_DATE = {"deals": "close_date", "accounts": "created", "contacts": "created", "leads": "created", "activities": "occurred",
+             "tasks": "due", "quotes": "created", "orders": "created", "cases": "opened", "campaigns": "start"}
+LINKS = {"deals": "/deals/{id}", "accounts": "/accounts/{id}", "contacts": "/contacts/{id}", "leads": "/leads/{id}", "quotes": "/quotes/{id}",
+         "orders": "/orders/{id}", "cases": "/cases/{id}", "campaigns": "/campaigns/{id}", "tasks": "/tasks"}
+
+
+def with_dashboard_filters(defn: dict, period: str | None, owner: str | None) -> tuple[dict, list[str]]:
+    """Add a dashboard's period / owner filters to one tile's definition where the source supports them.
+    Returns the new definition and the filters that could not apply (so the tile can say so)."""
+    src = src_of(defn.get("source") or "")
+    if src is None:
+        raise ReportError("Choose a data source")
+    extra, skipped = [], []
+    if period:
+        if period not in RELATIVE:
+            raise ReportError("Unknown period")
+        date_field = DASH_DATE.get(src.key)
+        if date_field and date_field in src.fields:
+            extra.append({"field": date_field, "op": "within", "value": period})
+        else:
+            skipped.append("period")
+    if owner:
+        if "owner" in src.fields:
+            extra.append({"field": "owner", "op": "eq", "value": owner})
+        else:
+            skipped.append("owner")
+    return ({**defn, "filters": [*(defn.get("filters") or []), *extra]} if extra else defn), skipped
+
+
+def _bucket_range(value: str, bucket: str) -> tuple[date, date]:
+    start = date.fromisoformat(str(value)[:10])
+    if bucket == "day":
+        return start, start
+    if bucket == "week":
+        return start, start + timedelta(days=6)
+    months = {"month": 1, "quarter": 3, "year": 12}[bucket]
+    m = start.month - 1 + months
+    return start, date(start.year + m // 12, m % 12 + 1, 1) - timedelta(days=1)
+
+
+def drill_definition(defn: dict, values: list) -> dict:
+    """The record list behind one cell of a summary: the report's filters plus one condition per grouping."""
+    validate(defn)
+    src = src_of(defn["source"])
+    groups = defn.get("group_by") or []
+    if len(values) > len(groups):
+        raise ReportError("More values than groupings")
+    filters = list(defn.get("filters") or [])
+    for g, v in zip(groups, values):
+        f = src.fields[g["field"]]
+        if v is None or v == "":
+            filters.append({"field": g["field"], "op": "is_empty"})
+        elif f.type == "date":
+            lo, hi = _bucket_range(v, g.get("bucket") or "month")
+            filters.append({"field": g["field"], "op": "between", "value": [lo.isoformat(), hi.isoformat()]})
+        elif f.type == "bool":
+            filters.append({"field": g["field"], "op": "is_true" if v in (True, "true", "True", 1) else "is_false"})
+        else:
+            filters.append({"field": g["field"], "op": "eq", "value": v})
+    group_cols = [g["field"] for g in groups if g["field"] not in src.default_columns]
+    return {"source": src.key, "filters": filters, "columns": [*src.default_columns, *group_cols][:10], "limit": 500, "with_ids": True}
 
 
 # ---- system-side helpers (workflows): no user scope, single records -----------------------------
 
 def validate_filters(source: str, filters: list[dict]) -> None:
-    src = SOURCES.get(source)
+    src = src_of(source)
     if src is None:
         raise ReportError("Choose a record type")
     for flt in filters or []:
@@ -561,7 +694,8 @@ async def match_ids(db: AsyncSession, source: str, filters: list[dict], ids: lis
                     exclude=None) -> list:
     """Ids of records that satisfy every filter (optionally only among ``ids``, and never those in the ``exclude``
     subquery), in a stable order so successive batches make progress. Not scoped to a user."""
-    src = SOURCES[source]
+    await refresh_custom_fields(db)
+    src = src_of(source)
     stmt = src.base().add_columns(src.id_col)
     for flt in filters or []:
         stmt = stmt.where(_condition(src.fields[flt["field"]], flt.get("op", "eq"), flt.get("value")))
@@ -590,7 +724,8 @@ def _plain(v, f: F) -> str:
 
 async def record_values(db: AsyncSession, source: str, record_id) -> dict[str, str]:
     """Every catalogue field of one record, formatted as text (for message templates)."""
-    src = SOURCES[source]
+    await refresh_custom_fields(db)
+    src = src_of(source)
     keys = list(src.fields)
     stmt = src.base().add_columns(*[src.fields[k].expr.label(k) for k in keys]).where(src.id_col == record_id)
     row = (await db.execute(stmt)).first()

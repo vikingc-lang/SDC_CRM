@@ -6,6 +6,8 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
+import { type DrillRequest, DrillDialog } from "@/components/drill";
+import { nice } from "@/components/filters";
 import { ReportViz, type RResult, type SavedReport } from "@/components/reportviz";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,7 +28,10 @@ export default function DashboardPage() {
   const router = useRouter();
   const qc = useQueryClient();
   const d = useQuery({ queryKey: ["analytics", "dashboard", id], queryFn: () => get<DashboardFull>(`/analytics/dashboards/${id}`) });
-  const cat = useQuery({ queryKey: ["analytics", "sources"], queryFn: () => get<{ can_share: boolean }>("/analytics/sources") });
+  const cat = useQuery({ queryKey: ["analytics", "sources"], queryFn: () => get<{ can_share: boolean; periods: string[] }>("/analytics/sources") });
+  const people = useQuery({ queryKey: ["users"], queryFn: () => get<{ id: string; full_name: string; role: string }[]>("/users") });
+  const [filters, setFilters] = useState<{ period: string; owner: string }>({ period: "", owner: "" });
+  const [drill, setDrill] = useState<DrillRequest | null>(null);
   const [edit, setEdit] = useState<null | { name: string; description: string; visibility: "private" | "shared"; tiles: { report_id: string; size: Size }[] }>(null);
   const reports = useQuery({ queryKey: ["analytics", "reports"], queryFn: () => get<SavedReport[]>("/analytics/reports"), enabled: !!edit });
   const save = useMutation({
@@ -85,7 +90,14 @@ export default function DashboardPage() {
               <span>· {dash.owner ?? "Unknown"} · updated {relativeDays(dash.updated_at)}</span>
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Select aria-label="Period" className="h-8 w-40 text-[13px]" value={filters.period} onChange={(e) => setFilters({ ...filters, period: e.target.value })}>
+              <option value="">Any time</option>{cat.data?.periods.map((p) => <option key={p} value={p}>{nice(p)}</option>)}
+            </Select>
+            <Select aria-label="Owner" className="h-8 w-44 text-[13px]" value={filters.owner} onChange={(e) => setFilters({ ...filters, owner: e.target.value })}>
+              <option value="">Everyone</option>
+              {people.data?.filter((u) => !["partner", "auditor"].includes(u.role)).map((u) => <option key={u.id} value={u.full_name}>{u.full_name}</option>)}
+            </Select>
             <Button variant="outline" size="sm" onClick={() => qc.invalidateQueries({ queryKey: ["analytics", "tile"] })}><RefreshCw className="h-3.5 w-3.5" />Refresh</Button>
             {dash.can_edit && <Button size="sm" onClick={() => setEdit({ name: dash.name, description: dash.description ?? "", visibility: dash.visibility, tiles: dash.tiles.map(({ report_id, size }) => ({ report_id, size })) })}><Pencil className="h-3.5 w-3.5" />Edit</Button>}
           </div>
@@ -112,19 +124,23 @@ export default function DashboardPage() {
                 </div>
               </CardBody>
             </Card>
-          )) : dash.tiles.map((t, k) => <TileView key={`${t.report_id}-${k}`} tile={t} />)}
+          )) : dash.tiles.map((t, k) => <TileView key={`${t.report_id}-${k}`} tile={t} filters={filters}
+              onDrill={(values, label) => setDrill({ reportId: t.report_id, values, label: `${t.report?.name ?? "Report"}: ${label}`, ...filters })} />)}
         </div>
       )}
+      <DrillDialog request={drill} onClose={() => setDrill(null)} />
     </div>
   );
 }
 
-function TileView({ tile }: { tile: TileOut }) {
+function TileView({ tile, filters, onDrill }: { tile: TileOut; filters: { period: string; owner: string }; onDrill: (values: unknown[], label: string) => void }) {
   const r = tile.report;
   const run = useQuery({
-    queryKey: ["analytics", "tile", tile.report_id], enabled: !!r, retry: false,
-    queryFn: async () => (await api.post<RResult>(`/analytics/reports/${tile.report_id}/run`)).data,
+    queryKey: ["analytics", "tile", tile.report_id, filters], enabled: !!r, retry: false, placeholderData: (p) => p,
+    queryFn: async () => (await api.post<RResult & { skipped_filters?: string[] }>(`/analytics/reports/${tile.report_id}/run`,
+      { period: filters.period || null, owner: filters.owner || null })).data,
   });
+  const skipped = run.data?.skipped_filters ?? [];
   return (
     <Card className={cn("min-w-0", SPAN[tile.size])}>
       <CardBody>
@@ -137,7 +153,10 @@ function TileView({ tile }: { tile: TileOut }) {
               </div>
             </div>
             {run.isError ? <p className="text-[13px] text-destructive">{errorMessage(run.error)}</p>
-              : !run.data ? <Skeleton className="h-32" /> : <ReportViz result={run.data} chart={r.definition.chart?.type} compact />}
+              : !run.data ? <Skeleton className="h-32" /> : <>
+                <ReportViz result={run.data} chart={r.definition.chart?.type} compact onDrill={onDrill} />
+                {skipped.length > 0 && <p className="mt-2 text-[11.5px] text-subtle">The {skipped.join(" and ")} filter doesn&apos;t apply to this report.</p>}
+              </>}
           </>
         )}
       </CardBody>

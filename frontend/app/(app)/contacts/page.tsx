@@ -12,6 +12,8 @@ import { Card } from "@/components/ui/card";
 import { Input, Select } from "@/components/ui/input";
 import { Avatar, EmptyState, Skeleton } from "@/components/ui/misc";
 import { get } from "@/lib/api";
+import { useMe } from "@/lib/me";
+import { BulkBar, RowBox, SelectAllBox, useSelection } from "@/components/bulk";
 import type { Contact } from "@/lib/types";
 
 export default function ContactsPage() {
@@ -23,6 +25,9 @@ export default function ContactsPage() {
     queryFn: () => get<Contact[]>("/contacts", { search: search || undefined, buying_role: role || undefined }),
     placeholderData: (p) => p,
   });
+  const { can } = useMe();
+  const sel = useSelection((data ?? []).map((c) => c.id));
+  const bulk = can("campaigns", "update");
 
   return (
     <div className="mx-auto max-w-7xl">
@@ -37,11 +42,13 @@ export default function ContactsPage() {
           {BUYING_ROLES.map((r) => <option key={r}>{r}</option>)}
         </Select>
       </div>
+      <BulkBar entity="contacts" sel={sel} />
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[720px] text-left text-sm">
             <thead className="border-b bg-surface-2/60 text-[12px] text-muted-foreground">
               <tr>
+                {bulk && <th className="w-8 px-4 py-2.5"><SelectAllBox sel={sel} label="Select all contacts" /></th>}
                 <th className="px-4 py-2.5 font-medium">Name</th>
                 <th className="px-4 py-2.5 font-medium">Account</th>
                 <th className="px-4 py-2.5 font-medium">Buying role</th>
@@ -50,9 +57,10 @@ export default function ContactsPage() {
               </tr>
             </thead>
             <tbody className="divide-y">
-              {isLoading && Array.from({ length: 6 }).map((_, i) => <tr key={i}><td colSpan={5} className="px-4 py-3"><Skeleton className="h-5" /></td></tr>)}
+              {isLoading && Array.from({ length: 6 }).map((_, i) => <tr key={i}><td colSpan={6} className="px-4 py-3"><Skeleton className="h-5" /></td></tr>)}
               {data?.map((c) => (
-                <tr key={c.id} className="hover:bg-muted/50">
+                <tr key={c.id} className={sel.has(c.id) ? "bg-primary-soft/40" : "hover:bg-muted/50"}>
+                  {bulk && <td className="px-4 py-3"><RowBox sel={sel} id={c.id} label={c.name} /></td>}
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-3">
                       <Avatar name={c.name} size={30} />

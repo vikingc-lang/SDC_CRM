@@ -25,6 +25,17 @@ class RunIn(BaseModel):
     definition: dict
 
 
+class DashFilterIn(BaseModel):
+    """Dashboard-wide filters applied to a tile: a relative period on the source's natural date and an owner name."""
+    period: str | None = None
+    owner: str | None = Field(default=None, max_length=150)
+
+
+class DrillIn(DashFilterIn):
+    definition: dict | None = None  # ad-hoc report (omit for a saved one)
+    values: list = Field(default_factory=list, max_length=2)  # one value per grouping, as shown in the result
+
+
 class ReportIn(BaseModel):
     name: str = Field(min_length=1, max_length=150)
     description: str | None = Field(default=None, max_length=2000)
@@ -84,7 +95,8 @@ async def _report(db: AsyncSession, p: Principal, report_id: uuid.UUID) -> Saved
 # ---- builder ---------------------------------------------------------------------------------
 
 @router.get("/sources")
-async def sources(p: Principal = Depends(authorize("reports", "read"))):
+async def sources(db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("reports", "read"))):
+    await reporting.refresh_custom_fields(db)
     return {"sources": reporting.catalogue(p), "periods": list(reporting.RELATIVE), "buckets": list(reporting.BUCKETS),
             "aggregates": list(reporting.AGGS), "can_share": p.user.role in PUBLISHERS, "can_export": p.can("reports", "export")}
 
@@ -102,6 +114,7 @@ async def run(body: RunIn, db: AsyncSession = Depends(get_db), p: Principal = De
 @router.get("/reports")
 async def list_reports(db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("reports", "read"))):
     rows = (await db.execute(_visible(p, SavedReport).order_by(SavedReport.name))).scalars().all()
+    await reporting.refresh_custom_fields(db)
     allowed = {s["key"] for s in reporting.catalogue(p)}
     names = await _names(db, [r.owner_id for r in rows])
     return [_report_out(r, p, names) for r in rows if r.source in allowed]
@@ -110,6 +123,7 @@ async def list_reports(db: AsyncSession = Depends(get_db), p: Principal = Depend
 @router.post("/reports", status_code=201)
 async def create_report(body: ReportIn, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("reports", "read"))):
     _check_visibility(p, body.visibility)
+    await reporting.refresh_custom_fields(db)
     try:
         reporting.validate(body.definition)
     except ReportError as e:
@@ -134,6 +148,7 @@ async def update_report(report_id: uuid.UUID, body: ReportIn, db: AsyncSession =
     if not _can_edit(p, r.owner_id):
         raise HTTPException(403, "Only the report's owner can change it. Save a copy instead.")
     _check_visibility(p, body.visibility)
+    await reporting.refresh_custom_fields(db)
     try:
         reporting.validate(body.definition)
     except ReportError as e:
@@ -153,10 +168,34 @@ async def delete_report(report_id: uuid.UUID, db: AsyncSession = Depends(get_db)
 
 
 @router.post("/reports/{report_id}/run")
-async def run_saved(report_id: uuid.UUID, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("reports", "read"))):
+async def run_saved(report_id: uuid.UUID, body: DashFilterIn | None = None, db: AsyncSession = Depends(get_db),
+                    p: Principal = Depends(authorize("reports", "read"))):
     r = await _report(db, p, report_id)
     try:
-        return await reporting.run(db, p, r.definition)
+        await reporting.refresh_custom_fields(db)
+        defn, skipped = reporting.with_dashboard_filters(r.definition, body.period if body else None, body.owner if body else None)
+        return {**await reporting.run(db, p, defn), "skipped_filters": skipped}
+    except ReportError as e:
+        raise _bad(e)
+
+
+@router.post("/drill")
+async def drill(body: DrillIn, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("reports", "read"))):
+    """The records behind one bar, slice or summary row of an ad-hoc report."""
+    return await _drill(db, p, body.definition or {}, body)
+
+
+@router.post("/reports/{report_id}/drill")
+async def drill_saved(report_id: uuid.UUID, body: DrillIn, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("reports", "read"))):
+    r = await _report(db, p, report_id)
+    return await _drill(db, p, r.definition, body)
+
+
+async def _drill(db: AsyncSession, p: Principal, definition: dict, body: DrillIn) -> dict:
+    try:
+        await reporting.refresh_custom_fields(db)
+        defn, _ = reporting.with_dashboard_filters(definition, body.period, body.owner)
+        return await reporting.run(db, p, reporting.drill_definition(defn, body.values))
     except ReportError as e:
         raise _bad(e)
 
@@ -226,6 +265,7 @@ async def get_dashboard(dashboard_id: uuid.UUID, db: AsyncSession = Depends(get_
     d = await _dashboard(db, p, dashboard_id)
     ids = [uuid.UUID(t["report_id"]) for t in d.tiles or []]
     reps = (await db.execute(_visible(p, SavedReport).where(SavedReport.id.in_(ids)))).scalars().all() if ids else []
+    await reporting.refresh_custom_fields(db)
     allowed = {s["key"] for s in reporting.catalogue(p)}
     names = await _names(db, [d.owner_id, *[r.owner_id for r in reps]])
     by_id = {str(r.id): _report_out(r, p, names) for r in reps if r.source in allowed}

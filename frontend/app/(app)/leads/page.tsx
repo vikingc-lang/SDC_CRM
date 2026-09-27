@@ -17,6 +17,7 @@ import { Input, Label, Select } from "@/components/ui/input";
 import { EmptyState, Skeleton } from "@/components/ui/misc";
 import { api, errorMessage, get } from "@/lib/api";
 import { useMe } from "@/lib/me";
+import { BulkBar, RowBox, SelectAllBox, useSelection } from "@/components/bulk";
 import type { Lead } from "@/lib/types";
 import { relativeDays } from "@/lib/utils";
 
@@ -33,6 +34,8 @@ export default function LeadsPage() {
   const { data: summary } = useQuery({ queryKey: ["leads", "summary"], queryFn: () => get<Summary>("/leads/summary") });
   const { data, isLoading } = useQuery({ queryKey: ["leads", tab, q], queryFn: () => get<Lead[]>("/leads", { status: FILTERS[tab], q: q || undefined }) });
   const threshold = summary?.mql_threshold ?? 60;
+  const sel = useSelection((data ?? []).map((l) => l.id));
+  const bulk = can("leads", "update") || can("campaigns", "update");
   const top = Math.max(1, ...FUNNEL.map(([k]) => summary?.by_status[k] ?? 0));
 
   return (
@@ -67,13 +70,15 @@ export default function LeadsPage() {
           <Input className="h-8 pl-8" placeholder="Name, email or company" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
       </div>
-      <Card className="mt-3 overflow-hidden">
+      <div className="mt-3"><BulkBar entity="leads" sel={sel} /></div>
+      <Card className="overflow-hidden">
         {isLoading ? <Skeleton className="m-4 h-40" /> : !data?.length ? (
           <EmptyState icon={<Magnet className="h-4 w-4" />} title="No leads here" description="Share a hosted web form or connect a webhook from Admin → Lead management." />
         ) : (
-          <Table head={["Lead", "Company", "Score", "Fit / engagement", "Qualification", "Source", "Owner", "Status", "Created"]} minWidth={1060}>
+          <Table head={[...(bulk ? [<SelectAllBox key="all" sel={sel} label="Select all leads" />] : []), "Lead", "Company", "Score", "Fit / engagement", "Qualification", "Source", "Owner", "Status", "Created"]} minWidth={1060}>
             {data.map((l) => (
-              <tr key={l.id} className="hover:bg-muted/50">
+              <tr key={l.id} className={sel.has(l.id) ? "bg-primary-soft/40" : "hover:bg-muted/50"}>
+                {bulk && <Td className="w-8"><RowBox sel={sel} id={l.id} label={l.full_name || l.email || "lead"} /></Td>}
                 <Td>
                   <Link href={`/leads/${l.id}`} className="font-medium hover:underline">{l.full_name || l.email}</Link>
                   <p className="text-[12px] text-muted-foreground">{l.job_title ?? l.email}</p>

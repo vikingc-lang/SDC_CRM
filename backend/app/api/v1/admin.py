@@ -16,7 +16,7 @@ from app.core.security import hash_password
 from app.models import (
     Account, AuditLog, ConsentEvent, Contact, CustomFieldDefinition, DedupDismissal, ErasureLog, MergeLog, RolePermission, User,
 )
-from app.services import data_io, dedup, identity, privacy
+from app.services import data_io, dedup, identity, privacy, reporting
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -262,6 +262,7 @@ async def create_custom_field(body: CustomFieldIn, db: AsyncSession = Depends(ge
     d = CustomFieldDefinition(**body.model_dump())
     db.add(d)
     await db.commit()
+    reporting.invalidate_custom_fields()  # new field is reportable straight away
     return {"id": d.id}
 
 
@@ -271,6 +272,7 @@ async def delete_custom_field(field_id: uuid.UUID, db: AsyncSession = Depends(ge
     if d:
         await db.delete(d)  # stored values stay in JSONB; they simply become untyped
         await db.commit()
+        reporting.invalidate_custom_fields()
 
 
 # ---- deduplication --------------------------------------------------------------------------------------

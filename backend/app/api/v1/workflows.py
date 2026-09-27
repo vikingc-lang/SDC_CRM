@@ -10,7 +10,7 @@ from app.core.audit import log_action
 from app.core.database import get_db
 from app.core.rbac import Principal, authorize
 from app.models import User, WorkflowRule, WorkflowRun
-from app.services import workflows
+from app.services import reporting, workflows
 from app.services.workflows import WorkflowError
 
 router = APIRouter(prefix="/workflows", tags=["workflows"])
@@ -52,6 +52,7 @@ def _check(body: RuleIn) -> None:
 
 @router.get("/meta")
 async def meta(db: AsyncSession = Depends(get_db), _: Principal = Depends(authorize("admin", "read"))):
+    await reporting.refresh_custom_fields(db)
     users = (await db.execute(select(User).where(User.is_active.is_(True), User.role != "partner").order_by(User.full_name))).scalars().all()
     return {**workflows.meta(), "users": [{"id": u.id, "name": u.full_name, "role": u.role} for u in users]}
 
@@ -66,6 +67,7 @@ async def list_rules(db: AsyncSession = Depends(get_db), _: Principal = Depends(
 
 @router.post("", status_code=201)
 async def create_rule(body: RuleIn, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("admin", "update"))):
+    await reporting.refresh_custom_fields(db)  # conditions may use custom fields
     _check(body)
     r = WorkflowRule(**body.model_dump(), created_by=p.id)
     db.add(r)
@@ -83,6 +85,7 @@ async def get_rule(rule_id: uuid.UUID, db: AsyncSession = Depends(get_db), _: Pr
 @router.put("/{rule_id}")
 async def update_rule(rule_id: uuid.UUID, body: RuleIn, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("admin", "update"))):
     r = await _rule(db, rule_id)
+    await reporting.refresh_custom_fields(db)  # conditions may use custom fields
     _check(body)
     for k, v in body.model_dump().items():
         setattr(r, k, v)

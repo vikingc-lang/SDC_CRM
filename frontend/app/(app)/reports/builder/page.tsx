@@ -7,6 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { FilterRow, IconX, NO_VALUE } from "@/components/filters";
+import { type DrillRequest, DrillDialog } from "@/components/drill";
 import { CHART_LABELS, type ChartType, type Definition, effectiveChart, ReportViz, ResultTable, type RResult, type SavedReport } from "@/components/reportviz";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -46,6 +47,7 @@ function Builder() {
   const [def, setDef] = useState<Definition | null>(null);
   const [debounced, setDebounced] = useState<Definition | null>(null);
   const [saveOpen, setSaveOpen] = useState<null | "save" | "copy">(null);
+  const [drill, setDrill] = useState<DrillRequest | null>(null);
 
   useEffect(() => {
     if (def) return;
@@ -196,7 +198,7 @@ function Builder() {
             {summary && (
               <Section title="Show as">
                 <div className="flex flex-wrap gap-1.5">
-                  {(["bar", "column", "line", "stacked", "number", "table"] as ChartType[]).map((t) => (
+                  {(["bar", "column", "line", "stacked", "matrix", "number", "table"] as ChartType[]).map((t) => (
                     <button key={t} type="button" onClick={() => set({ chart: { type: t } })} aria-pressed={def.chart?.type === t}
                       className={cn("rounded-full border px-2.5 py-1 text-[12.5px]", def.chart?.type === t ? "border-primary bg-primary-soft text-foreground" : "text-muted-foreground hover:text-foreground")}>{CHART_LABELS[t]}</button>
                   ))}
@@ -213,14 +215,16 @@ function Builder() {
               description={run.isFetching ? "Updating…" : src.label} />
             <CardBody>
               {run.isError ? <p className="text-sm text-destructive">{errorMessage(run.error)}</p>
-                : !run.data ? <Skeleton className="h-48" /> : <ReportViz result={run.data} chart={def.chart?.type} />}
+                : !run.data ? <Skeleton className="h-48" /> : <ReportViz result={run.data} chart={def.chart?.type} onDrill={summary ? (values, label) => setDrill({ definition: def, values, label }) : undefined} />}
+              {run.data && summary && run.data.rows.length > 0 && <p className="mt-3 text-[12px] text-subtle">Click any bar, point, cell or row to see the records behind it.</p>}
             </CardBody>
           </Card>
           {run.data && chart !== "table" && run.data.rows.length > 0 && (
-            <Card><CardHeader title="Data" /><ResultTable result={run.data} /></Card>
+            <Card><CardHeader title="Data" /><ResultTable result={run.data} onDrill={summary ? (values, label) => setDrill({ definition: def, values, label }) : undefined} /></Card>
           )}
         </div>
       </div>
+      <DrillDialog request={drill} onClose={() => setDrill(null)} />
       <SaveDialog mode={saveOpen} onClose={() => setSaveOpen(null)} def={def} saved={saved.data} canShare={cat.data.can_share}
         onSaved={(id) => { qc.invalidateQueries({ queryKey: ["analytics"] }); if (id !== reportId) router.replace(`/reports/builder?id=${id}`); }} />
     </div>
@@ -229,7 +233,8 @@ function Builder() {
 
 function hint(requested: ChartType | undefined, groups: number) {
   if (groups === 0) return "add a grouping to chart the data.";
-  if (groups === 2) return "two groupings are shown stacked.";
+  if (groups === 2) return "two groupings are shown stacked or as a matrix.";
+  if (requested === "matrix") return "a matrix needs two groupings.";
   if (requested === "line" || requested === "column") return "line and column charts need a date grouping.";
   return "a stacked bar needs two groupings.";
 }

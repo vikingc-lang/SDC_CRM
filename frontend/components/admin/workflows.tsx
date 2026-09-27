@@ -16,7 +16,9 @@ export type WorkflowAction =
   | { type: "create_task"; title: string; description?: string; due_in_days: number; priority: string; assign_to: string }
   | { type: "notify"; to: string[]; title: string; body?: string }
   | { type: "update_field"; field: string; value: string }
-  | { type: "emit_event"; event: string };
+  | { type: "emit_event"; event: string }
+  | { type: "http_request"; url: string }
+  | { type: "post_message"; channel: "slack" | "teams"; webhook_url: string; text: string };
 export interface WorkflowRule {
   id?: string; name: string; description: string | null; enabled: boolean; source: string;
   trigger: { type: "created" | "updated" | "schedule"; fields?: string[]; repeat_after_days?: number | null };

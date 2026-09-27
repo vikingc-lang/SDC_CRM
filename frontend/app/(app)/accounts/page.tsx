@@ -13,6 +13,8 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Avatar, EmptyState, Skeleton } from "@/components/ui/misc";
 import { get } from "@/lib/api";
+import { useMe } from "@/lib/me";
+import { BulkBar, RowBox, SelectAllBox, useSelection } from "@/components/bulk";
 import type { AccountListItem } from "@/lib/types";
 import { cn, money, relativeDays } from "@/lib/utils";
 
@@ -33,6 +35,9 @@ export default function AccountsPage() {
     });
     return r;
   }, [data, sort]);
+  const { can } = useMe();
+  const sel = useSelection(rows.map((a) => a.id));
+  const bulk = can("accounts", "update");
 
   const Th = ({ k, children, className }: { k: SortKey; children: React.ReactNode; className?: string }) => (
     <th className={cn("px-4 py-2.5 font-medium", className)}>
@@ -50,11 +55,13 @@ export default function AccountsPage() {
         <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-subtle" />
         <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, domain, industry" className="pl-8" aria-label="Search accounts" />
       </div>
+      <BulkBar entity="accounts" sel={sel} />
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[760px] text-left text-sm">
             <thead className="border-b bg-surface-2/60 text-[12px] text-muted-foreground">
               <tr>
+                {bulk && <th className="w-8 px-4 py-2.5"><SelectAllBox sel={sel} label="Select all accounts" /></th>}
                 <Th k="name">Account</Th>
                 <th className="px-4 py-2.5 font-medium">Tier</th>
                 <Th k="health">Health</Th>
@@ -66,10 +73,11 @@ export default function AccountsPage() {
             </thead>
             <tbody className="divide-y">
               {isLoading && Array.from({ length: 6 }).map((_, i) => (
-                <tr key={i}><td colSpan={7} className="px-4 py-3"><Skeleton className="h-5 w-full" /></td></tr>
+                <tr key={i}><td colSpan={8} className="px-4 py-3"><Skeleton className="h-5 w-full" /></td></tr>
               ))}
               {rows.map((a) => (
-                <tr key={a.id} className="group transition-colors hover:bg-muted/50">
+                <tr key={a.id} className={cn("group transition-colors hover:bg-muted/50", sel.has(a.id) && "bg-primary-soft/40")}>
+                  {bulk && <td className="px-4 py-3"><RowBox sel={sel} id={a.id} label={a.name} /></td>}
                   <td className="px-4 py-3">
                     <Link href={`/accounts/${a.id}`} className="flex items-center gap-3">
                       <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border bg-surface-2 text-[12px] font-semibold text-muted-foreground">{a.name[0]}</span>

@@ -102,6 +102,30 @@ export function ApiKeysPanel() {
   );
 }
 
+// ---- integration endpoints reference ------------------------------------------------------------------------
+
+const ENDPOINTS: [string, string][] = [
+  ["PUT /api/v1/upsert/{accounts|contacts|deals|leads}/{external_id}", "Create or update one record by your system's id. Related records by account_external_id / account_domain; owners by owner_email."],
+  ["POST /api/v1/upsert/{entity}", "Up to 500 records as {\"records\": [...]}; each row succeeds or fails on its own with a per-row result."],
+  ["POST /api/v1/bulk/{leads|accounts|contacts|cases}", "Reassign, change status / priority / tier / queue, or add to a campaign for many ids at once."],
+  ["GET /api/v1/integrations/events?after_id=…", "Cursor feed of every outbox event, for systems that poll instead of receiving webhooks."],
+  ["POST /api/v1/analytics/run", "Run any report definition (the same engine as the report builder) and get rows as JSON."],
+];
+
+export function IntegrationReference() {
+  return (
+    <Card className="overflow-hidden">
+      <CardHeader title="Integration endpoints" icon={<BookOpen className="h-4 w-4" />}
+        description="The building blocks for keeping other systems in sync. Authenticate with an API key; the full reference with request and response schemas is at /docs." />
+      <Table head={["Endpoint", "What it does"]} minWidth={720}>
+        {ENDPOINTS.map(([e, d]) => (
+          <tr key={e}><Td><code className="font-mono text-[12px]">{e}</code></Td><Td className="text-[13px]">{d}</Td></tr>
+        ))}
+      </Table>
+    </Card>
+  );
+}
+
 // ---- webhooks ----------------------------------------------------------------------------------------------
 
 export function WebhooksPanel() {

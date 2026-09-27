@@ -8,7 +8,7 @@ import { DataPanel } from "@/components/admin/data";
 import { AuditPanel, CompliancePanel, DedupPanel } from "@/components/admin/governance";
 import { JobsPanel } from "@/components/admin/integrations";
 import { ApprovalChainPanel, LeadManagementPanel, StagesPanel } from "@/components/admin/leadtoorder";
-import { ApiKeysPanel, WebhooksPanel } from "@/components/admin/developer";
+import { ApiKeysPanel, IntegrationReference, WebhooksPanel } from "@/components/admin/developer";
 import { CommissionPlansPanel, TerritoriesPanel } from "@/components/admin/performance";
 import { ServicePanel } from "@/components/admin/service";
 import { WorkflowsPanel } from "@/components/admin/workflows";
@@ -62,7 +62,7 @@ export default function AdminPage() {
       {current === "stages" && <StagesPanel />}
       {current === "gates" && <GatesPanel />}
       {current === "data" && <DataPanel />}
-      {current === "developer" && <div className="space-y-6"><ApiKeysPanel /><WebhooksPanel /></div>}
+      {current === "developer" && <div className="space-y-6"><ApiKeysPanel /><WebhooksPanel /><IntegrationReference /></div>}
       {current === "jobs" && <JobsPanel />}
     </div>
   );

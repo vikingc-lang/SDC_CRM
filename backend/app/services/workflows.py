@@ -37,6 +37,97 @@ MAX_DEPTH = 3
 MAX_ACTIONS = 10
 SCHEDULE_BATCH = 200
 TRIGGERS = ("created", "updated", "schedule")
+CHANNELS = ("slack", "teams")
+HTTP_TIMEOUT = 10.0
+http_transport = None  # tests swap in an httpx transport
+
+
+def _check_url(url: str | None, https_only: bool = False) -> None:
+    from urllib.parse import urlparse
+
+    from app.services import developer
+
+    u = urlparse((url or "").strip())
+    if https_only and u.scheme != "https":
+        raise WorkflowError("Enter a full https:// URL")
+    try:
+        developer.clean_url(url)
+    except developer.DeveloperError as e:
+        raise WorkflowError(str(e)) from e
+    if _blocked_host(u.hostname or ""):
+        raise WorkflowError("That address points at this server or a cloud metadata service")
+
+
+def _blocked_host(host: str) -> bool:
+    """Loopback, link-local (incl. 169.254.169.254 metadata), unspecified and multicast targets are refused.
+    Private ranges stay allowed: in a private-cloud install the ERP usually lives on one."""
+    import ipaddress
+    import socket
+
+    host = host.strip("[]").lower()
+    if not host or host == "localhost" or host.endswith(".localhost"):
+        return True
+    try:
+        addrs = {ipaddress.ip_address(host)}
+    except ValueError:
+        try:
+            addrs = {ipaddress.ip_address(a[4][0]) for a in socket.getaddrinfo(host, None)}
+        except (socket.gaierror, UnicodeError, ValueError):
+            return False  # unresolvable now; the POST itself will fail and be logged
+    return any(a.is_loopback or a.is_link_local or a.is_unspecified or a.is_multicast for a in addrs)
+
+
+async def _post(url: str, payload: dict, headers: dict | None = None, attempts: int = 2) -> tuple[bool, str]:
+    """POST JSON to an outside system, retrying once on a network error or 5xx. Returns (ok, status) for the run
+    log. The response body is never recorded, so the log can't be used to read internal services."""
+    import asyncio
+    from urllib.parse import urlparse
+
+    import httpx
+
+    if await asyncio.to_thread(_blocked_host, urlparse(url).hostname or ""):
+        return False, "Blocked: address points at this server or a cloud metadata service"
+    what = "no attempt"
+    for n in range(attempts):
+        try:
+            async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, transport=http_transport, follow_redirects=False) as client:
+                r = await client.post(url, json=payload, headers={"User-Agent": "Cirra-Workflows/1.0", **(headers or {})})
+            if 200 <= r.status_code < 300:
+                return True, f"HTTP {r.status_code}"
+            what = f"HTTP {r.status_code}"
+            if r.status_code < 500:
+                break
+        except httpx.HTTPError as e:
+            what = e.__class__.__name__
+        if n + 1 < attempts:
+            await asyncio.sleep(1.5)
+    return False, what
+
+
+async def send_pending(db: AsyncSession) -> None:
+    """Deliver the HTTP / chat actions queued by execute(), after the rule's changes committed, a few at a time,
+    then record each outcome on its run. Nothing is sent for a rule whose commit failed (the queue is dropped)."""
+    import asyncio
+
+    pending = db.info.pop("wf_http", None)
+    if not pending:
+        return
+    gate = asyncio.Semaphore(5)
+
+    async def one(item):
+        async with gate:
+            return await _post(item["url"], item["payload"], item.get("headers"))
+
+    outcomes = await asyncio.gather(*(one(i) for i in pending))
+    for item, (ok, what) in zip(pending, outcomes):
+        run = await db.get(WorkflowRun, item["run_id"])
+        if run is None:
+            continue
+        detail = [dict(d) for d in run.detail]
+        detail[item["index"]] = {"action": item["kind"], "ok": ok, "detail": f"{item['label']}: {what}"}
+        run.detail = detail
+        run.status = "done" if all(d["ok"] for d in detail) else "failed"
+    await db.commit()
 ACTION_TYPES = ("create_task", "notify", "update_field", "emit_event")
 PRIORITIES = ("low", "normal", "high", "urgent")
 
@@ -181,6 +272,14 @@ def validate(source: str, trigger: dict, conditions: list, actions: list) -> Non
         elif kind == "emit_event":
             if not re.fullmatch(r"[a-z][a-z0-9_.]{1,48}", a.get("event") or ""):
                 raise WorkflowError("Event names use lower-case letters, digits, dots and underscores")
+        elif kind == "http_request":
+            _check_url(a.get("url"))
+        elif kind == "post_message":
+            if a.get("channel") not in CHANNELS:
+                raise WorkflowError("Post to Slack or Microsoft Teams")
+            _check_url(a.get("webhook_url"), https_only=True)
+            if not (a.get("text") or "").strip():
+                raise WorkflowError("Write the message to post")
         else:
             raise WorkflowError(f"Unknown action '{kind}'")
 
@@ -188,7 +287,7 @@ def validate(source: str, trigger: dict, conditions: list, actions: list) -> Non
 def meta() -> dict:
     out = []
     for key, ent in ENTITIES.items():
-        src = reporting.SOURCES[key]
+        src = reporting.src_of(key)
         out.append({
             "key": key, "label": ent.label, "plural": src.label,
             "watch": [{"key": k, "label": src.fields[k].label} for k in ent.watch if k in src.fields],
@@ -202,7 +301,7 @@ def meta() -> dict:
 
 # ---- execution --------------------------------------------------------------------------------------
 
-_TEMPLATE = re.compile(r"\{\{\s*([a-z_]+)\s*\}\}")
+_TEMPLATE = re.compile(r"\{\{\s*([a-z][a-z0-9_]*)\s*\}\}")
 
 
 def render(text: str | None, values: dict[str, str]) -> str:
@@ -232,6 +331,7 @@ async def execute(db: AsyncSession, rule: WorkflowRule, record_id, trigger: str,
     values = await reporting.record_values(db, rule.source, record_id)
     owner_id = await ent.owner(db, obj)
     results = []
+    outbound: list[dict] = []  # HTTP / chat posts, sent after the commit by send_pending()
     for a in rule.actions:
         kind = a["type"]
         try:
@@ -273,12 +373,33 @@ async def execute(db: AsyncSession, rule: WorkflowRule, record_id, trigger: str,
                 if not dry_run:
                     emit(db, name, ENTITY_TYPE.get(rule.source, rule.source), record_id, {"workflow": rule.name, "record": values})
                 results.append({"action": kind, "ok": True, "detail": f"Emitted {name}"})
+            elif kind == "http_request":
+                host = a["url"].split("/")[2]
+                if dry_run:
+                    results.append({"action": kind, "ok": True, "detail": f"Would POST the record to {host}"})
+                else:  # sent after this rule's changes commit (send_pending)
+                    outbound.append({"index": len(results), "kind": kind, "label": f"POST {host}", "url": a["url"],
+                                     "payload": {"workflow": rule.name, "source": rule.source, "record_id": str(record_id), "trigger": trigger,
+                                                 "record": values}, "headers": {"X-Cirra-Workflow": str(rule.id)}})
+                    results.append({"action": kind, "ok": True, "detail": f"POST {host}: queued"})
+            elif kind == "post_message":
+                text = render(a["text"], values)
+                where = "Slack" if a["channel"] == "slack" else "Microsoft Teams"
+                if dry_run:
+                    results.append({"action": kind, "ok": True, "detail": f"Would post to {where}: {text[:120]}"})
+                else:
+                    outbound.append({"index": len(results), "kind": kind, "label": where, "url": a["webhook_url"], "payload": {"text": text}})
+                    results.append({"action": kind, "ok": True, "detail": f"{where}: queued"})
         except Exception as e:  # one failing action must not stop the others
             log.warning("Workflow %s action %s failed: %s", rule.id, kind, e)
             results.append({"action": kind, "ok": False, "detail": str(e)[:300]})
     status = "dry_run" if dry_run else ("done" if all(r["ok"] for r in results) else "failed")
     if not dry_run:
-        db.add(WorkflowRun(rule_id=rule.id, record_id=record_id, trigger=trigger, status=status, detail=results))
+        run = WorkflowRun(id=uuid.uuid4(), rule_id=rule.id, record_id=record_id, trigger=trigger, status=status, detail=results)
+        db.add(run)
+        for item in outbound:
+            item["run_id"] = run.id
+        db.info.setdefault("wf_http", []).extend(outbound)
         rule.run_count = (rule.run_count or 0) + 1
         rule.last_run_at = datetime.now(timezone.utc)
     return results
@@ -383,7 +504,9 @@ async def _process(events: list[dict], depth: int, origin) -> None:
                     db.info["wf_rule"] = rule.id
                     await execute(db, rule, record_id, kind)
                     await db.commit()
+                    await send_pending(db)
                 except Exception:
+                    db.info.pop("wf_http", None)  # nothing leaves for a rule that didn't commit
                     await db.rollback()
                     log.exception("Workflow rule %s failed on %s", rule_id, record_id)
     except Exception:  # never let automation break the request that triggered it
@@ -413,7 +536,9 @@ async def run_scheduled(db: AsyncSession) -> dict:
                 await execute(db, rule, rid, "schedule")
                 stats["actions_run"] += 1
             await db.commit()
+            await send_pending(db)
         except Exception:
+            db.info.pop("wf_http", None)
             await db.rollback()
             log.exception("Scheduled workflow %s failed", rule_id)
     return stats

@@ -114,6 +114,7 @@ class Account(Base):
     credit_risk_band: Mapped[str | None] = mapped_column(String(10))
     credit_risk_factors: Mapped[dict] = mapped_column(JSONB, default=dict)
     territory_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("territories.id", ondelete="SET NULL"))
+    external_id: Mapped[str | None] = mapped_column(String(200), unique=True)  # integration key (/upsert)
     embedding = mapped_column(Vector(settings.embedding_dim), nullable=True)
     created_at: Mapped[datetime] = _created()
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -151,6 +152,7 @@ class Contact(Base):
     relationship_strength: Mapped[int | None] = mapped_column(Integer)
     rsi_factors: Mapped[dict] = mapped_column(JSONB, default=dict)
     custom_fields: Mapped[dict] = mapped_column(JSONB, default=dict)
+    external_id: Mapped[str | None] = mapped_column(String(200), unique=True)  # integration key (/upsert)
     created_at: Mapped[datetime] = _created()
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -242,6 +244,7 @@ class Deal(Base):
     original_close_date: Mapped[date | None] = mapped_column(Date)
     close_date_pushes: Mapped[int] = mapped_column(Integer, default=0)
     custom_fields: Mapped[dict] = mapped_column(JSONB, default=dict)
+    external_id: Mapped[str | None] = mapped_column(String(200), unique=True)  # integration key (/upsert)
     po_number: Mapped[str | None] = mapped_column(String(64))
     bill_to: Mapped[dict] = mapped_column(JSONB, default=dict)
     ship_to: Mapped[dict] = mapped_column(JSONB, default=dict)

@@ -542,7 +542,8 @@ RECEIVED: list[dict] = []
 class Hook(BaseHTTPRequestHandler):
     def do_POST(self):  # noqa: N802
         body = self.rfile.read(int(self.headers.get("content-length", 0)))
-        RECEIVED.append({"headers": dict(self.headers), "body": body})
+        if self.path == "/hook":  # other (test) subscriptions may point at other paths on this listener
+            RECEIVED.append({"headers": dict(self.headers), "body": body})
         self.send_response(204)
         self.end_headers()
 
