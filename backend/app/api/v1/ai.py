@@ -98,8 +98,12 @@ async def _enrich(db: AsyncSession, result: QuickLogResponse, account_id: uuid.U
 
 @router.post("/ai/commit-log", response_model=CommitLogResponse)
 async def commit_log(body: CommitLogRequest, background: BackgroundTasks, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("activities", "create"))):
+    """Persist a (user-confirmed) QuickLogResponse: account, contacts, deal, activity, tasks.
+
+    Everything it reads or changes is held to the caller's permissions and row-level scope: an existing account
+    or opportunity must be visible to them, contacts are only matched on that account, and records are only
+    created or updated where the role allows (otherwise that part is skipped and the note is still logged)."""
     user = p.user
-    """Persist a (user-confirmed) QuickLogResponse: account, contacts, deal, activity, tasks."""
     # 1. Account
     account = None
     for candidate in (body.account_id, body.matched_account_id):
@@ -118,6 +122,8 @@ async def commit_log(body: CommitLogRequest, background: BackgroundTasks, db: As
     if account is None:
         if not body.account_name:
             raise HTTPException(422, "Could not determine the account. Add an account name or pick an existing account.")
+        if not p.can("accounts", "create"):
+            raise HTTPException(403, "Your role can't create accounts. Pick an existing account for this note.")
         slug = re.sub(r"[^a-z0-9]+", "-", body.account_name.lower()).strip("-") or "account"
         domain = (body.domain or f"{slug}.unverified").lower()
         account = Account(
@@ -137,8 +143,9 @@ async def commit_log(body: CommitLogRequest, background: BackgroundTasks, db: As
     touched_contacts: list[Contact] = []
     for c in body.contacts:
         existing = None
-        if c.email:
-            existing = (await db.execute(select(Contact).where(func.lower(Contact.email) == c.email.lower()))).scalars().first()
+        if c.email:  # only on this account: never touch another account's people
+            existing = (await db.execute(select(Contact).where(Contact.account_id == account.id, Contact.status != "erased",
+                                                               func.lower(Contact.email) == c.email.lower()))).scalars().first()
         if existing is None:
             existing = (
                 await db.execute(
@@ -150,18 +157,25 @@ async def commit_log(body: CommitLogRequest, background: BackgroundTasks, db: As
                 )
             ).scalars().first()
         if existing is not None:
+            touched_contacts.append(existing)
+            if not p.can("contacts", "update"):
+                continue
             existing.job_title = existing.job_title or c.job_title
             existing.email = existing.email or (c.email.lower() if c.email else None)
             if c.buying_role != "Evaluator":
                 existing.buying_role = c.buying_role
-            touched_contacts.append(existing)
             continue
+        if not p.can("contacts", "create"):
+            continue
+        email = c.email.lower() if c.email else None
+        if email and (await db.execute(select(Contact.id).where(func.lower(Contact.email) == email))).first():
+            email = None  # the address belongs to a contact elsewhere (emails are unique): keep the person, not the clash
         contact = Contact(
             account_id=account.id,
             first_name=c.first_name,
             last_name=c.last_name or "",
             job_title=c.job_title,
-            email=c.email.lower() if c.email else None,
+            email=email,
             buying_role=c.buying_role,
         )
         db.add(contact)
@@ -173,13 +187,15 @@ async def commit_log(body: CommitLogRequest, background: BackgroundTasks, db: As
     deal = None
     for candidate in (body.deal_id, body.matched_deal_id):
         if candidate and deal is None:
-            deal = await db.get(Deal, candidate)
-    if deal is not None and body.deal:
+            deal = (await db.execute(p.scope_deals(select(Deal).where(Deal.id == candidate, Deal.account_id == account.id)))).scalars().first()
+            if deal is None and candidate == body.deal_id:
+                raise HTTPException(404, "Opportunity not found on this account")
+    if deal is not None and body.deal and p.can("deals", "update"):
         if body.deal.amount:
             deal.amount = body.deal.amount
         if body.deal.target_close_date:
             deal.target_close_date = body.deal.target_close_date
-    elif deal is None and body.create_deal and body.deal and (body.deal.title or body.deal.amount):
+    elif deal is None and body.create_deal and body.deal and (body.deal.title or body.deal.amount) and p.can("deals", "create"):
         pipeline = await pipeline_service.default_pipeline(db)
         stage = next((s for s in pipeline.stages if s.name == body.deal.suggested_stage), pipeline.stages[0])
         key_contact = next((c for c in touched_contacts if c.buying_role in ("Champion", "Decision Maker")), touched_contacts[0] if touched_contacts else None)
@@ -198,7 +214,7 @@ async def commit_log(body: CommitLogRequest, background: BackgroundTasks, db: As
         db.add(deal)
         await db.flush()
         db.add(DealStageHistory(deal_id=deal.id, from_stage_id=None, to_stage_id=stage.id, changed_by=user.id))
-    if deal is not None and body.signals:
+    if deal is not None and body.signals and p.can("deals", "update"):
         ins = dict(deal.ai_insights or {})
         for key in ("competitors", "pain_points"):
             merged = list(dict.fromkeys([*ins.get(key, []), *body.signals.get(key, [])]))
@@ -220,7 +236,8 @@ async def commit_log(body: CommitLogRequest, background: BackgroundTasks, db: As
     )
     db.add(activity)
     await db.flush()
-    for item in body.action_items:
+    tasks = body.action_items if p.can("tasks", "create") else []
+    for item in tasks:
         db.add(Task(title=item.task, due_date=item.due_date, account_id=account.id, deal_id=deal.id if deal else None, activity_id=activity.id, owner_id=user.id, source="ai"))
 
     await scoring.rescore_account(db, account.id)
@@ -231,7 +248,7 @@ async def commit_log(body: CommitLogRequest, background: BackgroundTasks, db: As
         deal_id=deal.id if deal else None,
         activity_id=activity.id,
         contacts_created=len(created_contacts),
-        tasks_created=len(body.action_items),
+        tasks_created=len(tasks),
     )
 
 

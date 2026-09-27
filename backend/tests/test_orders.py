@@ -6,8 +6,6 @@ import pytest
 
 from tests.helpers import login_as
 
-pytestmark = pytest.mark.asyncio
-
 
 async def _stage(client, deal_id, name, **extra):
     deal = (await client.get(f"/api/v1/deals/{deal_id}")).json()

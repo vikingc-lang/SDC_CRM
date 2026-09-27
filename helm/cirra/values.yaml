@@ -37,8 +37,10 @@ api:
   replicas: 2
   resources: { requests: { cpu: 250m, memory: 512Mi }, limits: { memory: 1Gi } }
 worker:
-  replicas: 1          # runs Celery worker + beat; keep at 1 unless beat is split out
+  replicas: 2          # background jobs; scale with load (the schedule runs in the scheduler)
   resources: { requests: { cpu: 250m, memory: 512Mi }, limits: { memory: 1Gi } }
+scheduler:             # Celery beat: always exactly one replica
+  resources: { requests: { cpu: 50m, memory: 128Mi }, limits: { memory: 256Mi } }
 web:
   replicas: 2
   resources: { requests: { cpu: 100m, memory: 256Mi }, limits: { memory: 512Mi } }

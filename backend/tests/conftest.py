@@ -7,6 +7,7 @@ os.environ["DATABASE_URL"] = os.environ.get(
 os.environ["LLM_PROVIDER"] = "heuristic"
 os.environ["EMBEDDING_PROVIDER"] = "hash"
 os.environ["DB_NULL_POOL"] = "true"
+os.environ["RATE_LIMIT_ENABLED"] = "false"  # the suite signs in far more often than people do; test_wave5 turns it on
 
 import pytest  # noqa: E402
 from alembic import command  # noqa: E402

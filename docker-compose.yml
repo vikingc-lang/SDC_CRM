@@ -85,7 +85,26 @@ services:
       WHISPER_ENDPOINT: http://whisper:9000
     volumes:
       - cirra_files:/data
-    command: ["celery", "-A", "app.worker", "worker", "--beat", "--loglevel=info"]
+    command: ["celery", "-A", "app.worker", "worker", "--loglevel=info"]
+    # scale out with: docker compose up -d --scale worker=3 (remove container_name first)
+
+  # The schedule (Celery beat) runs in exactly one container, separate from the workers, so workers can be
+  # scaled or restarted without doubling or dropping scheduled jobs.
+  scheduler:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: cirra_scheduler
+    restart: always
+    depends_on:
+      - api
+      - redis
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://cirra_user:${POSTGRES_PASSWORD:-cirra_secure_password}@db:5432/cirra_crm
+      REDIS_URL: redis://redis:6379/0
+      RUN_MIGRATIONS: "false"
+    command: ["celery", "-A", "app.worker", "beat", "--loglevel=info", "--schedule", "/tmp/celerybeat-schedule"]
 
   # Local speech-to-text for Quick-Log voice notes (set TRANSCRIPTION_PROVIDER=whisper_asr).
   whisper:

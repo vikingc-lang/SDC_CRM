@@ -73,6 +73,16 @@ class Settings(BaseSettings):
     smtp_from: str = "cirra@localhost"
     smtp_starttls: bool = True
 
+    # API rate limits, requests per minute (see core/ratelimit.py). Counted in Redis across replicas.
+    rate_limit_enabled: bool = True
+    rate_limit_per_minute: int = 600            # a signed-in user
+    rate_limit_api_key_per_minute: int = 300    # an API key
+    rate_limit_anonymous_per_minute: int = 120  # unauthenticated calls to the API, per IP
+    rate_limit_login_per_minute: int = 60       # sign-in and two-factor attempts, per IP (per-account lockout is separate)
+    rate_limit_public_per_minute: int = 120     # public forms, e-signature, CSAT, unsubscribe, inbound email, per IP
+    rate_limit_tracking_per_minute: int = 1200  # email open pixels and click-throughs, per IP
+    log_format: Literal["text", "json"] = "text"
+
     # Public base URL of this API (email open/click tracking links point here).
     public_api_url: str = "http://localhost:8000"
     # Email-to-case: shared secret for POST /api/v1/inbound/email (unset = endpoint disabled), and an

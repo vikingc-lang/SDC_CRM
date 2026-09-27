@@ -1,0 +1,103 @@
+# Checks every push and pull request: the backend test suite against real Postgres (pgvector) and Redis,
+# the frontend typecheck, lint and production build, and that both Docker images and the Helm chart build.
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: cirra_user
+          POSTGRES_PASSWORD: cirra_secure_password
+          POSTGRES_DB: cirra_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U cirra_user -d cirra_test"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      TEST_DATABASE_URL: postgresql+asyncpg://cirra_user:cirra_secure_password@localhost:5432/cirra_test
+      REDIS_URL: redis://localhost:6379/0
+      USE_CELERY: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Byte-compile
+        run: python -m compileall -q app alembic
+      - name: Test suite
+        run: python -m pytest -q -rf --junitxml=junit.xml
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-junit
+          path: backend/junit.xml
+
+  frontend:
+    name: Frontend checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
+      - name: Production build
+        run: npm run build
+
+  images:
+    name: Docker images and Helm chart
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build API image
+        run: docker build -t cirra-api:ci backend
+      - name: Build web image
+        run: docker build --build-arg NEXT_PUBLIC_API_URL=http://localhost:8000 -t cirra-web:ci frontend
+      - uses: azure/setup-helm@v4
+      - name: Lint and render the Helm chart
+        run: |
+          helm lint helm/cirra
+          helm template cirra helm/cirra > /dev/null

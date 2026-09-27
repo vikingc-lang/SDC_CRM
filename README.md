@@ -4,6 +4,8 @@
 
 # Cirra: Connect what matters.
 
+[![CI](https://github.com/vikingc-lang/SDC_CRM/actions/workflows/ci.yml/badge.svg)](https://github.com/vikingc-lang/SDC_CRM/actions/workflows/ci.yml)
+
 **A CRM built around relationships, not just records.** Cirra is the AI CRM in the SDC Solutions portfolio of
 distinguished products (alongside promo [Q], Yield [S], deduct [✔] and nexora [§]). It brings every account, contact, deal
 and conversation into one place, and uses AI to surface the customers, signals and next steps that move revenue.
@@ -74,9 +76,12 @@ Open http://localhost:3000. Every demo user's password is `cirra123`:
 | `viewer@cirra.demo` | Auditor | Read and export everything, including the immutable audit trail; no writes |
 | `partner@northstar-partners.com` | Partner | External partner portal only: deal registration, commissions, collateral |
 
-The stack runs Postgres 16 + pgvector, Redis 7, Ollama, the FastAPI API, a Celery worker with beat (risk scans, SLA
-escalation, renewals, ERP sync, nightly re-score and de-duplication, scheduled workflows, case SLA scans, territory
-realignment and webhook delivery), optional Whisper, and the Next.js web app.
+The stack runs Postgres 16 + pgvector, Redis 7, Ollama, the FastAPI API, Celery workers for background jobs, a separate
+**scheduler** (Celery beat, exactly one) that triggers the scheduled ones (risk scans, SLA escalation, renewals, ERP sync,
+nightly re-score and de-duplication, scheduled workflows, case SLA scans and routing, territory realignment, webhook
+delivery, report subscriptions, nurture journeys and the support mailbox), optional Whisper, and the Next.js web app.
+Workers can be scaled (`docker compose up -d --scale worker=3` after removing `container_name`) without doubling scheduled
+jobs.
 Migrations run automatically, and `SEED_DEMO_DATA=true` loads the demo workspace. For a larger dataset across every object and
 transaction type (all lead sources and statuses, every pipeline stage, won/lost with each loss reason, quotes through the approval
 chain, documents in every signing state, orders, contracts and renewals, cases with SLA outcomes and CSAT, campaigns, partner
@@ -91,11 +96,29 @@ helm install cirra ./helm/cirra -n cirra --create-namespace \
   --set ingress.host=crm.example.com --set publicWebUrl=https://crm.example.com
 ```
 
-The chart deploys the API (with a migration init container), the worker, the web app, and optionally Postgres/pgvector,
+The chart deploys the API (with a migration init container), scalable workers, a single-replica scheduler, the web app,
+and optionally Postgres/pgvector,
 Redis, Ollama and Whisper. Point `externalDatabase` at a managed Postgres to skip the bundled one. Secrets are generated
 on first install and kept on upgrade and uninstall. A **zero-egress NetworkPolicy** is on by default: pods can reach only
 each other and cluster DNS, plus any CIDRs you list in `networkPolicy.allowEgressCIDRs` (for example an on-prem ERP or
 mail relay).
+
+### Operations
+
+- **Health checks:** `/health/live` (the process answers; used for liveness, so a database blip never restarts pods) and
+  `/health/ready` (database reachable and migrated to this build's schema, Redis reachable; 503 otherwise). `/health`
+  remains for simple uptime checks.
+- **Rate limits** (per minute, shared across API replicas through Redis): 600 per signed-in user, 300 per API key, 120
+  per IP for anonymous API calls and for public endpoints (forms, e-signature, CSAT, unsubscribe, inbound email), 60
+  sign-in attempts per IP (on top of the per-account lockout), 1,200 tracking hits per IP. Over the limit: HTTP 429 with
+  `Retry-After`; every response carries `X-RateLimit-Limit` and `X-RateLimit-Remaining`. Tune with `RATE_LIMIT_*`. If
+  Redis is down the limiter lets requests through rather than taking the CRM down.
+- **Tracing and logs:** every response carries an `X-Request-ID` (yours if you send one), written on a one-line access
+  log with status and duration. `LOG_FORMAT=json` switches the whole API to one JSON object per line for log shippers.
+- **Response hardening:** `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer` and a deny-all CSP on API
+  responses (the API only serves JSON; the interactive docs are exempt).
+- **CI** (`.github/workflows/ci.yml`) on every push and pull request: the backend suite against real Postgres/pgvector
+  and Redis, the frontend typecheck, lint and production build, then both Docker images and a Helm lint and render.
 
 ### Option B: local development
 
@@ -139,7 +162,7 @@ node e2e/wave3-journeys.mjs ./w3   # custom objects, field security, validation 
 node e2e/wave4-journeys.mjs ./w4   # email-to-case, presence routing, support inbox, nurture journeys and tracking (10 checks; needs INBOUND_EMAIL_SECRET)
 ```
 
-The backend suite (169 tests) covers the scoring formulas, the extractor and LLM fallback, and every pillar end to end:
+The backend suite (176 tests) covers the scoring formulas, the extractor and LLM fallback, and every pillar end to end:
 RBAC and row-level scope, the append-only audit trail, crypto-shredding erasure, dedup and merge, hierarchy rollups,
 all pipelines' gates, CPQ pricing, price books, promotions, bundles and the sequential approval chain, document generation,
 redlining and e-signature (built-in and provider webhooks), lead capture, scoring, routing and conversion, order generation
@@ -152,7 +175,9 @@ all-or-nothing imports, saved list views and in-place edits, previous-period com
 layer: validation rules (people vs system, create/edit scope, broken rules skipped), field-level security across record pages,
 API, reports and search, account sharing rules, custom objects end to end, and all-or-nothing configuration import;
 email-to-case (threading, reopen and follow-up, domain matching, loop and burst protection, emailed replies), presence routing
-(waiting, priority order, capacity), signed click tracking, and journeys branching on opens and clicks with exits.
+(waiting, priority order, capacity), signed click tracking, and journeys branching on opens and clicks with exits;
+quick-log scope and permissions, rate limits per identity and IP (with fail-open), request tracing, security headers and
+health checks.
 
 ---
 
@@ -208,8 +233,9 @@ Demo intake keys are printed by the seed: the hosted form is `/forms/cf_demo_web
 ## What's inside
 
 ```
-├── docker-compose.yml        # db (pgvector), redis, ollama, api, worker, web (+ whisper "voice" profile)
-├── helm/cirra/               # Kubernetes chart: api, worker, web, optional pgvector/redis/ollama/whisper, zero-egress policy
+├── .github/workflows/ci.yml  # tests, frontend checks, image builds and Helm lint on every push
+├── docker-compose.yml        # db (pgvector), redis, ollama, api, worker, scheduler, web (+ whisper "voice" profile)
+├── helm/cirra/               # Kubernetes chart: api, worker, scheduler, web, optional pgvector/redis/ollama/whisper, zero-egress policy
 ├── .env.example              # every setting, documented
 ├── backend/                  # FastAPI · async SQLAlchemy 2.0 · asyncpg · Pydantic v2 · Alembic · Celery
 │   ├── alembic/versions/001_initial_schema.py   # spec §4 DDL + activities/tasks/audit/pgvector
@@ -233,7 +259,7 @@ Demo intake keys are printed by the seed: the hosted form is `/forms/cf_demo_web
 │       │   ├── data_io.py · storage.py · notify.py                      # pillar 10
 │       │   └── jobs.py              # Celery or in-process background jobs
 │       ├── api/v1/           # accounts, contacts, deals, activities, ai, cpq, success, finance, partners (+portal), admin
-│       ├── worker.py         # Celery worker + beat schedule
+│       ├── worker.py         # Celery tasks and the beat schedule (run by the scheduler container)
 │       └── seed.py
 └── frontend/                 # Next.js 14 App Router · Tailwind · Radix · @dnd-kit · react-query · lucide
     ├── app/                  # home, pipeline, accounts, contacts, tasks, ask, quotes, approvals, products, reports,
