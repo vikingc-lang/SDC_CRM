@@ -71,6 +71,9 @@ async def decide(db: AsyncSession, reg: DealRegistration, approver: User, approv
     if account is None:
         account = Account(name=reg.company_name, domain=domain, owner_id=approver.id, custom_metadata={"source": "partner_registration"})
         db.add(account)
+        from app.services import performance
+
+        await performance.assign(db, account)
         await db.flush()
     pipeline = await default_pipeline(db, kind="partner")
     first = pipeline.stages[0]

@@ -14,7 +14,7 @@ from fastapi import BackgroundTasks
 
 from app.core.config import settings
 from app.core.database import SessionLocal
-from app.services import cases, insights, scoring, workflows
+from app.services import cases, developer, insights, performance, scoring, workflows
 
 log = logging.getLogger(__name__)
 
@@ -111,6 +111,18 @@ async def job_case_sla() -> None:
         await cases.scan_breaches(db)
 
 
+async def job_territories() -> None:
+    async with SessionLocal() as db:
+        if await performance.all_territories(db):
+            await performance.realign(db, apply=True)
+            await db.commit()
+
+
+async def job_webhooks() -> None:
+    async with SessionLocal() as db:
+        await developer.run(db)
+
+
 async def job_workflows() -> None:
     async with SessionLocal() as db:
         await workflows.run_scheduled(db)
@@ -133,6 +145,8 @@ JOBS = {
     "reindex": job_reindex,
     "workflows": job_workflows,
     "case_sla": job_case_sla,
+    "territories": job_territories,
+    "webhooks": job_webhooks,
 }
 
 

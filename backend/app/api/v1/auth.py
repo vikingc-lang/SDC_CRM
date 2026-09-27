@@ -2,15 +2,15 @@ import uuid
 from datetime import datetime, timezone
 
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import current_user_id, log_action
 from app.core.database import get_db
-from app.core.deps import bearer, get_current_user
-from app.core.rbac import ACTIONS, RESOURCES, load_matrix
+from app.core.deps import bearer, get_current_user, human_user
+from app.core.rbac import ACTIONS, RESOURCES, Principal, get_principal, load_matrix
 from app.core.security import create_access_token, create_pending_token, decode_pending_token, verify_password
 from app.models import Partner, User
 from app.schemas.crm import LoginRequest, TokenResponse
@@ -113,10 +113,10 @@ async def _enrolling_user(db: AsyncSession, token: str | None, bearer_user: User
     return bearer_user
 
 
-async def _optional_user(db: AsyncSession = Depends(get_db), creds=Depends(bearer)):
+async def _optional_user(request: Request, db: AsyncSession = Depends(get_db), creds=Depends(bearer)):
     if creds is None:
         return None
-    return await get_current_user(creds, db)
+    return await human_user(request, await get_current_user(request, creds, db))
 
 
 @router.post("/auth/mfa/enroll/start")
@@ -148,7 +148,7 @@ async def mfa_enroll_confirm(body: ConfirmIn, db: AsyncSession = Depends(get_db)
 
 
 @router.post("/auth/mfa/recovery-codes")
-async def mfa_new_recovery_codes(body: CodeIn, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+async def mfa_new_recovery_codes(body: CodeIn, db: AsyncSession = Depends(get_db), user: User = Depends(human_user)):
     try:
         identity.verify_second_factor(user, body.code)
     except IdentityError as e:
@@ -160,7 +160,7 @@ async def mfa_new_recovery_codes(body: CodeIn, db: AsyncSession = Depends(get_db
 
 
 @router.post("/auth/mfa/disable")
-async def mfa_disable(body: DisableIn, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+async def mfa_disable(body: DisableIn, db: AsyncSession = Depends(get_db), user: User = Depends(human_user)):
     if identity.mfa_required_for(await identity.policy(db), user):
         raise HTTPException(422, "Your role requires two-factor authentication, so it can't be turned off")
     if not verify_password(body.password, user.password_hash):
@@ -213,6 +213,7 @@ async def me(user: User = Depends(get_current_user), db: AsyncSession = Depends(
 
 
 @router.get("/users")
-async def list_users(db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
+async def list_users(db: AsyncSession = Depends(get_db), _: Principal = Depends(get_principal)):
+    """The internal directory (for owner / assignee pickers). Partner portal users can't list staff."""
     users = (await db.execute(select(User).where(User.is_active.is_(True), User.role != "partner").order_by(User.full_name))).scalars().all()
     return [{"id": u.id, "email": u.email, "full_name": u.full_name, "role": u.role} for u in users]

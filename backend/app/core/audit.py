@@ -27,10 +27,11 @@ current_user_id: ContextVar[uuid.UUID | None] = ContextVar("current_user_id", de
 audit_enabled: ContextVar[bool] = ContextVar("audit_enabled", default=True)
 
 _SKIP_FIELDS = {"embedding", "search_tsv", "updated_at", "created_at", "password_hash", "secret_encrypted", "key",
-                "mfa_secret", "mfa_recovery_hashes", "mfa_last_step", "session_version", "last_login_at"}
+                "mfa_secret", "mfa_recovery_hashes", "mfa_last_step", "session_version", "last_login_at",
+                "key_hash", "secret_enc", "cursor_event_id", "consecutive_failures", "last_success_at", "last_failure_at", "last_used_at"}
 _UNAUDITED = {
     "AuditLog", "ConsentEvent", "ErasureLog", "Notification", "SubjectKey", "IntegrationEvent", "ErpSyncRun",
-    "CollateralDownload", "SsoLoginState", "WorkflowRun",
+    "CollateralDownload", "SsoLoginState", "WorkflowRun", "WebhookDelivery",
 }
 _MAX = 4000
 

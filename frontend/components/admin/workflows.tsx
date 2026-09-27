@@ -43,7 +43,7 @@ export const TEMPLATES: Record<string, Omit<WorkflowRule, "id">> = {
   },
 };
 
-const SOURCE_LABEL: Record<string, string> = { deals: "Opportunities", leads: "Leads", accounts: "Accounts", contacts: "Contacts", activities: "Activities", tasks: "Tasks", quotes: "Quotes", orders: "Orders", cases: "Cases" };
+const SOURCE_LABEL: Record<string, string> = { deals: "Opportunities", leads: "Leads", accounts: "Accounts", contacts: "Contacts", activities: "Activities", tasks: "Tasks", quotes: "Quotes", orders: "Orders", cases: "Cases", campaigns: "Campaigns" };
 
 function triggerText(r: WorkflowRule) {
   if (r.trigger.type === "created") return "When created";

@@ -20,7 +20,7 @@ from sqlalchemy.orm import aliased
 
 from app.core.rbac import Principal
 from app.models import (
-    Account, Activity, Contact, Deal, FxRate, Lead, Order, Pipeline, PipelineStage, Quote, SupportQueue, SupportTicket, Task, User,
+    Account, Activity, Campaign, CampaignMember, Contact, Deal, FxRate, Lead, Order, Pipeline, PipelineStage, Quote, SupportQueue, SupportTicket, Task, Territory, User,
 )
 
 MAX_ROWS = 2000
@@ -69,6 +69,7 @@ class Source:
 
 def _deals() -> Source:
     owner, stage, pipe, acct, fx = aliased(User), aliased(PipelineStage), aliased(Pipeline), aliased(Account), aliased(FxRate)
+    terr = aliased(Territory)
     usd = Deal.amount * func.coalesce(fx.rate_to_usd, 1)
     status = case((stage.is_closed_won, literal("Won")), (stage.is_closed_lost, literal("Lost")), else_=literal("Open"))
     open_weight = case((or_(stage.is_closed_won, stage.is_closed_lost), 0), else_=stage.default_probability)
@@ -78,6 +79,7 @@ def _deals() -> Source:
         "industry": F("Industry", "text", acct.industry),
         "region": F("Region", "enum", acct.region, ["NA", "EMEA", "APAC", "LATAM"]),
         "tier": F("Account tier", "enum", acct.tier, ["SMB", "Mid-Market", "Enterprise"]),
+        "territory": F("Territory", "text", terr.name),
         "pipeline": F("Pipeline", "text", pipe.name),
         "stage": F("Stage", "text", stage.name),
         "status": F("Status", "enum", status, ["Open", "Won", "Lost"]),
@@ -103,19 +105,20 @@ def _deals() -> Source:
     }
     base = lambda: (select().select_from(Deal).join(acct, acct.id == Deal.account_id).join(stage, stage.id == Deal.stage_id)  # noqa: E731
                     .join(pipe, pipe.id == Deal.pipeline_id).outerjoin(owner, owner.id == Deal.owner_id)
-                    .outerjoin(fx, fx.currency == Deal.currency))
+                    .outerjoin(fx, fx.currency == Deal.currency).outerjoin(terr, terr.id == acct.territory_id))
     return Source("deals", "Opportunities", "deals", "Deals in every pipeline, with stage, owner, amounts in USD and dates.",
                   fields, base, lambda p, s: p.scope_deals(s), ["title", "account", "stage", "owner", "amount_usd", "close_date"], id_col=Deal.id)
 
 
 def _accounts() -> Source:
-    owner = aliased(User)
+    owner, terr = aliased(User), aliased(Territory)
     fields = {
         "name": F("Account", "text", Account.name, groupable=False),
         "industry": F("Industry", "text", Account.industry),
         "tier": F("Tier", "enum", Account.tier, ["SMB", "Mid-Market", "Enterprise"]),
         "region": F("Region", "enum", Account.region, ["NA", "EMEA", "APAC", "LATAM"]),
         "country": F("Country", "text", Account.country),
+        "territory": F("Territory", "text", terr.name),
         "lifecycle": F("Lifecycle stage", "enum", Account.lifecycle_stage, ["prospect", "customer", "churned", "partner"]),
         "owner": F("Owner", "text", owner.full_name),
         "health": F("Health score", "number", Account.health_score),
@@ -125,7 +128,8 @@ def _accounts() -> Source:
         "credit_hold": F("Credit hold", "bool", Account.credit_hold),
         "created": F("Created", "date", Account.created_at),
     }
-    base = lambda: select().select_from(Account).outerjoin(owner, owner.id == Account.owner_id)  # noqa: E731
+    base = lambda: (select().select_from(Account).outerjoin(owner, owner.id == Account.owner_id)  # noqa: E731
+                    .outerjoin(terr, terr.id == Account.territory_id))
     return Source("accounts", "Accounts", "accounts", "Customer and prospect accounts with health, churn risk and firmographics.",
                   fields, base, lambda p, s: p.scope_accounts(s), ["name", "industry", "tier", "owner", "health"], id_col=Account.id)
 
@@ -274,6 +278,29 @@ def _orders() -> Source:
                   fields, base, lambda p, s: p.scope_accounts(s, "orders", Order.account_id), ["order_number", "account", "status", "total_usd", "created"], id_col=Order.id)
 
 
+def _campaigns() -> Source:
+    owner = aliased(User)
+    members = select(func.count(CampaignMember.id)).where(CampaignMember.campaign_id == Campaign.id).scalar_subquery()
+    responses = (select(func.count(CampaignMember.id)).where(CampaignMember.campaign_id == Campaign.id,
+                                                             CampaignMember.status.in_(("responded", "registered", "attended"))).scalar_subquery())
+    fields = {
+        "name": F("Campaign", "text", Campaign.name, groupable=False),
+        "type": F("Type", "enum", Campaign.campaign_type, ["email", "webinar", "event", "trade_show", "paid_ads", "content", "partner", "other"]),
+        "status": F("Status", "enum", Campaign.status, ["planned", "active", "completed", "aborted"]),
+        "owner": F("Owner", "text", owner.full_name),
+        "budget": F("Budget", "money", Campaign.budget, groupable=False),
+        "actual_cost": F("Actual cost", "money", Campaign.actual_cost, groupable=False),
+        "expected_revenue": F("Expected revenue", "money", Campaign.expected_revenue, groupable=False),
+        "members": F("Members", "number", members, groupable=False),
+        "responses": F("Responses", "number", responses, groupable=False),
+        "start": F("Start", "date", Campaign.start_date),
+        "end": F("End", "date", Campaign.end_date),
+    }
+    base = lambda: select().select_from(Campaign).outerjoin(owner, owner.id == Campaign.owner_id)  # noqa: E731
+    return Source("campaigns", "Campaigns", "campaigns", "Marketing campaigns with budget, cost, members and responses.",
+                  fields, base, lambda p, s: s, ["name", "type", "status", "members", "responses", "actual_cost"], id_col=Campaign.id)
+
+
 def _cases() -> Source:
     acct, owner, queue = aliased(Account), aliased(User), aliased(SupportQueue)
     first_resp_h = func.round(func.extract("epoch", SupportTicket.first_responded_at - SupportTicket.opened_at) / 3600.0, 1)
@@ -306,7 +333,7 @@ def _cases() -> Source:
                   fields, base, scope, ["case_number", "subject", "account", "priority", "status", "owner"], id_col=SupportTicket.id)
 
 
-SOURCES: dict[str, Source] = {s.key: s for s in (_deals(), _accounts(), _contacts(), _leads(), _activities(), _tasks(), _quotes(), _orders(), _cases())}
+SOURCES: dict[str, Source] = {s.key: s for s in (_deals(), _accounts(), _contacts(), _leads(), _activities(), _tasks(), _quotes(), _orders(), _cases(), _campaigns())}
 
 
 def catalogue(p: Principal) -> list[dict]:

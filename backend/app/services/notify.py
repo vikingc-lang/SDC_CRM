@@ -20,6 +20,9 @@ EVENT_TARGETS = {
     "lead.converted": ["promo", "nexora"],
     "order.created": ["deduct", "nexora"],
     "order.acknowledged": ["deduct", "yield", "nexora"],
+    # published for webhook subscribers only (services/developer.py)
+    "account.created": [], "contact.created": [], "deal.created": [], "deal.stage_changed": [],
+    "case.created": [], "case.resolved": [], "campaign.launched": [], "campaign.member_responded": [],
 }
 
 

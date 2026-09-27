@@ -27,7 +27,7 @@ from app.models import (
     PriceBookEntry, Product, ProductRule, ProductUsage, Promotion, Quote,
     SupportTicket, Task, User,
 )
-from app.services import cases, clm, cpq, embeddings, erp, fx, insights, prm, reporting, scoring, sla, storage
+from app.services import campaigns, cases, clm, cpq, embeddings, erp, fx, insights, performance, prm, reporting, scoring, sla, storage
 from app.services.cpq import LEVEL_LABELS
 from app.services.pipeline_templates import PIPELINES
 from app.services.search import account_document
@@ -406,6 +406,8 @@ async def seed(minimal: bool = False, reset: bool = False) -> None:
 
         await reporting.ensure_starter_content(db, users["marcus@cirra.demo"].id)
         await cases.ensure_demo(db)
+        await performance.ensure_demo(db)
+        await campaigns.ensure_demo(db)
         await db.flush()
         for account in (await db.execute(select(Account))).scalars().unique().all():
             account.embedding = await embeddings.embed(account_document(account))

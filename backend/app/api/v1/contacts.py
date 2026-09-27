@@ -13,6 +13,7 @@ from app.core.rbac import Principal, authorize
 from app.models import Account, Activity, ConsentEvent, Contact, CustomFieldDefinition, ErasureLog
 from app.schemas.ai import BuyingRole
 from app.services import custom_fields, privacy, scoring
+from app.services.notify import emit
 from app.services.serializers import activity_out, contact_out
 
 router = APIRouter(prefix="/contacts", tags=["contacts"])
@@ -130,6 +131,9 @@ async def create_contact(body: ContactCreate, db: AsyncSession = Depends(get_db)
     except IntegrityError:
         raise HTTPException(409, "A contact with this email already exists")
     await scoring.rescore_account(db, body.account_id)
+    emit(db, "contact.created", "contact", contact.id, {"contact_id": str(contact.id), "account_id": str(contact.account_id),
+                                                        "name": f"{contact.first_name} {contact.last_name}", "email": contact.email,
+                                                        "buying_role": contact.buying_role})
     await db.commit()
     return contact_out(contact)
 

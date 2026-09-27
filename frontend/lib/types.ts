@@ -87,7 +87,7 @@ export interface Account360 {
     relationship_strength: number | null; churn_risk: number; churn_factors: Record<string, unknown>; owner: UserBrief | null; created_at: string;
     customer_master: { legal_name: string | null; tax_id: string | null; billing_address: Record<string, string>; payment_terms: string;
       credit_limit: number | null; credit_hold: boolean; erp_customer_id: string | null; erp_synced_at: string | null };
-    custom_fields: Record<string, unknown>; parent: { id: UUID; name: string } | null; subsidiaries: { id: UUID; name: string; health_score: number }[];
+    custom_fields: Record<string, unknown>; parent: { id: UUID; name: string } | null; territory?: { id: UUID; name: string } | null; subsidiaries: { id: UUID; name: string; health_score: number }[];
   };
   custom_field_definitions: CustomFieldDef[];
   contacts: Contact[]; deals: Deal[]; recent_activities: Activity[]; tasks: Task[];
@@ -123,7 +123,7 @@ export interface QuickLogResponse {
 }
 
 // ---- enterprise pillars -------------------------------------------------------------
-export type Role = "super_admin" | "sales_manager" | "account_executive" | "sdr" | "auditor" | "partner" | "support_agent";
+export type Role = "super_admin" | "sales_manager" | "account_executive" | "sdr" | "auditor" | "partner" | "support_agent" | "marketing";
 export type Action = "create" | "read" | "update" | "delete" | "export";
 export type Perm = Record<Action, boolean> & { scope: "all" | "own" };
 export interface Me {

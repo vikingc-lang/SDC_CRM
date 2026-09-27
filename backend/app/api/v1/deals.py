@@ -17,6 +17,7 @@ from app.services import custom_fields, fx, insights, orders, pipeline_service, 
 from app.services.clm import document_out
 from app.services.cpq import quote_out
 from app.services.jobs import enqueue
+from app.services.notify import emit
 from app.services.serializers import activity_out, contact_out, deal_card, task_out, user_brief
 
 router = APIRouter(tags=["deals"])
@@ -279,6 +280,9 @@ async def create_deal(body: DealCreate, db: AsyncSession = Depends(get_db), p: P
     db.add(deal)
     await db.flush()
     db.add(DealStageHistory(deal_id=deal.id, from_stage_id=None, to_stage_id=stage.id, changed_by=p.id))
+    emit(db, "deal.created", "deal", deal.id, {"deal_id": str(deal.id), "account_id": str(account.id), "account": account.name,
+                                               "title": deal.title, "stage": stage.name, "pipeline": pipeline.name,
+                                               "amount": float(deal.amount or 0), "currency": deal.currency})
     await scoring.rescore_account(db, account.id)
     await db.commit()
     await db.refresh(deal)

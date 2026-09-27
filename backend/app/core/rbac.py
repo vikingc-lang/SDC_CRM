@@ -24,12 +24,12 @@ ACTIONS = ("create", "read", "update", "delete", "export")
 RESOURCES = (
     "accounts", "contacts", "deals", "activities", "tasks", "products", "quotes", "approvals", "documents",
     "contracts", "success", "finance", "partners", "reports", "admin", "audit", "data", "leads", "orders",
-    "cases", "knowledge",
+    "cases", "knowledge", "campaigns",
 )
-ROLES = ("super_admin", "sales_manager", "account_executive", "sdr", "auditor", "partner", "support_agent")
+ROLES = ("super_admin", "sales_manager", "account_executive", "sdr", "auditor", "partner", "support_agent", "marketing")
 ROLE_LABELS = {
     "super_admin": "Super Admin", "sales_manager": "Sales Manager", "account_executive": "Account Executive",
-    "sdr": "SDR", "auditor": "Auditor", "partner": "Partner (portal)", "support_agent": "Support Agent",
+    "sdr": "SDR", "auditor": "Auditor", "partner": "Partner (portal)", "support_agent": "Support Agent", "marketing": "Marketing",
 }
 
 
@@ -46,7 +46,7 @@ DEFAULT_MATRIX: dict[str, dict[str, dict]] = {
         **{r: _p("CRUDE") for r in _SALES},
         "products": _p("RE"), "approvals": _p("RU"), "contracts": _p("CRUE"), "success": _p("CRUE"),
         "finance": _p("RE"), "partners": _p("CRUE"), "reports": _p("RE"), "admin": _p("R"), "audit": _p("R"),
-        "data": _p("CRE"), "leads": _p("CRUDE"), "orders": _p("CRUE"), "cases": _p("CRUDE"), "knowledge": _p("CRUDE"),
+        "data": _p("CRE"), "leads": _p("CRUDE"), "orders": _p("CRUE"), "cases": _p("CRUDE"), "knowledge": _p("CRUDE"), "campaigns": _p("CRUDE"),
     },
     "account_executive": {
         "accounts": _p("CRU", "own"), "contacts": _p("CRUD", "own"), "deals": _p("CRU", "own"),
@@ -54,17 +54,22 @@ DEFAULT_MATRIX: dict[str, dict[str, dict]] = {
         "documents": _p("CRU", "own"), "contracts": _p("R", "own"), "success": _p("R", "own"),
         "finance": _p("R", "own"), "products": _p("R"), "approvals": _p("R", "own"), "partners": _p("R"),
         "reports": _p("R", "own"), "leads": _p("CRU", "own"), "orders": _p("CR", "own"),
-        "cases": _p("CRU", "own"), "knowledge": _p("R"),
+        "cases": _p("CRU", "own"), "knowledge": _p("R"), "campaigns": _p("R"),
     },
     "sdr": {
         "accounts": _p("CR", "own"), "contacts": _p("CRU", "own"), "deals": _p("CR", "own"),
         "activities": _p("CRU", "own"), "tasks": _p("CRU", "own"), "products": _p("R"), "reports": _p("R", "own"),
-        "leads": _p("CRUE", "own"), "cases": _p("R", "own"), "knowledge": _p("R"),
+        "leads": _p("CRUE", "own"), "cases": _p("R", "own"), "knowledge": _p("R"), "campaigns": _p("R"),
     },
     # Service desk: every case, read-only view of customers, their own follow-ups
     "support_agent": {
         "cases": _p("CRUE"), "knowledge": _p("CRU"), "accounts": _p("R"), "contacts": _p("CRU"), "activities": _p("CR"),
         "tasks": _p("CRU", "own"), "products": _p("R"), "success": _p("R"), "reports": _p("R", "own"),
+    },
+    # Demand generation: campaigns and every lead; read-only view of customers and the pipeline they influence
+    "marketing": {
+        "campaigns": _p("CRUDE"), "leads": _p("CRUE"), "contacts": _p("RU"), "accounts": _p("R"), "deals": _p("R"),
+        "activities": _p("R"), "tasks": _p("CRU", "own"), "products": _p("R"), "reports": _p("RE", "own"), "knowledge": _p("R"),
     },
     "auditor": {**{r: _p("RE") for r in RESOURCES if r not in ("admin",)}, "admin": _p("R")},
     "partner": {},

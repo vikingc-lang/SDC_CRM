@@ -40,19 +40,21 @@ export default function ReportsPage() {
   }, []);
   const [pipelineId, setPipelineId] = useState("");
   const { can } = useMe();
-  const pipelines = useQuery({ queryKey: ["pipelines"], queryFn: () => get<PipelineFull[]>("/pipelines") });
-  const fc = useQuery({ queryKey: ["reports", "forecast", pipelineId], queryFn: () => get<Forecast>("/reports/forecast", { pipeline_id: pipelineId || undefined }) });
-  const wl = useQuery({ queryKey: ["reports", "winloss"], queryFn: () => get<WinLoss>("/reports/win-loss") });
+  const sales = can("deals", "read");  // forecast and win/loss are pipeline views; service and marketing roles may not read deals
+  const pipelines = useQuery({ queryKey: ["pipelines"], queryFn: () => get<PipelineFull[]>("/pipelines"), enabled: sales });
+  const fc = useQuery({ queryKey: ["reports", "forecast", pipelineId], queryFn: () => get<Forecast>("/reports/forecast", { pipeline_id: pipelineId || undefined }), enabled: sales });
+  const wl = useQuery({ queryKey: ["reports", "winloss"], queryFn: () => get<WinLoss>("/reports/win-loss"), enabled: sales });
   const exportDeals = () => downloadFile("/admin/export/deals", `deals-${new Date().toISOString().slice(0, 10)}.csv`, { format: "csv" }).catch((e) => toast.error(errorMessage(e)));
   return (
     <div className="mx-auto max-w-6xl">
       <PageHeader title="Reports" description="Dashboards and self-service reports, the risk-adjusted forecast, and win/loss analysis."
         actions={can("deals", "export") && <Button size="sm" variant="outline" onClick={exportDeals}><Download className="h-3.5 w-3.5" />Export deals</Button>} />
-      <Tabs value={tab} onChange={setTab} tabs={[{ value: "dashboards", label: "Dashboards" }, { value: "reports", label: "Saved reports" }, { value: "call", label: "Forecast call" }, { value: "forecast", label: "Pipeline forecast" }, { value: "winloss", label: "Win / loss" }]} />
+      <Tabs value={tab} onChange={setTab} tabs={[{ value: "dashboards", label: "Dashboards" }, { value: "reports", label: "Saved reports" },
+        ...(sales ? [{ value: "call" as const, label: "Forecast call" }, { value: "forecast" as const, label: "Pipeline forecast" }, { value: "winloss" as const, label: "Win / loss" }] : [])]} />
       {tab === "dashboards" && <DashboardsList />}
       {tab === "reports" && <SavedReportsList />}
-      {tab === "call" && <ForecastCall />}
-      {tab === "forecast" && (
+      {tab === "call" && sales && <ForecastCall />}
+      {tab === "forecast" && sales && (
         <>
           <div className="mb-4 flex items-center gap-2">
             <Select aria-label="Pipeline" className="w-auto" value={pipelineId} onChange={(e) => setPipelineId(e.target.value)}>
@@ -91,7 +93,7 @@ export default function ReportsPage() {
           )}
         </>
       )}
-      {tab === "winloss" && (!wl.data ? <Skeleton className="h-72 w-full" /> : (
+      {tab === "winloss" && sales && (!wl.data ? <Skeleton className="h-72 w-full" /> : (
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <StatTile label="Win rate" value={`${wl.data.win_rate}%`} emphasis />

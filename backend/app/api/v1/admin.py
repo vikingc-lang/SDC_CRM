@@ -370,10 +370,20 @@ async def export(entity: Entity, format: Literal["csv", "json"] = "csv", db: Asy
 
 # ---- background jobs on demand -------------------------------------------------------------------------------
 @router.post("/jobs/{job}")
-async def run_job(job: Literal["risk_scan", "escalations", "renewals", "rescore", "auto_dedup", "erp_sync", "erp_orders", "lead_rescore", "reindex", "workflows", "case_sla"],
+async def run_job(job: Literal["risk_scan", "escalations", "renewals", "rescore", "auto_dedup", "erp_sync", "erp_orders", "lead_rescore", "reindex", "workflows", "case_sla", "territories", "webhooks"],
                   db: AsyncSession = Depends(get_db), _: Principal = Depends(authorize("admin", "update"))):
     from app.services import clm, erp, insights, scoring, sla
 
+    if job == "webhooks":
+        from app.services import developer
+
+        return await developer.run(db)
+    if job == "territories":
+        from app.services import performance
+
+        out = await performance.realign(db, apply=True)
+        await db.commit()
+        return {"moved": len(out["changes"]), "unassigned": out["unassigned"]}
     if job == "case_sla":
         from app.services import cases
 

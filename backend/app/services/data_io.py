@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Account, Contact, Deal, DealStageHistory, Pipeline, PriceBookEntry, Product, User
 from app.models import ACCOUNT_TIERS, BUYING_ROLES
+from app.services import performance
 
 F = dict  # field spec shorthand
 
@@ -232,6 +233,7 @@ async def commit(db: AsyncSession, entity: str, content: bytes, filename: str, m
                     if acc is None:
                         acc = Account(custom_metadata={}, owner_id=(owner or user).id, **{k: v for k, v in r.items() if v is not None})
                         db.add(acc)
+                        await performance.assign(db, acc)
                         refs.accounts[r["domain"]] = acc
                         created += 1
                     else:

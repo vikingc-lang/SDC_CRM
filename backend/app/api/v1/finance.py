@@ -65,10 +65,10 @@ async def erp_runs(db: AsyncSession = Depends(get_db), _: Principal = Depends(au
 async def events_feed(after_id: int = 0, target: str | None = None, limit: int = 100, db: AsyncSession = Depends(get_db),
                       _: Principal = Depends(authorize("finance", "read"))):
     """Cursor-based feed for neighbouring SDC modules (promo, Yield, deduct, nexora)."""
-    stmt = select(IntegrationEvent).where(IntegrationEvent.id > after_id).order_by(IntegrationEvent.id).limit(min(limit, 500))
+    stmt = select(IntegrationEvent).where(IntegrationEvent.id > after_id).order_by(IntegrationEvent.id).limit(min(max(limit, 1), 500))
+    if target:  # filter in SQL so the cursor always advances past other modules' events
+        stmt = stmt.where(IntegrationEvent.targets.contains([target]))
     rows = (await db.execute(stmt)).scalars().all()
-    if target:
-        rows = [e for e in rows if target in (e.targets or [])]
     return {"next_after_id": rows[-1].id if rows else after_id,
             "events": [{"id": e.id, "type": e.event_type, "entity": e.entity_type, "entity_id": e.entity_id, "payload": e.payload,
                         "targets": e.targets, "created_at": e.created_at, "delivered_at": e.delivered_at} for e in rows]}

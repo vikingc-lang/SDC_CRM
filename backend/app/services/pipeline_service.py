@@ -270,6 +270,10 @@ async def change_stage(
         summary += f" (loss: {LOSS_TAXONOMY.get(loss_reason, loss_reason)}{f' to {loss_competitor}' if loss_competitor else ''})"
     db.add(Activity(account_id=deal.account_id, deal_id=deal.id, user_id=user.id if user else None, activity_type="system",
                     summary=summary, sentiment="neutral", source="system"))
+    emit(db, "deal.stage_changed", "deal", deal.id, {
+        "deal_id": str(deal.id), "account_id": str(deal.account_id), "title": deal.title, "from_stage": old_stage.name,
+        "to_stage": stage.name, "amount": float(deal.amount or 0), "currency": deal.currency, "forecast_delta": delta,
+    })
     if stage.is_closed:
         emit(db, "deal.closed_won" if stage.is_closed_won else "deal.closed_lost", "deal", deal.id, {
             "deal_id": str(deal.id), "account_id": str(deal.account_id), "account": deal.account.name, "title": deal.title,

@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { BarChart3, Bell, BookOpen, Building2, CheckSquare, ChevronsUpDown, Columns3, FileSignature, Handshake, HeartHandshake, Home, Landmark, LifeBuoy, LogOut, Magnet, Menu, Monitor, Moon, Package, PackageCheck, Search, Settings, ShieldCheck, Sparkles, Stamp, Sun, Users, X } from "lucide-react";
+import { BarChart3, Bell, BookOpen, Building2, CheckSquare, ChevronsUpDown, Columns3, FileSignature, Handshake, HeartHandshake, Home, Landmark, LifeBuoy, LogOut, Magnet, Megaphone, Menu, Monitor, Moon, Package, PackageCheck, Search, Settings, ShieldCheck, Sparkles, Stamp, Sun, Target, Users, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
@@ -33,7 +33,11 @@ const NAV: { group: string | null; items: NavItem[] }[] = [
     { href: "/approvals", label: "Approvals", icon: Stamp, resource: "approvals" },
     { href: "/orders", label: "Orders", icon: PackageCheck, resource: "orders" },
     { href: "/products", label: "Products", icon: Package, resource: "products" },
+    { href: "/performance", label: "Quotas & commission", icon: Target, resource: "deals" },
     { href: "/reports", label: "Reports", icon: BarChart3, resource: "reports" },
+  ] },
+  { group: "Marketing", items: [
+    { href: "/campaigns", label: "Campaigns", icon: Megaphone, resource: "campaigns" },
   ] },
   { group: "Customers", items: [
     { href: "/cases", label: "Service", icon: LifeBuoy, resource: "cases" },

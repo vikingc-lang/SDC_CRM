@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.deps import get_current_user
-from app.core.rbac import Principal, authorize
+from app.core.rbac import Principal, authorize, get_principal
 from app.models import Account, Activity, Contact, Deal, DealStageHistory, PipelineStage, Task, User
 from app.schemas.ai import AskRequest, CommitLogRequest, CommitLogResponse, QuickLogRequest, QuickLogResponse, SemanticSearchRequest
 from app.services import ai_extractor, dedup, insights, llm, pipeline_service, scoring, voice
@@ -127,6 +127,9 @@ async def commit_log(body: CommitLogRequest, background: BackgroundTasks, db: As
             custom_metadata={"domain_unverified": not body.domain, "source": "quick-log"},
         )
         db.add(account)
+        from app.services import performance
+
+        await performance.assign(db, account)
         await db.flush()
 
     # 2. Contacts
@@ -254,20 +257,30 @@ async def global_search(q: str, db: AsyncSession = Depends(get_db), p: Principal
 
 
 @router.post("/ai/ask")
-async def ask(body: AskRequest, db: AsyncSession = Depends(get_db), _: Principal = Depends(authorize("activities", "read"))):
-    return await insights.ask(db, body.question, body.account_id, body.deal_id)
+async def ask(body: AskRequest, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("activities", "read"))):
+    if body.account_id:
+        await p.ensure_account(db, body.account_id, "activities")
+    if body.deal_id:
+        await _visible_deal(db, p, body.deal_id)
+    return await insights.ask(db, body.question, body.account_id, body.deal_id, p)
 
 
 @router.get("/ai/briefing")
-async def briefing(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
-    return await insights.briefing(db, user.id)
+async def briefing(db: AsyncSession = Depends(get_db), p: Principal = Depends(get_principal)):
+    return await insights.briefing(db, p)
+
+
+async def _visible_deal(db: AsyncSession, p: Principal, deal_id: uuid.UUID) -> Deal:
+    """404 for a deal outside the caller's row-level scope, like the deals API."""
+    deal = (await db.execute(p.scope_deals(select(Deal).where(Deal.id == deal_id)))).scalars().unique().one_or_none()
+    if deal is None:
+        raise HTTPException(404, "Deal not found")
+    return deal
 
 
 @router.post("/ai/deals/{deal_id}/draft-email")
-async def draft_email(deal_id: uuid.UUID, purpose: str = "follow-up", db: AsyncSession = Depends(get_db), _: Principal = Depends(authorize("deals", "read"))):
-    deal = await db.get(Deal, deal_id)
-    if deal is None:
-        raise HTTPException(404, "Deal not found")
+async def draft_email(deal_id: uuid.UUID, purpose: str = "follow-up", db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("deals", "read"))):
+    deal = await _visible_deal(db, p, deal_id)
     return {"draft": await insights.draft_email(db, deal, purpose), "engine": llm.provider_name()}
 
 

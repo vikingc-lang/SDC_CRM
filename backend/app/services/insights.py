@@ -36,11 +36,11 @@ async def embed_activity(db: AsyncSession, activity_id: uuid.UUID) -> None:
     await db.commit()
 
 
-async def semantic_search(db: AsyncSession, query: str, limit: int = 10, account_id: uuid.UUID | None = None) -> list[dict]:
-    """Activity results from hybrid (vector + keyword) retrieval."""
+async def semantic_search(db: AsyncSession, query: str, limit: int = 10, account_id: uuid.UUID | None = None, principal=None) -> list[dict]:
+    """Activity results from hybrid (vector + keyword) retrieval, limited to what ``principal`` may see."""
     from app.services.search import hybrid_search
 
-    return [r for r in await hybrid_search(db, query, limit, None, account_id) if r["entity"] == "activity"]
+    return [r for r in await hybrid_search(db, query, limit, principal, account_id) if r["entity"] == "activity"]
 
 
 # ---- stage-gate autonomous actions ---------------------------------------------
@@ -208,32 +208,25 @@ async def scan_pipeline(db: AsyncSession) -> dict:
     return stats
 
 
-async def briefing(db: AsyncSession, user_id: uuid.UUID | None = None) -> dict:
+async def briefing(db: AsyncSession, principal) -> dict:
+    """Morning priorities for one person: their open tasks, plus at-risk / closing deals and cooling accounts
+    within what their role may see (row-level scope applies)."""
     today = date.today()
-    tasks = (
-        await db.execute(
-            select(Task).where(Task.completed.is_(False), Task.due_date.is_not(None), Task.due_date <= today + timedelta(days=1)).order_by(Task.due_date).limit(8)
-        )
-    ).scalars().unique().all()
-    risky = (
-        await db.execute(
-            select(Deal)
-            .join(PipelineStage, Deal.stage_id == PipelineStage.id)
-            .where(PipelineStage.is_closed_won.is_(False), PipelineStage.is_closed_lost.is_(False), Deal.risk_score >= 60)
-            .order_by(Deal.amount.desc())
-            .limit(5)
-        )
-    ).scalars().unique().all()
-    closing = (
-        await db.execute(
-            select(Deal)
-            .join(PipelineStage, Deal.stage_id == PipelineStage.id)
-            .where(PipelineStage.is_closed_won.is_(False), PipelineStage.is_closed_lost.is_(False), Deal.target_close_date <= today + timedelta(days=30))
-            .order_by(Deal.target_close_date)
-            .limit(5)
-        )
-    ).scalars().unique().all()
-    cooling = (await db.execute(select(Account).where(Account.health_score < 50).order_by(Account.health_score).limit(5))).scalars().unique().all()
+    uid = principal.id
+    task_q = select(Task).where(Task.completed.is_(False), Task.due_date.is_not(None), Task.due_date <= today + timedelta(days=1))
+    if principal.is_own_scope("tasks") or not principal.can("tasks", "read"):
+        task_q = task_q.where(or_(Task.owner_id == uid, Task.assignee_id == uid))
+    tasks = (await db.execute(task_q.order_by(Task.due_date).limit(8))).scalars().unique().all()
+    risky, closing, cooling = [], [], []
+    if principal.can("deals", "read"):
+        open_deals = principal.scope_deals(select(Deal).join(PipelineStage, Deal.stage_id == PipelineStage.id)
+                                           .where(PipelineStage.is_closed_won.is_(False), PipelineStage.is_closed_lost.is_(False)))
+        risky = (await db.execute(open_deals.where(Deal.risk_score >= 60).order_by(Deal.amount.desc()).limit(5))).scalars().unique().all()
+        closing = (await db.execute(open_deals.where(Deal.target_close_date <= today + timedelta(days=30))
+                                    .order_by(Deal.target_close_date).limit(5))).scalars().unique().all()
+    if principal.can("accounts", "read"):
+        cooling = (await db.execute(principal.scope_accounts(select(Account)).where(Account.health_score < 50)
+                                    .order_by(Account.health_score).limit(5))).scalars().unique().all()
 
     priorities: list[dict] = []
     for t in tasks:
@@ -286,9 +279,9 @@ def _headline(tasks: int, risky: int, closing: int) -> str:
 
 
 # ---- copilot Q&A ----------------------------------------------------------------
-async def ask(db: AsyncSession, question: str, account_id: uuid.UUID | None = None, deal_id: uuid.UUID | None = None) -> dict:
-    matches = await semantic_search(db, question, limit=6, account_id=account_id)
-    facts = await _structured_facts(db, question, account_id, deal_id)
+async def ask(db: AsyncSession, question: str, account_id: uuid.UUID | None = None, deal_id: uuid.UUID | None = None, principal=None) -> dict:
+    matches = await semantic_search(db, question, limit=6, account_id=account_id, principal=principal)
+    facts = await _structured_facts(db, question, account_id, deal_id, principal)
     if facts["text"]:
         # The question was answered from live pipeline data; only keep strongly related notes.
         matches = [m for m in matches if (m["similarity"] or 0) >= 0.35 or "keyword" in m.get("matched_by", [])]
@@ -312,12 +305,14 @@ async def ask(db: AsyncSession, question: str, account_id: uuid.UUID | None = No
     return {"answer": answer, "sources": matches, "engine": llm.provider_name() if answer and llm.provider_name() != "heuristic" else "heuristic"}
 
 
-async def _structured_facts(db: AsyncSession, question: str, account_id, deal_id) -> dict:
+async def _structured_facts(db: AsyncSession, question: str, account_id, deal_id, principal=None) -> dict:
     q = question.lower()
     lines: list[str] = []
     open_q = select(Deal).join(PipelineStage, Deal.stage_id == PipelineStage.id).where(
         PipelineStage.is_closed_won.is_(False), PipelineStage.is_closed_lost.is_(False)
     )
+    if principal is not None:
+        open_q = principal.scope_deals(open_q) if principal.can("deals", "read") else open_q.where(False)
     if account_id:
         open_q = open_q.where(Deal.account_id == account_id)
     if deal_id:
@@ -337,6 +332,8 @@ async def _structured_facts(db: AsyncSession, question: str, account_id, deal_id
         lines.append("Upcoming closes: " + ("; ".join(f"{d.title} on {d.target_close_date:%b %d} (${float(d.amount):,.0f})" for d in soon) or "none scheduled"))
     if re.search(r"champion|decision maker|buying committee|who ", q):
         stmt = select(Contact).where(Contact.buying_role.in_(["Champion", "Decision Maker", "Economic Buyer"]))
+        if principal is not None:
+            stmt = principal.scope_accounts(stmt, "contacts", Contact.account_id) if principal.can("contacts", "read") else stmt.where(False)
         if account_id:
             stmt = stmt.where(Contact.account_id == account_id)
         people = (await db.execute(stmt.limit(8))).scalars().all()

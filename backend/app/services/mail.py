@@ -134,34 +134,39 @@ async def sync_mailbox(db: AsyncSession, conn: MailboxConnection) -> dict:
     return {"status": "ok", "fetched": len(messages), "logged": created}
 
 
-async def send_email(db: AsyncSession, user: User, contact: Contact, subject: str, body: str, deal_id=None, in_reply_to: str | None = None) -> Activity:
-    allowed, why = can_contact(contact, "email")
-    if not allowed:
-        raise PermissionError(why)
+async def deliver(db: AsyncSession, user: User, to: str, subject: str, body: str, in_reply_to: str | None = None) -> tuple[str, bool]:
+    """Send through the user's connected mailbox (SMTP). Returns (Message-ID, delivered); without SMTP it's recorded only."""
     conn = (await db.execute(select(MailboxConnection).where(MailboxConnection.user_id == user.id, MailboxConnection.status != "disabled"))).scalars().first()
     msg = EmailMessage()
     msg["From"] = conn.email_address if conn else user.email
-    msg["To"] = contact.email
+    msg["To"] = to
     msg["Subject"] = subject
     msg["Message-ID"] = make_msgid(domain=(msg["From"].split("@")[-1] if "@" in msg["From"] else "cirra.local"))
     if in_reply_to:
         msg["In-Reply-To"] = msg["References"] = in_reply_to
     msg.set_content(body)
-    delivered = False
-    if conn and conn.smtp_host:
-        import asyncio
+    if not (conn and conn.smtp_host):
+        return str(msg["Message-ID"]), False
+    import asyncio
 
-        def _send():
-            with smtplib.SMTP(conn.smtp_host, conn.smtp_port or 587, timeout=30) as s:
-                s.starttls()
-                s.login(conn.username or conn.email_address, decrypt_secret(conn.secret_encrypted or ""))
-                s.send_message(msg)
+    def _send():
+        with smtplib.SMTP(conn.smtp_host, conn.smtp_port or 587, timeout=30) as s:
+            s.starttls()
+            s.login(conn.username or conn.email_address, decrypt_secret(conn.secret_encrypted or ""))
+            s.send_message(msg)
 
-        await asyncio.to_thread(_send)
-        delivered = True
+    await asyncio.to_thread(_send)
+    return str(msg["Message-ID"]), True
+
+
+async def send_email(db: AsyncSession, user: User, contact: Contact, subject: str, body: str, deal_id=None, in_reply_to: str | None = None) -> Activity:
+    allowed, why = can_contact(contact, "email")
+    if not allowed:
+        raise PermissionError(why)
+    message_id, delivered = await deliver(db, user, contact.email, subject, body, in_reply_to)
     act = Activity(account_id=contact.account_id, contact_id=contact.id, deal_id=deal_id, user_id=user.id, activity_type="email",
                    direction="outbound", subject=subject[:500], summary=f"{subject}: {body[:300]}", raw_text=body, sentiment="neutral",
-                   external_id=str(msg["Message-ID"]), thread_id=in_reply_to or str(msg["Message-ID"]),
+                   external_id=message_id, thread_id=in_reply_to or message_id,
                    source="email_sync" if delivered else "manual")
     db.add(act)
     await db.flush()

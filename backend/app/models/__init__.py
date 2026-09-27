@@ -29,7 +29,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.config import settings
 from app.core.database import Base
 
-USER_ROLES = ("super_admin", "sales_manager", "account_executive", "sdr", "auditor", "partner", "support_agent")
+USER_ROLES = ("super_admin", "sales_manager", "account_executive", "sdr", "auditor", "partner", "support_agent", "marketing")
 ACCOUNT_TIERS = ("SMB", "Mid-Market", "Enterprise")
 BUYING_ROLES = ("Champion", "Decision Maker", "Economic Buyer", "Blocker", "Evaluator", "Influencer")
 ACTIVITY_TYPES = ("meeting", "call", "note", "email", "system", "file", "document")
@@ -113,6 +113,7 @@ class Account(Base):
     credit_risk_score: Mapped[int | None] = mapped_column(Integer)
     credit_risk_band: Mapped[str | None] = mapped_column(String(10))
     credit_risk_factors: Mapped[dict] = mapped_column(JSONB, default=dict)
+    territory_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("territories.id", ondelete="SET NULL"))
     embedding = mapped_column(Vector(settings.embedding_dim), nullable=True)
     created_at: Mapped[datetime] = _created()
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -358,5 +359,8 @@ from app.models.success import *  # noqa: E402,F401,F403
 from app.models.partners import *  # noqa: E402,F401,F403
 from app.models.leads import *  # noqa: E402,F401,F403
 from app.models.orders import *  # noqa: E402,F401,F403
+from app.models.performance import *  # noqa: E402,F401,F403
+from app.models.marketing import *  # noqa: E402,F401,F403
+from app.models.developer import *  # noqa: E402,F401,F403
 
 import app.core.audit  # noqa: E402,F401  (registers the audit-trail flush listener)

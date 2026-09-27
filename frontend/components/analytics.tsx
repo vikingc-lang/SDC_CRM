@@ -17,7 +17,7 @@ import { api, errorMessage, get } from "@/lib/api";
 import { relativeDays } from "@/lib/utils";
 
 interface DashboardItem { id: string; name: string; description: string | null; visibility: "private" | "shared"; owner: string | null; tile_count: number; updated_at: string }
-const SOURCE_LABELS: Record<string, string> = { deals: "Opportunities", accounts: "Accounts", contacts: "Contacts", leads: "Leads", activities: "Activities", tasks: "Tasks", quotes: "Quotes", orders: "Orders", cases: "Cases" };
+const SOURCE_LABELS: Record<string, string> = { deals: "Opportunities", accounts: "Accounts", contacts: "Contacts", leads: "Leads", activities: "Activities", tasks: "Tasks", quotes: "Quotes", orders: "Orders", cases: "Cases", campaigns: "Campaigns" };
 
 function Visibility({ v }: { v: "private" | "shared" }) {
   return <Badge tone={v === "shared" ? "primary" : "neutral"}>{v === "shared" ? "Shared" : "Only me"}</Badge>;

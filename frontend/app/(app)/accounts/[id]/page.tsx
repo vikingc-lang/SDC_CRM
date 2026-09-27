@@ -60,6 +60,7 @@ export default function Account360Page() {
             <a href={`https://${account.domain}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:text-foreground">{account.domain}<ExternalLink className="h-3 w-3" /></a>
             <Badge tone="outline">{account.tier}</Badge>
             {account.industry && <span>{account.industry}</span>}
+            {account.territory && <span>territory {account.territory.name}</span>}
             {account.parent && <span>part of <Link className="text-foreground hover:underline" href={`/accounts/${account.parent.id}`}>{account.parent.name}</Link></span>}
             {account.owner && <span className="flex items-center gap-1.5"><Avatar name={account.owner.full_name} size={18} />{account.owner.full_name}</span>}
           </div>

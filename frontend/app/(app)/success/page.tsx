@@ -29,9 +29,11 @@ function churnTone(v: number) {
 
 export default function SuccessPage() {
   const [tab, setTab] = useState<"onboarding" | "churn" | "renewals">("onboarding");
+  const { can } = useMe();
+  const seesRenewals = can("contracts", "read");  // renewals are contracts; support agents read success but not contracts
   const onboarding = useQuery({ queryKey: ["success", "onboarding"], queryFn: () => get<OnboardingProject[]>("/success/onboarding") });
   const churn = useQuery({ queryKey: ["success", "churn"], queryFn: () => get<ChurnRow[]>("/success/churn") });
-  const renewals = useQuery({ queryKey: ["success", "renewals"], queryFn: () => get<Contract[]>("/success/renewals", { days: 180 }) });
+  const renewals = useQuery({ queryKey: ["success", "renewals"], queryFn: () => get<Contract[]>("/success/renewals", { days: 180 }), enabled: seesRenewals });
 
   const active = onboarding.data?.filter((p) => p.status !== "completed") ?? [];
   const atRisk = churn.data?.filter((c) => c.churn_risk >= 60) ?? [];
@@ -44,13 +46,15 @@ export default function SuccessPage() {
         <StatTile label="Active onboardings" value={String(active.length)} icon={<Rocket className="h-4 w-4" />}
           sub={`${active.reduce((a, p) => a + p.overdue, 0)} overdue milestone(s)`} />
         <StatTile label="Churn watchlist" value={String(atRisk.length)} icon={<AlertTriangle className="h-4 w-4" />} sub="customers at 60+ churn risk" />
-        <StatTile label="Renewals ≤ 180 days" value={String(renewals.data?.length ?? 0)} icon={<CalendarClock className="h-4 w-4" />} sub={`${fmtMoney(renewalAcv, "USD", true)} ACV up for renewal`} />
-        <StatTile label="Renewal deals opened" value={String(renewals.data?.filter((r) => r.renewal_deal_id).length ?? 0)} icon={<RefreshCw className="h-4 w-4" />} sub="auto-created 90–120 days out" />
+        {seesRenewals && <>
+          <StatTile label="Renewals ≤ 180 days" value={String(renewals.data?.length ?? 0)} icon={<CalendarClock className="h-4 w-4" />} sub={`${fmtMoney(renewalAcv, "USD", true)} ACV up for renewal`} />
+          <StatTile label="Renewal deals opened" value={String(renewals.data?.filter((r) => r.renewal_deal_id).length ?? 0)} icon={<RefreshCw className="h-4 w-4" />} sub="auto-created 90–120 days out" />
+        </>}
       </div>
       <Tabs value={tab} onChange={setTab} tabs={[
         { value: "onboarding", label: "Onboarding", count: onboarding.data?.length },
         { value: "churn", label: "Churn early warning", count: atRisk.length },
-        { value: "renewals", label: "Renewals", count: renewals.data?.length },
+        ...(seesRenewals ? [{ value: "renewals" as const, label: "Renewals", count: renewals.data?.length }] : []),
       ]} />
       {tab === "onboarding" && <Onboarding projects={onboarding.data} loading={onboarding.isLoading} />}
       {tab === "churn" && <Churn rows={churn.data} loading={churn.isLoading} />}

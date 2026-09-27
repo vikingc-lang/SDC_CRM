@@ -26,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import (
     Account, Activity, AppSetting, AssignmentRule, Contact, Deal, DealStageHistory, EngagementEvent, Lead, Pipeline, PipelineStage, User,
 )
-from app.services import app_settings, enrichment, privacy, scoring
+from app.services import app_settings, enrichment, performance, privacy, scoring
 from app.services.dedup import find_account_duplicate, registrable_domain
 from app.services.notify import emit, notify
 
@@ -311,6 +311,9 @@ async def capture(db: AsyncSession, data: dict, *, source: str, campaign: str | 
     lead.duplicate_matches = await find_duplicates(db, lead)
     if event_type:
         await add_event(db, lead, event_type, event_detail or campaign, source=source, cfg=cfg)
+    from app.services import campaigns
+
+    await campaigns.attach_capture(db, lead)
     became_mql = await rescore(db, lead, cfg)
     routed = await route(db, lead)
     if became_mql and lead.owner_id and not routed.get("rule"):
@@ -400,6 +403,7 @@ async def convert(db: AsyncSession, lead: Lead, user: User, *, account_id: uuid.
                           annual_revenue=lead.annual_revenue, country=lead.country, region=lead.region, tier=_tier(lead.employee_count),
                           owner_id=owner_id, lifecycle_stage="prospect", custom_metadata={"source": f"lead:{lead.source}"})
         db.add(account)
+        await performance.assign(db, account)
         await db.flush()
 
     # Contact: explicit, else same email, else new

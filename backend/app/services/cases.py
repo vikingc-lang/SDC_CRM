@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.rbac import Principal
 from app.models import Account, CaseComment, Contact, KbArticle, SupportQueue, SupportTicket, User
 from app.services import app_settings, scoring
-from app.services.notify import notify
+from app.services.notify import emit, notify
 
 PRIORITIES = ("critical", "high", "medium", "low")
 STATUSES = ("open", "pending", "resolved", "closed")
@@ -81,6 +81,8 @@ async def create(db: AsyncSession, data: dict, actor: User | None) -> SupportTic
     await db.flush()
     notify(db, [case.owner_id] if case.owner_id and (actor is None or case.owner_id != actor.id) else [], "case",
            f"{case.case_number} assigned to you: {case.subject}", None, f"/cases/{case.id}")
+    emit(db, "case.created", "case", case.id, {"case_id": str(case.id), "case_number": case.case_number, "account_id": str(case.account_id),
+                                               "subject": case.subject, "priority": case.severity, "channel": case.channel})
     await scoring.rescore_account(db, case.account_id)
     return case
 
@@ -111,6 +113,8 @@ async def update(db: AsyncSession, case: SupportTicket, data: dict) -> SupportTi
         if new in ("resolved", "closed") and case.status in OPEN:
             case.resolved_at = now
             case.csat_token = case.csat_token or secrets.token_urlsafe(24)
+            emit(db, "case.resolved", "case", case.id, {"case_id": str(case.id), "case_number": case.case_number,
+                                                        "account_id": str(case.account_id), "status": new})
         if new in OPEN and case.status in ("resolved", "closed"):
             case.resolved_at = None  # reopened
         case.status = new

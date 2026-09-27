@@ -26,6 +26,8 @@ celery_app.conf.beat_schedule = {
     "reindex": _every("reindex", crontab(hour=4, minute=0)),                   # pillar 6: vector memory hygiene
     "workflows": _every("workflows", crontab(minute=5)),                       # scheduled workflow rules, hourly
     "case-sla": _every("case_sla", crontab(minute="*/10")),                   # service: SLA breach alerts
+    "territories": _every("territories", crontab(hour=2, minute=30)),          # nightly territory realignment
+    "webhooks": _every("webhooks", crontab()),                                 # signed webhook fan-out and retries, every minute
 }
 
 

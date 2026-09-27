@@ -70,6 +70,7 @@ async def create_rule(body: RuleIn, db: AsyncSession = Depends(get_db), p: Princ
     r = WorkflowRule(**body.model_dump(), created_by=p.id)
     db.add(r)
     await db.commit()
+    await db.refresh(r)  # server-set timestamps are expired after commit
     workflows.invalidate_cache()
     return _out(r, {p.id: p.user.full_name})
 
@@ -86,6 +87,7 @@ async def update_rule(rule_id: uuid.UUID, body: RuleIn, db: AsyncSession = Depen
     for k, v in body.model_dump().items():
         setattr(r, k, v)
     await db.commit()
+    await db.refresh(r)  # updated_at is set by the database on update
     workflows.invalidate_cache()
     return _out(r)
 
@@ -96,6 +98,7 @@ async def toggle(rule_id: uuid.UUID, db: AsyncSession = Depends(get_db), p: Prin
     r.enabled = not r.enabled
     log_action(db, "workflow_on" if r.enabled else "workflow_off", "workflow_rules", r.id, r.name)
     await db.commit()
+    await db.refresh(r)  # updated_at is set by the database on update
     workflows.invalidate_cache()
     return _out(r)
 
