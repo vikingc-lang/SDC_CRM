@@ -12,8 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit import log_action
 from app.core.database import get_db
 from app.core.rbac import Principal, authorize
-from app.models import Dashboard, SavedReport, User
-from app.services import reporting
+from app.models import Dashboard, ReportSubscription, SavedReport, User
+from app.services import mailer, reporting, subscriptions
 from app.services.reporting import ReportError
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
@@ -34,6 +34,15 @@ class DashFilterIn(BaseModel):
 class DrillIn(DashFilterIn):
     definition: dict | None = None  # ad-hoc report (omit for a saved one)
     values: list = Field(default_factory=list, max_length=2)  # one value per grouping, as shown in the result
+
+
+class SubscriptionIn(BaseModel):
+    frequency: Literal["daily", "weekly", "monthly"]
+    weekday: int = Field(default=0, ge=0, le=6)          # weekly: 0 = Monday
+    day_of_month: int = Field(default=1, ge=1, le=28)    # monthly
+    hour: int = Field(default=7, ge=0, le=23)            # UTC
+    recipient_ids: list[uuid.UUID] = Field(default_factory=list, max_length=subscriptions.MAX_RECIPIENTS)
+    active: bool = True
 
 
 class ReportIn(BaseModel):
@@ -292,3 +301,82 @@ async def delete_dashboard(dashboard_id: uuid.UUID, db: AsyncSession = Depends(g
         raise HTTPException(403, "Only the dashboard's owner can delete it")
     await db.delete(d)
     await db.commit()
+
+
+# ---- scheduled deliveries ------------------------------------------------------------------------
+
+def _sub_out(sub: ReportSubscription | None, report: SavedReport | None = None) -> dict | None:
+    if sub is None:
+        return None
+    out = {"id": sub.id, "report_id": sub.report_id, "frequency": sub.frequency, "weekday": sub.weekday, "day_of_month": sub.day_of_month,
+           "hour": sub.hour, "recipient_ids": [str(i) for i in sub.recipient_ids or []], "active": sub.active,
+           "last_sent_at": sub.last_sent_at, "last_status": sub.last_status}
+    if report is not None:
+        out["report_name"] = report.name
+    return out
+
+
+async def _my_sub(db: AsyncSession, p: Principal, report_id: uuid.UUID) -> ReportSubscription | None:
+    return (await db.execute(select(ReportSubscription).where(ReportSubscription.report_id == report_id,
+                                                              ReportSubscription.user_id == p.id))).scalar_one_or_none()
+
+
+@router.get("/subscriptions")
+async def list_subscriptions(db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("reports", "read"))):
+    rows = (await db.execute(select(ReportSubscription, SavedReport).join(SavedReport, SavedReport.id == ReportSubscription.report_id)
+                             .where(ReportSubscription.user_id == p.id).order_by(SavedReport.name))).all()
+    return {"subscriptions": [_sub_out(s, r) for s, r in rows], "email_enabled": mailer.configured()}
+
+
+@router.get("/reports/{report_id}/subscription")
+async def get_subscription(report_id: uuid.UUID, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("reports", "read"))):
+    await _report(db, p, report_id)
+    return {"subscription": _sub_out(await _my_sub(db, p, report_id)), "email_enabled": mailer.configured()}
+
+
+@router.put("/reports/{report_id}/subscription")
+async def put_subscription(report_id: uuid.UUID, body: SubscriptionIn, db: AsyncSession = Depends(get_db),
+                           p: Principal = Depends(authorize("reports", "read"))):
+    """Subscribe (or change the schedule). Extra recipients must be active colleagues, and only for a shared report:
+    each of them receives the report run with their own access."""
+    r = await _report(db, p, report_id)
+    others = list(dict.fromkeys(i for i in body.recipient_ids if i != p.id))
+    if others:
+        if r.visibility != "shared":
+            raise HTTPException(422, "Share the report before sending it to other people")
+        found = (await db.execute(select(User).where(User.id.in_(others), User.is_active.is_(True), User.role != "partner"))).scalars().all()
+        if len(found) != len(others):
+            raise HTTPException(422, "Recipients must be active internal users")
+    sub = await _my_sub(db, p, report_id)
+    if sub is None:
+        sub = ReportSubscription(report_id=report_id, user_id=p.id)
+        db.add(sub)
+    sub.frequency, sub.weekday, sub.day_of_month, sub.hour = body.frequency, body.weekday, body.day_of_month, body.hour
+    sub.recipient_ids, sub.active = [str(i) for i in others], body.active
+    await db.commit()
+    await db.refresh(sub)
+    return {"subscription": _sub_out(sub), "email_enabled": mailer.configured()}
+
+
+@router.delete("/reports/{report_id}/subscription", status_code=204)
+async def delete_subscription(report_id: uuid.UUID, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("reports", "read"))):
+    sub = await _my_sub(db, p, report_id)
+    if sub is not None:
+        await db.delete(sub)
+        await db.commit()
+
+
+@router.post("/reports/{report_id}/subscription/send")
+async def send_subscription_now(report_id: uuid.UUID, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("reports", "read"))):
+    """Deliver a copy now to the subscriber only (to check what the schedule will send; colleagues are never
+    messaged on demand). Doesn't move the regular schedule forward."""
+    await _report(db, p, report_id)
+    sub = await _my_sub(db, p, report_id)
+    if sub is None:
+        raise HTTPException(404, "Subscribe to this report first")
+    await reporting.refresh_custom_fields(db)
+    keep = sub.last_sent_at
+    status = await subscriptions.deliver(db, sub, only=p.id)
+    sub.last_sent_at = keep  # a manual send is extra: the next scheduled delivery still happens
+    await db.commit()
+    return {"status": status}

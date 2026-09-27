@@ -17,6 +17,7 @@ import { EmptyState, Skeleton } from "@/components/ui/misc";
 import { api, errorMessage, get } from "@/lib/api";
 import { useMe } from "@/lib/me";
 import { BulkBar, RowBox, SelectAllBox, useSelection } from "@/components/bulk";
+import { ListViewPicker, useListView, ViewGrid } from "@/components/listviews";
 import type { AccountListItem } from "@/lib/types";
 import { relativeDays } from "@/lib/utils";
 
@@ -36,6 +37,7 @@ export default function CasesPage() {
   const s = stats.data;
   const sel = useSelection((list.data ?? []).map((c) => c.id));
   const bulk = can("cases", "update");
+  const lv = useListView("cases");
   return (
     <div className="mx-auto max-w-7xl">
       <PageHeader title="Service" description="Customer cases with SLA clocks, queues and a shared knowledge base."
@@ -46,6 +48,8 @@ export default function CasesPage() {
         <StatTile label="SLA breached" value={s ? String(s.breached) : "…"} sub="open cases past a target" />
         <StatTile label="CSAT, last 30 days" value={s?.csat_30d != null ? `${s.csat_30d.toFixed(1)} / 5` : "—"} sub={s ? `${s.csat_responses_30d} response${s.csat_responses_30d === 1 ? "" : "s"}` : undefined} />
       </div>
+      <ListViewPicker lv={lv} className="mb-3 flex-wrap" />
+      {lv.view ? <ViewGrid lv={lv} /> : (<>
       <Tabs value={view} onChange={setView} tabs={[
         { value: "open", label: "All open" }, { value: "mine", label: "Mine" }, { value: "unassigned", label: "Unassigned" },
         { value: "breached", label: "Breached" }, { value: "resolved", label: "Resolved" }, { value: "all", label: "Everything" }]} />
@@ -80,6 +84,7 @@ export default function CasesPage() {
           </Table>
         )}
       </Card>
+      </>)}
       {meta.data && <NewCaseDialog open={creating} onClose={() => setCreating(false)} meta={meta.data} />}
     </div>
   );

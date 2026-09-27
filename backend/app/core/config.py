@@ -65,6 +65,14 @@ class Settings(BaseSettings):
     esign_api_token: str | None = None
     esign_webhook_secret: str | None = None   # shared secret expected in the provider callback header
 
+    # System mail (scheduled report emails). Unset host: deliveries are in-app notifications only.
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_user: str | None = None
+    smtp_password: str | None = None
+    smtp_from: str = "cirra@localhost"
+    smtp_starttls: bool = True
+
     # 'hash' (offline feature-hashing) | 'ollama' | 'aws_bedrock'
     embedding_provider: Literal["hash", "ollama", "aws_bedrock"] = "hash"
     embedding_dim: int = 1536

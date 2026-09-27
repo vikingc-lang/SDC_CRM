@@ -15,6 +15,7 @@ import { Avatar, EmptyState, Skeleton } from "@/components/ui/misc";
 import { get } from "@/lib/api";
 import { useMe } from "@/lib/me";
 import { BulkBar, RowBox, SelectAllBox, useSelection } from "@/components/bulk";
+import { ListViewPicker, useListView, ViewGrid } from "@/components/listviews";
 import type { AccountListItem } from "@/lib/types";
 import { cn, money, relativeDays } from "@/lib/utils";
 
@@ -38,6 +39,7 @@ export default function AccountsPage() {
   const { can } = useMe();
   const sel = useSelection(rows.map((a) => a.id));
   const bulk = can("accounts", "update");
+  const lv = useListView("accounts");
 
   const Th = ({ k, children, className }: { k: SortKey; children: React.ReactNode; className?: string }) => (
     <th className={cn("px-4 py-2.5 font-medium", className)}>
@@ -51,6 +53,8 @@ export default function AccountsPage() {
   return (
     <div className="mx-auto max-w-7xl">
       <PageHeader title="Accounts" description={data ? `${data.length} accounts` : undefined} actions={<Button size="sm" onClick={() => setCreating(true)}><Plus className="h-4 w-4" />New account</Button>} />
+      <ListViewPicker lv={lv} className="mb-3 flex-wrap" />
+      {lv.view ? <ViewGrid lv={lv} /> : (<>
       <div className="relative mb-4 w-full sm:w-72">
         <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-subtle" />
         <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, domain, industry" className="pl-8" aria-label="Search accounts" />
@@ -103,6 +107,7 @@ export default function AccountsPage() {
         </div>
         {!isLoading && rows.length === 0 && <EmptyState icon={<Building2 className="h-4 w-4" />} title="No accounts found" description="Create one, or log a conversation with ⌘K and Cirra will create it for you." />}
       </Card>
+      </>)}
       <NewAccountDialog open={creating} onOpenChange={setCreating} />
     </div>
   );

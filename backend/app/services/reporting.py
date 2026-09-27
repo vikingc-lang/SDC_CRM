@@ -443,6 +443,45 @@ def _period(name: str, today: date) -> tuple[date, date]:
     return table[name]
 
 
+_UNIT = {"today": "day", "yesterday": "day", "this_week": "week", "last_week": "week", "this_month": "month", "last_month": "month",
+         "this_quarter": "quarter", "last_quarter": "quarter", "next_quarter": "quarter", "this_year": "year", "last_year": "year"}
+_PREV_LABEL = {"today": "yesterday", "yesterday": "the day before", "this_week": "last week", "this_month": "last month",
+               "this_quarter": "last quarter", "next_quarter": "this quarter", "this_year": "last year"}
+
+
+def previous_range(name: str, today: date) -> tuple[date, date, str]:
+    """The period immediately before a relative period, as (inclusive start, exclusive end, label). Calendar periods
+    step back one calendar unit (this month -> last month, whatever its length); rolling windows step back by
+    their own length (last 30 days -> the 30 days before that)."""
+    s, e = _period(name, today)
+    unit = _UNIT.get(name)
+    if unit is None:
+        n = (e - s).days
+        return s - timedelta(days=n), s, f"previous {n} days"
+    if unit in ("day", "week"):
+        step = timedelta(days=1 if unit == "day" else 7)
+        return s - step, s, _PREV_LABEL.get(name, f"previous {unit}")
+    m = s.month - 1 - {"month": 1, "quarter": 3, "year": 12}[unit]
+    return date(s.year + m // 12, m % 12 + 1, 1), s, _PREV_LABEL.get(name, f"previous {unit}")
+
+
+def _compare_filter(filters: list[dict]) -> int | None:
+    """Index of the relative-date filter a comparison shifts: the last one (a dashboard's period comes last)."""
+    idx = [i for i, f in enumerate(filters or []) if f.get("op") == "within"]
+    return idx[-1] if idx else None
+
+
+def previous_period_definition(defn: dict, today: date | None = None) -> tuple[dict, dict]:
+    filters = list(defn.get("filters") or [])
+    i = _compare_filter(filters)
+    if i is None:
+        raise ReportError("Comparing to the previous period needs a relative date filter, e.g. Created within this quarter")
+    start, end, label = previous_range(str(filters[i].get("value")), today or date.today())
+    filters[i] = {**filters[i], "op": "between", "value": [start.isoformat(), (end - timedelta(days=1)).isoformat()]}
+    prev = {k: v for k, v in defn.items() if k != "compare"}
+    return {**prev, "filters": filters}, {"label": label, "start": start.isoformat(), "end": (end - timedelta(days=1)).isoformat()}
+
+
 def _as_date(v) -> date:
     try:
         return v if isinstance(v, date) else date.fromisoformat(str(v)[:10])
@@ -530,6 +569,15 @@ def validate(defn: dict) -> dict:
     for flt in defn.get("filters") or []:
         if flt.get("field") not in src.fields:
             raise ReportError(f"Unknown filter field '{flt.get('field')}'")
+    if defn.get("compare"):
+        if defn["compare"] != "previous_period":
+            raise ReportError("Compare must be 'previous_period'")
+        if not (groups or defn.get("measures")):
+            raise ReportError("Only summaries can be compared with the previous period")
+        if any(src.fields[g["field"]].type == "date" for g in groups):
+            raise ReportError("Can't compare with the previous period while grouping by a date")
+        if _compare_filter(defn.get("filters") or []) is None:
+            raise ReportError("Comparing to the previous period needs a relative date filter, e.g. Created within this quarter")
     return defn
 
 
@@ -609,6 +657,10 @@ async def run(db: AsyncSession, p: Principal, defn: dict) -> dict:
     if defn.get("with_ids") and not (groups or measures) and src.id_col is not None:
         out["ids"] = [r.pop() for r in data]  # the trailing _id column
         out["link"] = LINKS.get(src.key)
+    if defn.get("compare") and (groups or measures):
+        prev_defn, window = previous_period_definition(defn)
+        prev = await run(db, p, prev_defn)
+        out["comparison"] = {**window, "rows": prev["rows"], "truncated": prev["truncated"]}
     return out
 
 

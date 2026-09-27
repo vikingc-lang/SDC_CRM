@@ -128,6 +128,13 @@ async def job_workflows() -> None:
         await workflows.run_scheduled(db)
 
 
+async def job_report_subscriptions() -> None:
+    from app.services import subscriptions
+
+    async with SessionLocal() as db:
+        await subscriptions.deliver_due(db)
+
+
 JOBS = {
     "embed_activity": job_embed_activity,
     "rescore_account": job_rescore_account,
@@ -147,6 +154,7 @@ JOBS = {
     "case_sla": job_case_sla,
     "territories": job_territories,
     "webhooks": job_webhooks,
+    "report_subscriptions": job_report_subscriptions,
 }
 
 

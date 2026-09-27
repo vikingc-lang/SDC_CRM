@@ -18,6 +18,7 @@ import { EmptyState, Skeleton } from "@/components/ui/misc";
 import { api, errorMessage, get } from "@/lib/api";
 import { useMe } from "@/lib/me";
 import { BulkBar, RowBox, SelectAllBox, useSelection } from "@/components/bulk";
+import { ListViewPicker, useListView, ViewGrid } from "@/components/listviews";
 import type { Lead } from "@/lib/types";
 import { relativeDays } from "@/lib/utils";
 
@@ -36,6 +37,7 @@ export default function LeadsPage() {
   const threshold = summary?.mql_threshold ?? 60;
   const sel = useSelection((data ?? []).map((l) => l.id));
   const bulk = can("leads", "update") || can("campaigns", "update");
+  const lv = useListView("leads");
   const top = Math.max(1, ...FUNNEL.map(([k]) => summary?.by_status[k] ?? 0));
 
   return (
@@ -62,6 +64,8 @@ export default function LeadsPage() {
         </p>
       )}
 
+      <ListViewPicker lv={lv} className="mb-3 flex-wrap" />
+      {lv.view ? <ViewGrid lv={lv} /> : (<>
       <div className="flex flex-wrap items-end gap-3">
         <Tabs className="mb-0 flex-1" value={tab} onChange={setTab} tabs={[{ value: "open", label: "Open" }, { value: "mql", label: "MQL" },
           { value: "sql", label: "SQL" }, { value: "converted", label: "Converted" }, { value: "disqualified", label: "Disqualified" }, { value: "all", label: "All" }]} />
@@ -101,6 +105,7 @@ export default function LeadsPage() {
           </Table>
         )}
       </Card>
+      </>)}
       <NewLeadDialog open={open} onOpenChange={setOpen} />
     </div>
   );

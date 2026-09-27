@@ -12,6 +12,7 @@ __all__ = [
     "RolePermission", "AuditLog", "CustomFieldDefinition", "MergeLog", "DedupDismissal", "SubjectKey",
     "ConsentEvent", "ErasureLog", "Notification", "Attachment", "MailboxConnection", "DealAlert", "FxRate",
     "IntegrationEvent", "ErpSyncRun", "SsoLoginState", "SavedReport", "Dashboard", "WorkflowRule", "WorkflowRun", "ForecastSubmission", "ForecastAdjustment",
+    "ListView", "ReportSubscription",
 ]
 
 
@@ -325,3 +326,37 @@ class ForecastAdjustment(Base):
     best_case_amount: Mapped[float] = mapped_column(Numeric(15, 2))
     note: Mapped[str | None] = mapped_column(Text)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class ListView(Base):
+    """A saved way of looking at a list: columns, filters and sort over one report source."""
+    __tablename__ = "list_views"
+
+    id: Mapped[uuid.UUID] = _pk()
+    source: Mapped[str] = mapped_column(String(30))
+    name: Mapped[str] = mapped_column(String(120))
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    visibility: Mapped[str] = mapped_column(String(10), default="private")
+    columns: Mapped[list] = mapped_column(JSONB, default=list)
+    filters: Mapped[list] = mapped_column(JSONB, default=list)
+    sort: Mapped[dict] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class ReportSubscription(Base):
+    """A saved report delivered on a schedule (UTC) to its subscriber and optional extra recipients."""
+    __tablename__ = "report_subscriptions"
+
+    id: Mapped[uuid.UUID] = _pk()
+    report_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("saved_reports.id", ondelete="CASCADE"))
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    recipient_ids: Mapped[list] = mapped_column(JSONB, default=list)
+    frequency: Mapped[str] = mapped_column(String(10))
+    weekday: Mapped[int] = mapped_column(Integer, default=0)
+    day_of_month: Mapped[int] = mapped_column(Integer, default=1)
+    hour: Mapped[int] = mapped_column(Integer, default=7)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_status: Mapped[str | None] = mapped_column(String(200))
+    created_at: Mapped[datetime] = _ts()

@@ -14,6 +14,7 @@ import { Avatar, EmptyState, Skeleton } from "@/components/ui/misc";
 import { get } from "@/lib/api";
 import { useMe } from "@/lib/me";
 import { BulkBar, RowBox, SelectAllBox, useSelection } from "@/components/bulk";
+import { ListViewPicker, useListView, ViewGrid } from "@/components/listviews";
 import type { Contact } from "@/lib/types";
 
 export default function ContactsPage() {
@@ -28,10 +29,13 @@ export default function ContactsPage() {
   const { can } = useMe();
   const sel = useSelection((data ?? []).map((c) => c.id));
   const bulk = can("campaigns", "update");
+  const lv = useListView("contacts");
 
   return (
     <div className="mx-auto max-w-7xl">
       <PageHeader title="Contacts" description="Everyone on every buying committee" actions={<Button size="sm" onClick={() => setCreating(true)}><Plus className="h-4 w-4" />New contact</Button>} />
+      <ListViewPicker lv={lv} className="mb-3 flex-wrap" />
+      {lv.view ? <ViewGrid lv={lv} /> : (<>
       <div className="mb-4 flex flex-wrap gap-2">
         <div className="relative w-full sm:w-72">
           <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-subtle" />
@@ -78,6 +82,7 @@ export default function ContactsPage() {
         </div>
         {data?.length === 0 && <EmptyState icon={<Users className="h-4 w-4" />} title="No contacts match" />}
       </Card>
+      </>)}
       <NewContactDialog open={creating} onOpenChange={setCreating} />
     </div>
   );

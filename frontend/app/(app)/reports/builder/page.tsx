@@ -8,6 +8,7 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { FilterRow, IconX, NO_VALUE } from "@/components/filters";
 import { type DrillRequest, DrillDialog } from "@/components/drill";
+import { SubscribeButton } from "@/components/subscribe";
 import { CHART_LABELS, type ChartType, type Definition, effectiveChart, ReportViz, ResultTable, type RResult, type SavedReport } from "@/components/reportviz";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -96,6 +97,7 @@ function Builder() {
             <Button variant="outline" size="sm" onClick={() => downloadFile(`/analytics/reports/${reportId}/export`, `${saved.data!.name}.csv`).catch((e) => toast.error(errorMessage(e)))}><Download className="h-3.5 w-3.5" />Export CSV</Button>
           )}
           {saved.data?.can_edit && <Button variant="ghost" size="sm" loading={del.isPending} onClick={() => del.mutate()}><Trash2 className="h-3.5 w-3.5" />Delete</Button>}
+          {saved.data && <SubscribeButton reportId={saved.data.id} shared={saved.data.visibility === "shared"} />}
           {saved.data && <Button variant="outline" size="sm" onClick={() => setSaveOpen("copy")}><Copy className="h-3.5 w-3.5" />Save as copy</Button>}
           {(!saved.data || saved.data.can_edit) && <Button size="sm" onClick={() => setSaveOpen("save")}><Save className="h-3.5 w-3.5" />Save</Button>}
         </div>
@@ -117,7 +119,7 @@ function Builder() {
                 <button key={k} type="button" role="radio" aria-checked={(k === "summary") === summary}
                   className={cn("rounded px-2 py-1.5", (k === "summary") === summary ? "bg-surface font-medium shadow-sm" : "text-muted-foreground")}
                   onClick={() => set(k === "summary" ? { columns: undefined, group_by: defaultDef(src).group_by, measures: defaultDef(src).measures, sort: undefined, chart: { type: "bar" } }
-                    : { columns: src.default_columns, group_by: undefined, measures: undefined, sort: undefined, chart: { type: "table" } })}>{l}</button>
+                    : { columns: src.default_columns, group_by: undefined, measures: undefined, sort: undefined, chart: { type: "table" }, compare: undefined })}>{l}</button>
               ))}
             </div>
 
@@ -181,6 +183,15 @@ function Builder() {
               {(def.filters ?? []).map((f, k) => <FilterRow key={k} f={f} src={src} periods={cat.data!.periods}
                 onChange={(nf) => { const fs = [...def.filters!]; fs[k] = nf; set({ filters: fs }); }} onRemove={() => set({ filters: def.filters!.filter((_, j) => j !== k) })} />)}
               <AddButton onClick={() => { const f = src.fields[0]; set({ filters: [...(def.filters ?? []), { field: f.key, op: f.ops[0], value: "" }] }); }}>Add filter</AddButton>
+              {summary && (
+                <label className="flex items-start gap-2 pt-1 text-[13px]">
+                  <input type="checkbox" className="mt-0.5 h-4 w-4" checked={def.compare === "previous_period"}
+                    disabled={!def.compare && (!(def.filters ?? []).some((f) => f.op === "within") || (def.group_by ?? []).some((g) => field(g.field)?.type === "date"))}
+                    onChange={(e) => set({ compare: e.target.checked ? "previous_period" : undefined })} />
+                  <span>Compare with the previous period
+                    <span className="block text-[12px] text-subtle">Needs an “in period” date filter (e.g. Created in this quarter); not with date groupings.</span></span>
+                </label>
+              )}
             </Section>
 
             <Section title="Sort">

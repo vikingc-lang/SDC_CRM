@@ -28,6 +28,7 @@ celery_app.conf.beat_schedule = {
     "case-sla": _every("case_sla", crontab(minute="*/10")),                   # service: SLA breach alerts
     "territories": _every("territories", crontab(hour=2, minute=30)),          # nightly territory realignment
     "webhooks": _every("webhooks", crontab()),                                 # signed webhook fan-out and retries, every minute
+    "report-subscriptions": _every("report_subscriptions", crontab(minute=0)),  # scheduled report deliveries, hourly
 }
 
 

@@ -13,12 +13,16 @@ export type ChartType = "table" | "bar" | "column" | "line" | "stacked" | "matri
 /** Called with one value per grouping when a bar, point, segment, cell or summary row is clicked. */
 export type DrillFn = (values: unknown[], label: string) => void;
 export interface RCol { key: string; label: string; type: string; role: "dimension" | "measure" | "column"; bucket?: string | null }
-export interface RResult { source: string; source_label: string; columns: RCol[]; rows: unknown[][]; truncated: boolean; row_count: number; generated_at: string }
+/** The same summary over the previous period (same length, or the previous calendar unit). */
+export interface Comparison { label: string; start: string; end: string; rows: unknown[][]; truncated: boolean }
+export interface RResult {
+  source: string; source_label: string; columns: RCol[]; rows: unknown[][]; truncated: boolean; row_count: number; generated_at: string; comparison?: Comparison;
+}
 
 export interface Filter { field: string; op: string; value?: unknown }
 export interface Definition {
   source: string; columns?: string[]; group_by?: { field: string; bucket?: string }[]; measures?: { agg: string; field?: string }[];
-  filters?: Filter[]; sort?: { by: string; dir: "asc" | "desc" }; limit?: number; chart?: { type: ChartType };
+  filters?: Filter[]; sort?: { by: string; dir: "asc" | "desc" }; limit?: number; chart?: { type: ChartType }; compare?: "previous_period";
 }
 export interface SavedReport {
   id: string; name: string; description: string | null; source: string; definition: Definition; visibility: "private" | "shared";
@@ -150,14 +154,28 @@ function Tip({ children, style }: { children: React.ReactNode; style?: React.CSS
   return <div className="pointer-events-none absolute z-10 whitespace-nowrap rounded-md border bg-surface px-2.5 py-1.5 text-xs shadow-pop" style={style}>{children}</div>;
 }
 
+/** Change against the previous period, e.g. "▲ 12% vs last quarter (40)". Neutral colour: whether up is good depends on the measure. */
+export function Delta({ now, before, col, label }: { now: number; before: number; col: RCol; label: string }) {
+  const diff = now - before;
+  const pct = before ? Math.round((100 * diff) / Math.abs(before)) : null;
+  const arrow = diff > 0 ? "▲" : diff < 0 ? "▼" : "=";
+  return (
+    <span className="tabular text-[12.5px] text-muted-foreground" title={`Previous: ${fmtValue(before, col)}`}>
+      <span className="font-medium text-foreground">{arrow} {pct === null ? (diff ? "new" : "no change") : `${Math.abs(pct)}%`}</span> vs {label} ({fmtValue(before, col, true)})
+    </span>
+  );
+}
+
 function Headline({ result }: { result: RResult }) {
   const { i, col } = measure(result);
   const total = result.rows.reduce((s, r) => s + Number(r[i] ?? 0), 0);
   const others = result.columns.filter((c, j) => c.role === "measure" && j !== i);
+  const cmp = result.comparison;
   return (
     <div className="py-2">
       <div className="text-[34px] font-semibold leading-10 tracking-tight tabular">{fmtValue(total, col, true)}</div>
       <div className="mt-1 text-[12.5px] text-muted-foreground">{col.label}</div>
+      {cmp && <div className="mt-1"><Delta now={total} before={cmp.rows.reduce((s, r) => s + Number(r[i] ?? 0), 0)} col={col} label={cmp.label} /></div>}
       {others.map((c) => {
         const j = result.columns.indexOf(c);
         return <div key={c.key} className="mt-0.5 text-[12.5px] text-muted-foreground tabular">{c.label}: {fmtValue(result.rows.reduce((s, r) => s + Number(r[j] ?? 0), 0), c, true)}</div>;
@@ -404,13 +422,27 @@ export function ResultTable({ result, maxRows, onDrill }: { result: RResult; max
   const numeric = (c: RCol) => c.type === "money" || c.type === "number";
   const dimIdx = result.columns.map((c, j) => (c.role === "dimension" ? j : -1)).filter((j) => j >= 0);
   const drill = dimIdx.length ? onDrill : undefined;
+  // with a comparison: the first summary's previous-period value and change, matched on the grouping values
+  const cmp = result.comparison && dimIdx.length ? result.comparison : undefined;
+  const mi = result.columns.findIndex((c) => c.role === "measure");
+  const keyOf = (r: unknown[]) => JSON.stringify(dimIdx.map((j) => r[j]));
+  const prev = new Map((cmp?.rows ?? []).map((r) => [keyOf(r), Number(r[mi] ?? 0)]));
+  const head = [...result.columns.map((c) => <span key={c.key} className={cn(numeric(c) && "block text-right")}>{c.label}</span>),
+    ...(cmp && mi >= 0 ? [<span key="_prev" className="block text-right">{result.columns[mi].label}, {cmp.label}</span>, <span key="_chg" className="block text-right">Change</span>] : [])];
   return (
     <div>
-      <Table head={result.columns.map((c) => <span key={c.key} className={cn(numeric(c) && "block text-right")}>{c.label}</span>)} minWidth={Math.max(480, result.columns.length * 130)}>
+      <Table head={head} minWidth={Math.max(480, head.length * 130)}>
         {rows.map((r, k) => (
           <tr key={k} className={cn(drill && "cursor-pointer hover:bg-muted/50")} title={drill ? "Show these records" : undefined}
             onClick={drill ? () => drill(dimIdx.map((j) => r[j]), dimIdx.map((j) => fmtValue(r[j], result.columns[j])).join(" · ")) : undefined}>
             {result.columns.map((c, j) => <Td key={c.key} className={cn("text-[13px]", numeric(c) && "tabular text-right")}>{fmtValue(r[j], c)}</Td>)}
+            {cmp && mi >= 0 && (() => {
+              const before = prev.get(keyOf(r)) ?? 0, now = Number(r[mi] ?? 0), diff = now - before;
+              return <>
+                <Td className="tabular text-right text-[13px] text-muted-foreground">{fmtValue(before, result.columns[mi])}</Td>
+                <Td className="tabular text-right text-[13px]">{diff > 0 ? "▲ " : diff < 0 ? "▼ " : ""}{before ? `${Math.abs(Math.round((100 * diff) / Math.abs(before)))}%` : diff ? "new" : "—"}</Td>
+              </>;
+            })()}
           </tr>
         ))}
       </Table>

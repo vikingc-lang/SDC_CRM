@@ -26,6 +26,15 @@ ACTIONS = {
 }
 LEAD_STATUSES = ("new", "working", "recycled", "disqualified")
 TIERS = ("SMB", "Mid-Market", "Enterprise")
+CASE_STATUSES = ("open", "pending", "resolved", "closed")  # mirrors services.cases (imported lazily there)
+CASE_PRIORITIES = ("critical", "high", "medium", "low")
+# List-view columns that can be edited in place, and the bulk action (on a single id) that does it.
+INLINE = {
+    "leads": {"owner": {"action": "assign_owner", "kind": "user"}, "status": {"action": "set_status", "options": LEAD_STATUSES}},
+    "accounts": {"owner": {"action": "assign_owner", "kind": "user"}, "tier": {"action": "set_tier", "options": TIERS}},
+    "cases": {"owner": {"action": "assign_owner", "kind": "user"}, "status": {"action": "set_status", "options": CASE_STATUSES},
+              "priority": {"action": "set_priority", "options": CASE_PRIORITIES}},
+}
 
 
 class BulkError(ValueError):
