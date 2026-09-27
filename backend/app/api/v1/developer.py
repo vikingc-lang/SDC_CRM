@@ -2,30 +2,22 @@
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import log_action
 from app.core.database import get_db
-from app.core.rbac import Principal, authorize
+from app.core.rbac import Principal, authorize_person
 from app.models import ApiKey, User, WebhookDelivery, WebhookSubscription
 from app.services import developer as svc
 
 router = APIRouter(prefix="/developer", tags=["developer"])
 
 
-def _people_only(request: Request) -> None:
-    if getattr(request.state, "api_key_id", None):
-        raise HTTPException(403, "API keys can't manage API keys or webhooks")
-
-
 def admin(action: str):
-    async def _dep(request: Request, p: Principal = Depends(authorize("admin", action))) -> Principal:
-        _people_only(request)
-        return p
-    return _dep
+    return authorize_person("admin", action)
 
 
 class KeyIn(BaseModel):

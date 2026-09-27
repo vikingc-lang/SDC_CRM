@@ -313,7 +313,7 @@ async def capture(db: AsyncSession, data: dict, *, source: str, campaign: str | 
         await add_event(db, lead, event_type, event_detail or campaign, source=source, cfg=cfg)
     from app.services import campaigns
 
-    await campaigns.attach_capture(db, lead)
+    await campaigns.attach_capture(db, lead, campaign or fields.get("campaign"))
     became_mql = await rescore(db, lead, cfg)
     routed = await route(db, lead)
     if became_mql and lead.owner_id and not routed.get("rule"):

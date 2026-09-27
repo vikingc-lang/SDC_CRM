@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -12,7 +12,7 @@ from app.core.database import get_db
 from app.core.deps import bearer, get_current_user, human_user
 from app.core.rbac import ACTIONS, RESOURCES, Principal, get_principal, load_matrix
 from app.core.security import create_access_token, create_pending_token, decode_pending_token, verify_password
-from app.models import Partner, User
+from app.models import AuditLog, Partner, User
 from app.schemas.crm import LoginRequest, TokenResponse
 from app.services import identity
 from app.services.identity import IdentityError
@@ -20,6 +20,20 @@ from app.services.identity import IdentityError
 router = APIRouter(tags=["auth"])
 
 MFA_VERIFY, MFA_ENROLL = "mfa_verify", "mfa_enroll"
+# Brute-force protection, counted from the append-only audit trail (works across API processes, no extra table)
+LOCKOUT_WINDOW = timedelta(minutes=15)
+MFA_MAX_FAILURES = 5
+LOGIN_MAX_FAILURES = 10
+
+
+async def _recent_failures(db: AsyncSession, user_id: uuid.UUID, action: str) -> int:
+    since = datetime.now(timezone.utc) - LOCKOUT_WINDOW
+    return (await db.execute(select(func.count()).select_from(AuditLog).where(
+        AuditLog.record_id == user_id, AuditLog.action == action, AuditLog.created_at >= since))).scalar_one()
+
+
+def _locked(what: str) -> HTTPException:
+    return HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, f"Too many failed {what}. Wait 15 minutes and try again.")
 
 
 class CodeIn(BaseModel):
@@ -78,7 +92,13 @@ async def methods(db: AsyncSession = Depends(get_db)):
 @router.post("/auth/login", response_model=TokenResponse, response_model_exclude_none=True)
 async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
     user = (await db.execute(select(User).where(func.lower(User.email) == body.username.strip().lower()))).scalar_one_or_none()
+    if user is not None and await _recent_failures(db, user.id, "login_failed") >= LOGIN_MAX_FAILURES:
+        raise _locked("sign-in attempts")
     if user is None or not user.is_active or not verify_password(body.password, user.password_hash):
+        if user is not None:
+            current_user_id.set(user.id)
+            log_action(db, "login_failed", "users", user.id)
+            await db.commit()
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Incorrect email or password")
     pol = await identity.policy(db)
     if not identity.password_login_allowed(pol, user):
@@ -93,6 +113,8 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
 @router.post("/auth/mfa/verify", response_model=TokenResponse, response_model_exclude_none=True)
 async def mfa_verify(body: PendingCodeIn, db: AsyncSession = Depends(get_db)):
     user = await _pending_user(db, body.mfa_token, MFA_VERIFY)
+    if await _recent_failures(db, user.id, "mfa_failed") >= MFA_MAX_FAILURES:
+        raise _locked("two-factor codes")
     try:
         method = identity.verify_second_factor(user, body.code)
     except IdentityError as e:
@@ -114,9 +136,15 @@ async def _enrolling_user(db: AsyncSession, token: str | None, bearer_user: User
 
 
 async def _optional_user(request: Request, db: AsyncSession = Depends(get_db), creds=Depends(bearer)):
+    """The signed-in person, if any. A stale or revoked bearer (left in the browser after an MFA reset) counts as
+    no session rather than an error, so forced enrolment with an mfa_token still works."""
     if creds is None:
         return None
-    return await human_user(request, await get_current_user(request, creds, db))
+    try:
+        user = await get_current_user(request, creds, db)
+    except HTTPException:
+        return None
+    return await human_user(request, user)
 
 
 @router.post("/auth/mfa/enroll/start")

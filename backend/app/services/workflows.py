@@ -69,6 +69,9 @@ async def _deal_owner(db: AsyncSession, deal_id) -> uuid.UUID | None:
     return (await db.execute(select(Deal.owner_id).where(Deal.id == deal_id))).scalar() if deal_id else None
 
 
+ENTITY_TYPE = {"deals": "deal", "leads": "lead", "accounts": "account", "contacts": "contact", "activities": "activity",
+               "tasks": "task", "quotes": "quote", "orders": "order", "cases": "case"}
+
 ENTITIES: dict[str, Entity] = {
     "deals": Entity(Deal, "Opportunity",
                     {"stage": "stage_id", "owner": "owner_id", "amount": "amount", "close_date": "target_close_date", "risk_score": "risk_score",
@@ -258,12 +261,17 @@ async def execute(db: AsyncSession, rule: WorkflowRule, record_id, trigger: str,
                     if not (await db.execute(select(User.id).where(User.id == value, User.is_active.is_(True)))).first():
                         raise WorkflowError("The chosen user is inactive or deleted")
                 if not dry_run:
-                    setattr(obj, attr, value)
+                    if rule.source == "cases":  # through the case service: priority re-times SLAs, owner changes notify
+                        from app.services import cases as case_svc
+
+                        await case_svc.update(db, obj, {attr: value})
+                    else:
+                        setattr(obj, attr, value)
                 results.append({"action": kind, "ok": True, "detail": f"Set {a['field']}"})
             elif kind == "emit_event":
                 name = f"workflow.{a['event']}"
                 if not dry_run:
-                    emit(db, name, rule.source.rstrip("s"), record_id, {"workflow": rule.name, "record": values})
+                    emit(db, name, ENTITY_TYPE.get(rule.source, rule.source), record_id, {"workflow": rule.name, "record": values})
                 results.append({"action": kind, "ok": True, "detail": f"Emitted {name}"})
         except Exception as e:  # one failing action must not stop the others
             log.warning("Workflow %s action %s failed: %s", rule.id, kind, e)
@@ -368,12 +376,16 @@ async def _process(events: list[dict], depth: int, origin) -> None:
                     if await reporting.match_ids(db, r["source"], r["conditions"], [ev["id"]]):
                         matched.append((r["id"], ev["id"], ev["kind"]))
             for rule_id, record_id, kind in matched:
-                rule = await db.get(WorkflowRule, rule_id)
-                if rule is None or not rule.enabled:
-                    continue
-                db.info["wf_rule"] = rule.id
-                await execute(db, rule, record_id, kind)
-                await db.commit()
+                try:  # each rule commits on its own: one failure must not skip the others
+                    rule = await db.get(WorkflowRule, rule_id)
+                    if rule is None or not rule.enabled:
+                        continue
+                    db.info["wf_rule"] = rule.id
+                    await execute(db, rule, record_id, kind)
+                    await db.commit()
+                except Exception:
+                    await db.rollback()
+                    log.exception("Workflow rule %s failed on %s", rule_id, record_id)
     except Exception:  # never let automation break the request that triggered it
         log.exception("Workflow evaluation failed")
 
@@ -386,22 +398,24 @@ async def run_scheduled(db: AsyncSession) -> dict:
     db.info["wf_depth"] = 1
     for rule in [r for r in rules if r.trigger.get("type") == "schedule"]:
         stats["rules"] += 1
-        ids = await reporting.match_ids(db, rule.source, rule.conditions, limit=SCHEDULE_BATCH)
-        if not ids:
-            continue
-        done = select(WorkflowRun.record_id).where(WorkflowRun.rule_id == rule.id, WorkflowRun.record_id.in_(ids),
+        rule_id = rule.id
+        # records already handled (within the repeat window) are excluded in the query itself, so each batch is
+        # new work and matches beyond the first batch are reached on later runs
+        done = select(WorkflowRun.record_id).where(WorkflowRun.rule_id == rule_id, WorkflowRun.record_id.is_not(None),
                                                    WorkflowRun.status != "dry_run")
         rep = rule.trigger.get("repeat_after_days")
         if rep:
             done = done.where(WorkflowRun.created_at > func.now() - timedelta(days=rep))
-        already = set((await db.execute(done)).scalars())
-        db.info["wf_rule"] = rule.id
-        for rid in ids:
-            if rid in already:
-                continue
-            await execute(db, rule, rid, "schedule")
-            stats["actions_run"] += 1
-        await db.commit()
+        try:
+            ids = await reporting.match_ids(db, rule.source, rule.conditions, limit=SCHEDULE_BATCH, exclude=done)
+            db.info["wf_rule"] = rule_id
+            for rid in ids:
+                await execute(db, rule, rid, "schedule")
+                stats["actions_run"] += 1
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            log.exception("Scheduled workflow %s failed", rule_id)
     return stats
 
 

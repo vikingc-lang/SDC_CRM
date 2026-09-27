@@ -227,13 +227,14 @@ async def commit(db: AsyncSession, entity: str, content: bytes, filename: str, m
     try:
         async with db.begin_nested():
             if entity == "accounts":
+                territories = await performance.all_territories(db)  # load once for the whole file
                 for r in clean:
                     parent, owner = r.pop("parent_domain", None), r.pop("owner_email", None)
                     acc = refs.accounts.get(r["domain"])
                     if acc is None:
                         acc = Account(custom_metadata={}, owner_id=(owner or user).id, **{k: v for k, v in r.items() if v is not None})
                         db.add(acc)
-                        await performance.assign(db, acc)
+                        await performance.assign(db, acc, territories)
                         refs.accounts[r["domain"]] = acc
                         created += 1
                     else:

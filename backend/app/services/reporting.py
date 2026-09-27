@@ -14,7 +14,7 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Callable
 
-from sqlalchemy import Date, and_, case, cast, func, literal, not_, or_, select
+from sqlalchemy import Date, Numeric, and_, case, cast, func, literal, not_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -192,7 +192,7 @@ def _activities() -> Source:
         "direction": F("Direction", "enum", Activity.direction, ["inbound", "outbound", "internal"]),
         "disposition": F("Call outcome", "text", Activity.disposition),
         "source": F("Source", "text", Activity.source),
-        "duration_min": F("Duration (min)", "number", func.round(Activity.duration_seconds / 60.0, 1), groupable=False),
+        "duration_min": F("Duration (min)", "number", func.round(cast(Activity.duration_seconds / 60.0, Numeric), 1), groupable=False),
         "occurred": F("Occurred", "date", Activity.occurred_at),
     }
     base = lambda: (select().select_from(Activity).join(acct, acct.id == Activity.account_id)  # noqa: E731
@@ -303,8 +303,9 @@ def _campaigns() -> Source:
 
 def _cases() -> Source:
     acct, owner, queue = aliased(Account), aliased(User), aliased(SupportQueue)
-    first_resp_h = func.round(func.extract("epoch", SupportTicket.first_responded_at - SupportTicket.opened_at) / 3600.0, 1)
-    resolve_h = func.round(func.extract("epoch", SupportTicket.resolved_at - SupportTicket.opened_at) / 3600.0, 1)
+    # Postgres only has round(numeric, int): cast the epoch-seconds arithmetic before rounding to 0.1 h
+    first_resp_h = func.round(cast(func.extract("epoch", SupportTicket.first_responded_at - SupportTicket.opened_at) / 3600.0, Numeric), 1)
+    resolve_h = func.round(cast(func.extract("epoch", SupportTicket.resolved_at - SupportTicket.opened_at) / 3600.0, Numeric), 1)
     fields = {
         "case_number": F("Case #", "text", SupportTicket.case_number, groupable=False),
         "subject": F("Subject", "text", SupportTicket.subject, groupable=False),
@@ -556,8 +557,10 @@ def validate_filters(source: str, filters: list[dict]) -> None:
         _condition(f, flt.get("op", "eq"), flt.get("value"))  # raises on a bad operator or value
 
 
-async def match_ids(db: AsyncSession, source: str, filters: list[dict], ids: list | None = None, limit: int = 500) -> list:
-    """Ids of records that satisfy every filter (optionally only among ``ids``). Not scoped to a user."""
+async def match_ids(db: AsyncSession, source: str, filters: list[dict], ids: list | None = None, limit: int = 500,
+                    exclude=None) -> list:
+    """Ids of records that satisfy every filter (optionally only among ``ids``, and never those in the ``exclude``
+    subquery), in a stable order so successive batches make progress. Not scoped to a user."""
     src = SOURCES[source]
     stmt = src.base().add_columns(src.id_col)
     for flt in filters or []:
@@ -566,7 +569,9 @@ async def match_ids(db: AsyncSession, source: str, filters: list[dict], ids: lis
         if not ids:
             return []
         stmt = stmt.where(src.id_col.in_(ids))
-    return [r[0] for r in (await db.execute(stmt.limit(limit)))]
+    if exclude is not None:
+        stmt = stmt.where(src.id_col.not_in(exclude))
+    return [r[0] for r in (await db.execute(stmt.order_by(src.id_col).limit(limit)))]
 
 
 def _plain(v, f: F) -> str:

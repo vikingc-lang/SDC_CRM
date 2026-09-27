@@ -1,6 +1,8 @@
 // Browser E2E for the Cirra lead-to-order flow (62 checks, 12 journeys).
 // Needs the API on :8000 and the web app on :3000 with freshly seeded demo data, plus Playwright:
 //   npm i playwright && node e2e/lead-to-order.mjs ./e2e-output
+// The prospect is configurable, e.g. E2E_FIRST=Vedh E2E_LAST=DC E2E_COMPANY=Noviq E2E_DOMAIN=noviq-demo.com; set
+// E2E_CHANNEL=msedge (or chrome) to drive an installed browser instead of Playwright's bundled Chromium.
 import { chromium } from "playwright";
 import { mkdirSync, writeFileSync } from "fs";
 
@@ -19,7 +21,8 @@ const BASE = "http://localhost:3000", API = "http://localhost:8000/api/v1", PW =
 const RUN = Date.now().toString(36).slice(-5);
 const results = [];
 let current = "";
-const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" }).catch(() => chromium.launch());
+const browser = process.env.E2E_CHANNEL ? await chromium.launch({ channel: process.env.E2E_CHANNEL })
+  : await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" }).catch(() => chromium.launch());
 
 async function step(journey, name, fn, page) {
   const t0 = Date.now(); current = `${journey} › ${name}`;
@@ -57,7 +60,10 @@ const toast = (page, text) => page.locator("[data-sonner-toast]", { hasText: tex
 const moveTo = async (page, stage) => { await page.locator(`button[title="Move to ${stage}"]`).click(); };
 
 // ---------------------------------------------------------------------------------------------------------------
-const company = `Nordlicht Maschinenbau ${RUN}`, email = `anna.keller@nordlicht-${RUN}.de`;
+const FIRST = process.env.E2E_FIRST ?? "Anna", LAST = process.env.E2E_LAST ?? "Keller";
+const DOMAIN = process.env.E2E_DOMAIN ?? `nordlicht-${RUN}.de`;
+const company = process.env.E2E_COMPANY ?? `Nordlicht Maschinenbau ${RUN}`;
+const FULL = `${FIRST} ${LAST}`, email = `${FIRST}.${LAST}@${DOMAIN}`.toLowerCase().replace(/\s+/g, "");
 let leadId, dealId, quoteId, orderFormUrl, orderId;
 
 // J1 web form capture ---------------------------------------------------------------------------------------------
@@ -73,7 +79,7 @@ let leadId, dealId, quoteId, orderFormUrl, orderId;
     await q.getByText("This form is no longer available").waitFor(); await q.close();
   }, p);
   await step(J, "Prospect submits the form with consent", async () => {
-    await p.fill("#f-first_name", "Anna"); await p.fill("#f-last_name", "Keller"); await p.fill("#f-email", email);
+    await p.fill("#f-first_name", FIRST); await p.fill("#f-last_name", LAST); await p.fill("#f-email", email);
     await p.fill("#f-company_name", company); await p.fill("#f-job_title", "VP Operations"); await p.fill("#f-country", "Germany");
     await p.fill("#f-employee_count", "1200"); await p.fill("#f-message", "Need CPQ integrated with SAP");
     await p.getByLabel("I agree to receive product updates").check();
@@ -91,7 +97,7 @@ const mgr = await login("marcus@cirra.demo");
   const J = "2. Lead qualification & scoring"; const p = mgr.page;
   await step(J, "New lead appears in the Leads list", async () => {
     await p.goto(`${BASE}/leads`); await p.fill('input[placeholder="Name, email or company"]', company);
-    await p.getByRole("link", { name: "Anna Keller" }).click(); await p.waitForURL(/\/leads\/.+/);
+    await p.getByRole("link", { name: FULL }).click(); await p.waitForURL(/\/leads\/.+/);
     leadId = p.url().split("/").pop();
   }, p);
   await step(J, "Lead is normalised, enriched, consented and routed", async () => {
@@ -139,7 +145,7 @@ const mgr = await login("marcus@cirra.demo");
     await p.getByText("Enterprise Solution Sale").first().waitFor();
   }, p);
   await step(J, "Deal starts in Discovery with the lead history carried over", async () => {
-    await p.getByText(/Lead converted: Anna Keller/).first().waitFor();
+    await p.getByText(new RegExp(`Lead converted: ${FULL}`)).first().waitFor();
     await ev(p, "E07", "TC-10", "Opportunity created in Discovery, owned by Priya Raman");
     const r = await api(mgr.token, "GET", `/deals/${dealId}`);
     expect(r.data.stage === "Discovery", `stage ${r.data.stage}`); expect(r.data.owner.full_name === "Priya Raman", "owner not Priya");
@@ -165,7 +171,7 @@ const mgr = await login("marcus@cirra.demo");
   // test data: buying committee + meeting notes (the UI paths for these are covered by the pre-existing suite)
   const d = (await api(mgr.token, "GET", `/deals/${dealId}`)).data;
   for (const [first, role] of [["Jonas", "Champion"], ["Mia", "Evaluator"], ["Felix", "Legal Counsel"]])
-    await api(mgr.token, "POST", "/contacts", { account_id: d.account.id, first_name: first, last_name: "Keller", email: `${first.toLowerCase()}@nordlicht-${RUN}.de`, buying_role: role });
+    await api(mgr.token, "POST", "/contacts", { account_id: d.account.id, first_name: first, last_name: LAST, email: `${first.toLowerCase()}.${RUN}@${DOMAIN}`, buying_role: role });
   await api(mgr.token, "POST", "/activities", { account_id: d.account.id, deal_id: dealId, activity_type: "meeting", subject: "Solution workshop",
     summary: "Pain: manual quoting bottleneck. PoC scope agreed for SAP integration. Business case shows 11-month payback, budget approved." });
   await api(mgr.token, "PATCH", `/deals/${dealId}`, { target_close_date: new Date(Date.now() + 30 * 864e5).toISOString().slice(0, 10) });
@@ -293,7 +299,7 @@ const mgr = await login("marcus@cirra.demo");
   }, p);
   await step(J, "Customer signs from the public link", async () => {
     const c = await browser.newContext(); const s = await c.newPage(); await s.goto(BASE + links[0]);
-    await s.locator("#sig-name").fill("Anna Keller"); await s.getByRole("checkbox").last().check();
+    await s.locator("#sig-name").fill(FULL); await s.getByRole("checkbox").last().check();
     await ev(s, "E17", "TC-31", "Customer signs the Order Form from the public signing link", s.getByRole("button", { name: "Sign document" }));
     await s.getByRole("button", { name: "Sign document" }).click(); await s.getByText("your signature is recorded").waitFor(); await c.close();
   }, p);
@@ -439,7 +445,7 @@ const mgr = await login("marcus@cirra.demo");
   await step(J, "Auditor sees leads read-only (no New lead, no Convert)", async () => {
     await aud.page.goto(`${BASE}/leads`); await aud.page.getByRole("heading", { name: "Leads" }).waitFor();
     expect(await aud.page.getByRole("button", { name: "New lead" }).count() === 0, "New lead visible");
-    await aud.page.goto(`${BASE}/leads/${leadId}`); await aud.page.getByText("Anna Keller").first().waitFor();
+    await aud.page.goto(`${BASE}/leads/${leadId}`); await aud.page.getByText(FULL).first().waitFor();
     expect(await aud.page.getByRole("button", { name: "Convert" }).count() === 0, "Convert visible");
     await ev(aud.page, "E27", "TC-50", "Auditor: lead is read-only (no Convert, Disqualify or edit actions)");
   }, aud.page);

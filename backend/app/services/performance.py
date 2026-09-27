@@ -85,22 +85,29 @@ async def all_territories(db: AsyncSession) -> list[Territory]:
     return list((await db.execute(select(Territory))).scalars().all())
 
 
-async def assign(db: AsyncSession, account: Account) -> Territory | None:
-    """Stamp one account (on create / conversion). Leaves a manually chosen territory alone."""
+async def assign(db: AsyncSession, account: Account, territories: list[Territory] | None = None) -> Territory | None:
+    """Stamp one account (on create / conversion / import). Leaves a manually chosen territory alone.
+    Pass ``territories`` when assigning many accounts, to load them once. No autoflush: the account may be
+    pending, and its insert (with any unique-domain error) belongs to the caller's own flush."""
     if account.territory_id:
         return None
-    t = match(account, await all_territories(db))
+    with db.no_autoflush:
+        t = match(account, territories if territories is not None else await all_territories(db))
     account.territory_id = t.id if t else None
     return t
 
 
 async def realign(db: AsyncSession, apply: bool) -> dict:
+    """Recompute every account's territory. Reads only the matching columns (no ORM objects or relationships)
+    and writes one UPDATE per destination territory."""
     territories = await all_territories(db)
     names = {t.id: t.name for t in territories}
-    accounts = (await db.execute(select(Account).order_by(Account.name))).scalars().unique().all()
+    rows = (await db.execute(select(Account.id, Account.name, Account.region, Account.country, Account.industry, Account.tier,
+                                    Account.employee_count, Account.territory_id).order_by(Account.name))).all()
     changes, counts = [], {t.id: 0 for t in territories}
+    moves: dict = {}
     unassigned = 0
-    for a in accounts:
+    for a in rows:
         t = match(a, territories)
         new = t.id if t else None
         if new:
@@ -109,9 +116,10 @@ async def realign(db: AsyncSession, apply: bool) -> dict:
             unassigned += 1
         if new != a.territory_id:
             changes.append({"account_id": a.id, "account": a.name, "from": names.get(a.territory_id), "to": names.get(new)})
-            if apply:
-                a.territory_id = new
+            moves.setdefault(new, []).append(a.id)
     if apply:
+        for territory_id, ids in moves.items():
+            await db.execute(update(Account).where(Account.id.in_(ids)).values(territory_id=territory_id).execution_options(synchronize_session=False))
         await db.flush()
     return {"applied": apply, "changes": changes, "unassigned": unassigned,
             "by_territory": [{"id": tid, "name": names[tid], "accounts": n} for tid, n in counts.items()]}

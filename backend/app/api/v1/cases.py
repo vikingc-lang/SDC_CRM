@@ -203,6 +203,9 @@ async def get_case(case_id: uuid.UUID, db: AsyncSession = Depends(get_db), p: Pr
 async def patch_case(case_id: uuid.UUID, body: CasePatch, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("cases", "update"))):
     c = await _case(db, p, case_id)
     data = body.model_dump(exclude_unset=True)
+    cleared = [k for k in ("status", "severity", "subject", "channel") if k in data and data[k] is None]
+    if cleared:
+        raise HTTPException(422, f"{', '.join(cleared)} can't be empty")
     if "owner_id" in data:
         await _check_owner(db, data["owner_id"])
     if data.get("contact_id"):

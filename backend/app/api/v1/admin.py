@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import log_action
 from app.core.database import get_db
-from app.core.rbac import ACTIONS, RESOURCES, ROLE_LABELS, ROLES, Principal, authorize, invalidate_cache, load_matrix
+from app.core.rbac import ACTIONS, RESOURCES, ROLE_LABELS, ROLES, Principal, authorize, authorize_person, invalidate_cache, load_matrix
 from app.core.security import hash_password
 from app.models import (
     Account, AuditLog, ConsentEvent, Contact, CustomFieldDefinition, DedupDismissal, ErasureLog, MergeLog, RolePermission, User,
@@ -85,7 +85,7 @@ async def permissions(db: AsyncSession = Depends(get_db), _: Principal = Depends
 
 
 @router.put("/permissions")
-async def set_permissions(rows: list[PermissionIn], db: AsyncSession = Depends(get_db), _: Principal = Depends(authorize("admin", "update"))):
+async def set_permissions(rows: list[PermissionIn], db: AsyncSession = Depends(get_db), _: Principal = Depends(authorize_person("admin", "update"))):
     for r in rows:
         if r.role not in ROLES or r.resource not in RESOURCES:
             raise HTTPException(422, f"Unknown role/resource {r.role}/{r.resource}")
@@ -111,7 +111,7 @@ async def list_users(db: AsyncSession = Depends(get_db), _: Principal = Depends(
 
 
 @router.post("/users", status_code=201)
-async def create_user(body: UserIn, db: AsyncSession = Depends(get_db), _: Principal = Depends(authorize("admin", "create"))):
+async def create_user(body: UserIn, db: AsyncSession = Depends(get_db), _: Principal = Depends(authorize_person("admin", "create"))):
     if body.role not in ROLES:
         raise HTTPException(422, "Unknown role")
     if body.role == "partner" and not body.partner_id:
@@ -129,7 +129,7 @@ async def create_user(body: UserIn, db: AsyncSession = Depends(get_db), _: Princ
 
 
 @router.patch("/users/{user_id}")
-async def update_user(user_id: uuid.UUID, body: UserUpdate, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("admin", "update"))):
+async def update_user(user_id: uuid.UUID, body: UserUpdate, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize_person("admin", "update"))):
     user = await db.get(User, user_id)
     if user is None:
         raise HTTPException(404, "User not found")
@@ -144,6 +144,7 @@ async def update_user(user_id: uuid.UUID, body: UserUpdate, db: AsyncSession = D
         pw = data.pop("password")
         if pw:
             user.password_hash = hash_password(pw)
+            user.session_version = (user.session_version or 0) + 1  # a reset after a compromise must end existing sessions
     if data.get("is_active") is False:
         user.session_version = (user.session_version or 0) + 1  # sign them out everywhere
     for k, v in data.items():
@@ -153,7 +154,7 @@ async def update_user(user_id: uuid.UUID, body: UserUpdate, db: AsyncSession = D
 
 
 @router.post("/users/{user_id}/reset-mfa")
-async def reset_mfa(user_id: uuid.UUID, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("admin", "update"))):
+async def reset_mfa(user_id: uuid.UUID, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize_person("admin", "update"))):
     """Lost-device recovery: clears the user's authenticator and signs them out; they re-enrol at next sign-in."""
     user = await db.get(User, user_id)
     if user is None:
@@ -167,12 +168,12 @@ async def reset_mfa(user_id: uuid.UUID, db: AsyncSession = Depends(get_db), p: P
 # ---- sign-in security (MFA policy, single sign-on) ----------------------------------------------
 
 @router.get("/security")
-async def get_security(db: AsyncSession = Depends(get_db), _: Principal = Depends(authorize("admin", "read"))):
+async def get_security(db: AsyncSession = Depends(get_db), _: Principal = Depends(authorize_person("admin", "read"))):
     return identity.admin_view(await identity.policy(db))
 
 
 @router.put("/security")
-async def put_security(body: dict, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("admin", "update"))):
+async def put_security(body: dict, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize_person("admin", "update"))):
     try:
         out = await identity.save_policy(db, body)
     except identity.IdentityError as e:
@@ -185,7 +186,7 @@ async def put_security(body: dict, db: AsyncSession = Depends(get_db), p: Princi
 
 
 @router.post("/security/sso/test")
-async def test_sso(body: dict, _: Principal = Depends(authorize("admin", "update"))):
+async def test_sso(body: dict, _: Principal = Depends(authorize_person("admin", "update"))):
     """Reads the IdP's discovery document so an admin can check the issuer URL before turning SSO on."""
     issuer = (body.get("issuer") or "").strip().rstrip("/")
     if not issuer:

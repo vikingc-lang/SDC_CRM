@@ -226,6 +226,15 @@ async def discover(issuer: str) -> dict:
     return doc
 
 
+def safe_return_path(value: str | None) -> bool:
+    """Only same-site paths: '/x' but not '//host', a slash followed by a backslash, schemes or control characters
+    (browsers normalise backslashes to slashes, so '/' + backslash + 'evil.com' would otherwise leave the site)."""
+    if not value or not value.startswith("/") or value.startswith("//") or "\\" in value:
+        return False
+    parts = urllib.parse.urlsplit(value)
+    return not parts.scheme and not parts.netloc and all(ord(ch) >= 32 for ch in value)
+
+
 async def start_sso(db: AsyncSession, return_to: str | None) -> str:
     sso = (await policy(db)).get("sso") or {}
     if not (sso.get("enabled") and sso.get("issuer") and sso.get("client_id")):
@@ -233,7 +242,7 @@ async def start_sso(db: AsyncSession, return_to: str | None) -> str:
     doc = await discover(sso["issuer"])
     await db.execute(delete(SsoLoginState).where(SsoLoginState.created_at < func.now() - SSO_STATE_TTL))
     state, nonce, verifier = secrets.token_urlsafe(32), secrets.token_urlsafe(32), secrets.token_urlsafe(64)
-    if return_to and not (return_to.startswith("/") and not return_to.startswith("//")):
+    if not safe_return_path(return_to):
         return_to = None
     db.add(SsoLoginState(state=state, nonce=nonce, code_verifier=verifier, return_to=return_to))
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
@@ -295,6 +304,7 @@ async def complete_sso(db: AsyncSession, code: str, state: str) -> tuple[User, s
 
 async def _link_user(db: AsyncSession, sso: dict, claims: dict) -> User:
     subject = f"{claims['iss']}|{claims['sub']}"
+    verified_email = (claims.get("email") or "").strip().lower() if claims.get("email_verified") is True else ""
     email = (claims.get("email") or claims.get("preferred_username") or claims.get("upn") or "").strip().lower()
     user = (await db.execute(select(User).where(User.sso_subject == subject))).scalar_one_or_none()
     if user is None:
@@ -302,9 +312,17 @@ async def _link_user(db: AsyncSession, sso: dict, claims: dict) -> User:
             raise IdentityError("The identity provider didn't share an email address. Add the 'email' scope or claim.")
         if claims.get("email_verified") is False:
             raise IdentityError(f"{email} is not verified at the identity provider")
-        domains = sso.get("allowed_domains") or []
-        if domains and email.rsplit("@", 1)[1] not in domains:
+        domains = [d.lower() for d in sso.get("allowed_domains") or []]
+        domain_trusted = email.rsplit("@", 1)[1] in domains
+        if domains and not domain_trusted:
             raise IdentityError(f"{email} is not in an allowed sign-in domain")
+        # Linking an IdP identity to an existing Cirra user (possibly an admin) needs proof the IdP owns the address:
+        # a verified 'email' claim, or a domain the admin listed as allowed. A bare username/UPN is not enough.
+        if not (email == verified_email or domain_trusted):
+            existing = (await db.execute(select(User.id).where(func.lower(User.email) == email))).first()
+            if existing is not None or not sso.get("auto_provision"):
+                raise IdentityError(f"Can't confirm {email} belongs to you: the identity provider didn't mark it verified. "
+                                    "An administrator can list your email domain under allowed sign-in domains.")
         user = (await db.execute(select(User).where(func.lower(User.email) == email))).scalar_one_or_none()
         if user is None:
             if not sso.get("auto_provision"):

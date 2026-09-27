@@ -12,7 +12,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -167,6 +167,18 @@ def authorize(resource: str, action: str = "read"):
     async def _dep(principal: Principal = Depends(get_principal)) -> Principal:
         if not principal.can(resource, action):
             raise HTTPException(status.HTTP_403_FORBIDDEN, f"Your role cannot {action} {resource}")
+        return principal
+
+    return _dep
+
+
+def authorize_person(resource: str, action: str = "read"):
+    """Like ``authorize`` but refuses API keys: identity, access control and key management need a person's session."""
+    check = authorize(resource, action)
+
+    async def _dep(request: Request, principal: Principal = Depends(check)) -> Principal:
+        if getattr(request.state, "api_key_id", None):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "API keys can't manage users, permissions, sign-in security or keys")
         return principal
 
     return _dep

@@ -25,7 +25,8 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
 import httpx
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import func, or_, select, text, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ApiKey, IntegrationEvent, User, WebhookDelivery, WebhookSubscription
@@ -34,6 +35,7 @@ from app.services.mail import decrypt_secret, encrypt_secret
 KEY_PREFIX = "ck_"
 BACKOFF = (timedelta(minutes=1), timedelta(minutes=5), timedelta(minutes=30), timedelta(hours=2), timedelta(hours=12))
 MAX_ATTEMPTS = len(BACKOFF) + 1
+SETTLE = timedelta(minutes=5)  # how long an event id may lag behind higher ids before its transaction commits
 DISABLE_AFTER = 20
 TIMEOUT = 10.0
 
@@ -165,16 +167,24 @@ def delivery_out(d: WebhookDelivery) -> dict:
 # ---- fan-out and delivery --------------------------------------------------------------------------
 
 async def fan_out(db: AsyncSession, batch: int = 1000) -> int:
+    """Queue a delivery per (subscription, matching event). Event ids come from a sequence taken before commit,
+    so a transaction that commits late can leave a lower id behind a higher one. The cursor therefore only moves
+    past events older than SETTLE; newer ones are scanned again next run, and the (subscription, event) unique
+    key keeps that to a single delivery."""
     created = 0
+    settled_before = _now() - SETTLE
     for sub in (await db.execute(select(WebhookSubscription).where(WebhookSubscription.active.is_(True)))).scalars().all():
-        events = (await db.execute(select(IntegrationEvent.id, IntegrationEvent.event_type).where(IntegrationEvent.id > sub.cursor_event_id)
-                                   .order_by(IntegrationEvent.id).limit(batch))).all()
-        for ev_id, ev_type in events:
-            if wants(sub, ev_type):
-                db.add(WebhookDelivery(subscription_id=sub.id, event_id=ev_id, event_type=ev_type, next_attempt_at=_now()))
-                created += 1
-        if events:
-            sub.cursor_event_id = events[-1][0]
+        events = (await db.execute(select(IntegrationEvent.id, IntegrationEvent.event_type, IntegrationEvent.created_at)
+                                   .where(IntegrationEvent.id > sub.cursor_event_id).order_by(IntegrationEvent.id).limit(batch))).all()
+        rows = [{"subscription_id": sub.id, "event_id": ev_id, "event_type": ev_type, "next_attempt_at": _now()}
+                for ev_id, ev_type, _ in events if wants(sub, ev_type)]
+        if rows:
+            res = await db.execute(pg_insert(WebhookDelivery).values(rows).on_conflict_do_nothing(index_elements=["subscription_id", "event_id"]))
+            created += max(res.rowcount or 0, 0)
+        for ev_id, _, at in events:  # advance through the settled prefix only
+            if at >= settled_before:
+                break
+            sub.cursor_event_id = ev_id
     await db.flush()
     return created
 
@@ -239,6 +249,11 @@ async def deliver_due(db: AsyncSession, limit: int = 200) -> dict:
 
 
 async def run(db: AsyncSession) -> dict:
+    """One webhook cycle. A transaction-scoped advisory lock makes overlapping runs (beat, 'Deliver now',
+    Admin > Jobs) skip instead of sending the same deliveries twice."""
+    got = (await db.execute(text("SELECT pg_try_advisory_xact_lock(hashtext('cirra.webhooks'))"))).scalar()
+    if not got:
+        return {"queued": 0, "attempted": 0, "succeeded": 0, "skipped": "another webhook run is in progress"}
     created = await fan_out(db)
     out = await deliver_due(db)
     await db.commit()

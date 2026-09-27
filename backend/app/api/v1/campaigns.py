@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.rbac import Principal, authorize
-from app.models import Account, Campaign, CampaignMember, Contact, Lead, User
+from app.models import Account, Campaign, CampaignMember, Contact, Deal, Lead, User
 from app.services import campaigns as svc
 from app.services import fx
 from app.services.notify import emit
@@ -115,9 +115,17 @@ async def create_campaign(body: CampaignIn, db: AsyncSession = Depends(get_db), 
 
 
 @router.get("/{campaign_id}")
-async def get_campaign(campaign_id: uuid.UUID, db: AsyncSession = Depends(get_db), _: Principal = Depends(authorize("campaigns", "read"))):
+async def get_campaign(campaign_id: uuid.UUID, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("campaigns", "read"))):
     c = await _get(db, campaign_id)
-    return {**svc.campaign_out(c, await _owner_name(db, c.owner_id)), "metrics": await svc.metrics(db, c, deals=True)}
+    metrics = await svc.metrics(db, c, deals=True)
+    # campaign-level totals stay whole; the itemised deal list follows the viewer's row-level scope
+    if not p.can("deals", "read"):
+        metrics["deals"] = []
+    elif p.is_own_scope("deals") and metrics.get("deals"):
+        ids = [d["id"] for d in metrics["deals"]]
+        visible = set((await db.execute(p.scope_deals(select(Deal.id).where(Deal.id.in_(ids))))).scalars())
+        metrics["deals"] = [d for d in metrics["deals"] if d["id"] in visible]
+    return {**svc.campaign_out(c, await _owner_name(db, c.owner_id)), "metrics": metrics}
 
 
 @router.put("/{campaign_id}")
@@ -257,8 +265,8 @@ async def email_preview(campaign_id: uuid.UUID, db: AsyncSession = Depends(get_d
     sample = next((r for r in rec if not r["blocked"]), None)
     return {"eligible": sum(1 for r in rec if not r["blocked"]), "blocked": blocked,
             "sample": {"to": sample["person"]["email"],
-                       "subject": svc.render(c.email_subject or "", sample["person"], "preview").split("\n--\n")[0],
-                       "body": svc.render(c.email_body or "", sample["person"], sample["member"].token)} if sample else None}
+                       "subject": svc.render(c.email_subject or "", sample["person"], None).split("\n--\n")[0],
+                       "body": svc.render(c.email_body or "", sample["person"], None)} if sample else None}  # inert link: a click here unsubscribes nobody
 
 
 @router.post("/{campaign_id}/email/send")

@@ -111,9 +111,10 @@ async def find_by_key(db: AsyncSession, key: str | None) -> Campaign | None:
                              .order_by(Campaign.created_at).limit(1))).scalar_one_or_none()
 
 
-async def attach_capture(db: AsyncSession, lead: Lead) -> Campaign | None:
-    """A captured lead with a known campaign key joins that campaign as a responder."""
-    campaign = await find_by_key(db, lead.campaign)
+async def attach_capture(db: AsyncSession, lead: Lead, key: str | None = None) -> Campaign | None:
+    """A captured lead joins the campaign named by this capture (``key``), falling back to the lead's first-touch
+    campaign. A returning lead keeps its first-touch campaign but is still credited to the new one."""
+    campaign = await find_by_key(db, key or lead.campaign)
     if campaign is None:
         return None
     await add_members(db, campaign, lead_ids=[lead.id], source="capture", status="responded")
@@ -156,13 +157,17 @@ def unsubscribe_url(token: str) -> str:
     return f"{settings.public_web_url.rstrip('/')}/unsubscribe/{token}"
 
 
-def render(template: str, person: dict, token: str) -> str:
+def render(template: str, person: dict, token: str | None) -> str:
+    """Fill {{first_name}}, {{last_name}}, {{company}} and the unsubscribe link. Values are inserted literally
+    (a function replacement), so backslashes in names can't act as regex escapes. ``token=None`` renders an
+    inert preview link."""
     out = template or ""
     for key in ("first_name", "last_name", "company"):
-        out = re.sub(r"\{\{\s*" + key + r"\s*\}\}", person.get(key) or "", out)
-    url = unsubscribe_url(token)
+        value = person.get(key) or ""
+        out = re.sub(r"\{\{\s*" + key + r"\s*\}\}", lambda _m, v=value: v, out)
+    url = unsubscribe_url(token) if token else f"{settings.public_web_url.rstrip('/')}/unsubscribe/<personal-link>"
     if re.search(r"\{\{\s*unsubscribe_url\s*\}\}", out):
-        return re.sub(r"\{\{\s*unsubscribe_url\s*\}\}", url, out)
+        return re.sub(r"\{\{\s*unsubscribe_url\s*\}\}", lambda _m: url, out)
     return f"{out.rstrip()}\n\n--\nYou received this because of your interest in our events and content. Unsubscribe: {url}"
 
 
@@ -196,6 +201,11 @@ async def recipients(db: AsyncSession, campaign: Campaign) -> list[dict]:
 
 
 async def send(db: AsyncSession, campaign: Campaign, sender: User) -> dict:
+    """Email every eligible 'targeted' member. Each message is committed as soon as it is handed to SMTP, so a
+    failure part-way never un-marks people who already received it (a retry won't email them twice). A refused
+    recipient is marked bounced; any other mail error stops the run and reports how far it got."""
+    import smtplib
+
     from app.models import Activity
     from app.services import mail
 
@@ -213,7 +223,17 @@ async def send(db: AsyncSession, campaign: Campaign, sender: User) -> dict:
         m, person = r["member"], r["person"]
         subject = render(campaign.email_subject, person, m.token).split("\n--\n")[0][:200]
         body = render(campaign.email_body, person, m.token)
-        message_id, ok = await mail.deliver(db, sender, person["email"], subject, body)
+        try:
+            message_id, ok = await mail.deliver(db, sender, person["email"], subject, body)
+        except smtplib.SMTPRecipientsRefused:
+            m.status = "bounced"
+            await db.commit()
+            skipped["Address refused by the mail server"] = skipped.get("Address refused by the mail server", 0) + 1
+            continue
+        except (smtplib.SMTPException, OSError) as e:
+            campaign.last_sent_at = now if sent else campaign.last_sent_at
+            await db.commit()
+            raise CampaignError(f"Sending stopped after {sent} email(s): {e}. Sent members are recorded; send again to continue.")
         m.status, m.sent_at = "sent", now
         sent += 1
         delivered += ok
@@ -222,6 +242,7 @@ async def send(db: AsyncSession, campaign: Campaign, sender: User) -> dict:
             db.add(Activity(account_id=c.account_id, contact_id=c.id, user_id=sender.id, activity_type="email", direction="outbound",
                             subject=subject[:500], summary=f"Campaign email ({campaign.name}): {subject}", raw_text=body, sentiment="neutral",
                             external_id=message_id, thread_id=message_id, source="system"))
+        await db.commit()  # this person is emailed: record it now
     campaign.last_sent_at = now
     if campaign.status == "planned":
         campaign.status = "active"
