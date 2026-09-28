@@ -283,9 +283,33 @@ def _headline(tasks: int, risky: int, closing: int) -> str:
 
 
 # ---- copilot Q&A ----------------------------------------------------------------
-async def ask(db: AsyncSession, question: str, account_id: uuid.UUID | None = None, deal_id: uuid.UUID | None = None, principal=None) -> dict:
+HELP_SYSTEM = (
+    "You are Aiden, the assistant inside the Cirra CRM. Answer questions about using Cirra from the HELP excerpts only. "
+    "Give short numbered steps when the user asks how to do something, name the screen, and cite excerpts as [H1], [H2]. "
+    "If the excerpts don't cover it, say so and suggest the closest topic. Don't invent features."
+)
+
+
+async def ask(db: AsyncSession, question: str, account_id: uuid.UUID | None = None, deal_id: uuid.UUID | None = None, principal=None,
+              mode: str = "auto", page: str | None = None) -> dict:
+    """Answer from CRM data (pipeline facts and notes), from the help center ("how do I…"), or both."""
+    from app.services import help as help_svc
+
+    role = principal.user.role if principal is not None else None
+    wants_help = mode == "help" or help_svc.is_help_question(question)
+    help_hits = help_svc.search(question, role, limit=4) if wants_help else []
+    if mode == "help" and page and not help_hits:
+        help_hits = [{"kind": "area", "title": a["title"], "snippet": a["summary"], "href": f"/help/areas/{a['key']}", "page": a["pages"][0]}
+                     for a in help_svc.context(page, role)["areas"]]
+    help_links = [{"title": h["title"], "href": h["href"], "kind": h["kind"], "page": h.get("page")} for h in help_hits]
+    if mode == "help":
+        return await _help_answer(question, help_hits, help_links)
     matches = await semantic_search(db, question, limit=6, account_id=account_id, principal=principal)
     facts = await _structured_facts(db, question, account_id, deal_id, principal)
+    if help_hits and not facts["text"]:  # a how-to question, not a question about the data
+        out = await _help_answer(question, help_hits, help_links)
+        if out["help"]:
+            return out
     if facts["text"]:
         # The question was answered from live pipeline data; only keep strongly related notes.
         matches = [m for m in matches if (m["similarity"] or 0) >= 0.35 or "keyword" in m.get("matched_by", [])]
@@ -307,7 +331,23 @@ async def ask(db: AsyncSession, question: str, account_id: uuid.UUID | None = No
             )
         if not answer:
             answer = "I couldn't find anything in your CRM memory about that yet. Try logging notes with ⌘K."
-    return {"answer": answer, "sources": matches, "engine": llm.provider_name() if answer and llm.provider_name() != "heuristic" else "heuristic"}
+    return {"answer": answer, "sources": matches, "engine": llm.provider_name() if answer and llm.provider_name() != "heuristic" else "heuristic",
+            "help": help_links}
+
+
+async def _help_answer(question: str, hits: list[dict], links: list[dict]) -> dict:
+    """Answer a how-to question from the help center: the model phrases it from the excerpts when one is configured,
+    otherwise the best article's steps are returned as written."""
+    from app.services import help as help_svc
+
+    if not hits:
+        return {"answer": "I couldn't find that in the help center. Try the Help center search, or ask about a screen by name.",
+                "sources": [], "engine": "help", "help": []}
+    answer = None
+    if llm.provider_name() != "heuristic":
+        answer = await llm.complete_text(HELP_SYSTEM, f"HELP:\n{help_svc.help_context(hits)}\n\nQUESTION: {question}", max_tokens=700, feature="help")
+    return {"answer": answer or help_svc.compose_answer(question, hits), "sources": [], "engine": "help" if not answer else llm.provider_name(),
+            "help": links}
 
 
 async def _structured_facts(db: AsyncSession, question: str, account_id, deal_id, principal=None) -> dict:

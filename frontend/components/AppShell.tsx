@@ -1,13 +1,14 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { BarChart3, Bell, BookOpen, Boxes, Building2, CheckSquare, ChevronsUpDown, Columns3, FileSignature, Handshake, HeartHandshake, Home, Landmark, LifeBuoy, LogOut, Magnet, Megaphone, Menu, Monitor, Moon, Package, PackageCheck, Search, Settings, ShieldCheck, Sparkles, Stamp, Sun, Target, Users, X } from "lucide-react";
+import { BarChart3, Bell, BookOpen, Boxes, Building2, CheckSquare, ChevronsUpDown, CircleHelp, Columns3, FileSignature, Handshake, HeartHandshake, Home, Landmark, LifeBuoy, LogOut, Magnet, Megaphone, Menu, Monitor, Moon, Package, PackageCheck, Search, Settings, ShieldCheck, Sparkles, Stamp, Sun, Target, Users, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
 import { AidenAvatar, CirraLogo, CirraMark } from "@/components/Brand";
 import { CopilotPanel } from "@/components/CopilotPanel";
+import { HelpDrawer } from "@/components/help";
 import { QuickLogModal } from "@/components/QuickLogModal";
 import { Button } from "@/components/ui/button";
 import { Avatar, Dropdown, DropdownContent, DropdownItem, DropdownSeparator, DropdownTrigger, Kbd } from "@/components/ui/misc";
@@ -51,6 +52,7 @@ const NAV: { group: string | null; items: NavItem[] }[] = [
   ] },
   { group: "Workspace", items: [
     { href: "/admin", label: "Admin", icon: ShieldCheck, resource: "admin" },
+    { href: "/help", label: "Help center", icon: CircleHelp },
   ] },
 ];
 
@@ -205,6 +207,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         e.preventDefault();
         ui.set({ copilotOpen: !ui.get().copilotOpen });
       }
+      const t = e.target as HTMLElement | null;
+      const typing = !!t && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName));
+      if (e.key === "?" && !typing && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        ui.set({ helpOpen: !ui.get().helpOpen });
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -244,6 +252,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <Button variant="outline" size="sm" onClick={() => ui.set({ copilotOpen: true })} className="hidden sm:inline-flex">
               <AidenAvatar size={18} />Aiden<Kbd className="ml-1">⌘J</Kbd>
             </Button>
+            <Button variant="ghost" size="icon" onClick={() => ui.set({ helpOpen: true })} aria-label={t("shell.help")} title={`${t("shell.help")} (?)`}>
+              <CircleHelp className="h-4 w-4" />
+            </Button>
             <NotificationBell />
             <ThemeToggle />
           </div>
@@ -252,6 +263,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </div>
       <QuickLogModal />
       <CopilotPanel />
+      <HelpDrawer />
     </div>
   );
 }

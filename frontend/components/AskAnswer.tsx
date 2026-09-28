@@ -1,15 +1,17 @@
 "use client";
 
 import Link from "next/link";
+import { HelpLinks } from "@/components/help";
 import type { Activity } from "@/lib/types";
 import { shortDate } from "@/lib/utils";
 
-export interface AskResponse { answer: string; sources: Activity[]; engine: string }
+export interface AskResponse { answer: string; sources: Activity[]; engine: string; help?: { title: string; href: string; kind: string; page?: string | null }[] }
 
 export function AnswerBlock({ answer, onNavigate }: { answer: AskResponse; onNavigate?: () => void }) {
   return (
     <div className="animate-slide-up">
       <div className="whitespace-pre-wrap text-[14px] leading-relaxed">{answer.answer}</div>
+      {!!answer.help?.length && <div className="mt-3"><HelpLinks links={answer.help} onNavigate={onNavigate} /></div>}
       {answer.sources.length > 0 && (
         <div className="mt-3 space-y-1.5">
           <p className="text-[11px] font-medium uppercase tracking-wide text-subtle">Sources</p>

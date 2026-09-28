@@ -26,6 +26,9 @@ description: Cirra AI layer (Aiden) - private LLM gateway (ollama / aws_bedrock 
 - `services/agents.py` – agents act only via `propose()`; `AGENTS[x]["may"]` is the hard permission list, the
   policy (`ai_agents` setting) switches agents on/off, narrows actions and picks `auto` | `approve`.
   `decide()` / `can_decide()` (owner, their manager, or org-wide deals:update). Pending suggestions expire (14 d).
+- Help answers: `insights.ask(..., mode="auto"|"help", page=)`. A how-to question (`help.is_help_question`) with
+  no CRM facts is answered from the help content by `_help_answer` (LLM feature `help`, `HELP_SYSTEM`, else the
+  best how-to's steps; engine `help`); other answers carry `help` links. `/help/ask` forces help mode for every role.
 - `api/v1/aigov.py` – `/ai/governance` (GET/PUT), `/ai/agents/policy`, `/ai/usage/log`, `/ai/usage/me`,
   `/ai/actions` + `/ai/actions/{id}/decide`. UI: Admin → AI governance (`components/admin/ai.tsx`),
   Approvals → AI suggestions (`components/aisuggestions.tsx`).

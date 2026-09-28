@@ -284,7 +284,7 @@ async def ask(body: AskRequest, db: AsyncSession = Depends(get_db), p: Principal
         await p.ensure_account(db, body.account_id, "activities")
     if body.deal_id:
         await _visible_deal(db, p, body.deal_id)
-    return await insights.ask(db, body.question, body.account_id, body.deal_id, p)
+    return await insights.ask(db, body.question, body.account_id, body.deal_id, p, body.mode, body.page)
 
 
 @router.get("/ai/briefing")

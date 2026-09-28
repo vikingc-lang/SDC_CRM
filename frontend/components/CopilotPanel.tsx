@@ -9,7 +9,8 @@ import { AnswerBlock, type AskResponse } from "@/components/AskAnswer";
 import { api, errorMessage } from "@/lib/api";
 import { ui, useUI } from "@/lib/store";
 
-const SUGGESTIONS = ["Which deals are at risk?", "What's our weighted forecast?", "Who are the champions?", "What did we learn from lost deals?", "Any security concerns in the pipeline?"];
+const SUGGESTIONS = ["Which deals are at risk?", "What's our weighted forecast?", "Who are the champions?", "What did we learn from lost deals?",
+  "How do I add products to a deal?", "How do I connect my calendar?"];
 
 export function CopilotPanel() {
   const open = useUI((s) => s.copilotOpen);
@@ -24,7 +25,7 @@ export function CopilotPanel() {
     onError: (e) => setThread((t) => t.map((m, i) => (i === t.length - 1 ? { ...m, error: errorMessage(e) } : m))),
   });
 
-  useEffect(() => bottom.current?.scrollIntoView({ behavior: "smooth" }), [thread]);
+  useEffect(() => { bottom.current?.scrollIntoView({ behavior: "smooth" }); }, [thread]);  // braces: newer browsers return a Promise from scrollIntoView
 
   const submit = (q: string) => {
     if (!q.trim() || ask.isPending) return;
@@ -51,7 +52,7 @@ export function CopilotPanel() {
             {thread.length === 0 && (
               <div className="pt-6">
                 <p className="text-[15px] font-medium">Hi, I’m Aiden. What do you want to know?</p>
-                <p className="mt-1 text-[13px] text-muted-foreground">I search every note, email and call you have logged, plus live pipeline data.</p>
+                <p className="mt-1 text-[13px] text-muted-foreground">I search every note, email and call you have logged, plus live pipeline data, and I can explain how anything in Cirra works.</p>
                 <div className="mt-4 flex flex-col items-start gap-2">
                   {SUGGESTIONS.map((s) => (
                     <button key={s} onClick={() => submit(s)} className="rounded-full border px-3 py-1.5 text-left text-[13px] text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground">{s}</button>

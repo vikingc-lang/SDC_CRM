@@ -21,6 +21,13 @@ description: Cirra Next.js 14 frontend conventions - app router pages under app/
 - Navigation: `components/AppShell.tsx` `NAV` (items gated by `resource`), custom objects added by
   `CustomObjectsNav`; `PageHeader {title, description, actions}`.
 
+- Help center: content lives in `backend/app/help/content.py` (roles, areas with `pages` and how-tos, processes,
+  glossary); `services/help.py` serves it (`/help`, `/help/areas/{key}`, `/help/search`, `/help/context`,
+  `/help/data-model`, `/help/ask`). UI: `app/(app)/help` (tabs via `?tab=`), `app/(app)/help/areas/[key]`,
+  `components/help.tsx` (`HelpDrawer` opened by the header button or the ? key through `ui.helpOpen`,
+  `ProcessMap`, `DataModelExplorer`, `HelpLinks`). A new screen: add its route to an area's `pages` so the
+  drawer finds it, and to the page list in `tests/test_help.py`.
+
 ## Patterns
 - Queries: `useQuery({ queryKey: [area, …], queryFn: () => get(…) })`; mutations invalidate by the area key
   (e.g. `["cases"]`) so lists, views and detail pages refresh together.
@@ -30,6 +37,8 @@ description: Cirra Next.js 14 frontend conventions - app router pages under app/
 - Colours come from CSS tokens in `app/globals.css` (`--status-good|warning|critical`, `primary`, `muted`,
   `subtle`); support light and dark mode; use `tabular` for numbers.
 - Accessible labels: every control has a `<Label htmlFor>` or `aria-label` (the browser journeys rely on them).
+- `useEffect` bodies use braces: an expression body that returns a Promise (e.g. `scrollIntoView` in new
+  Chromium) crashes React with "destroy is not a function".
 - `localStorage` only for per-browser conveniences, wrapped in try/catch (see `listviews.tsx`).
 - Localisation (`lib/i18n.tsx`): the user's locale (`me.preferences.locale`, else the browser) drives number,
   currency and date formats through `money`, `fmtNumber`, `fmtDateTime`, `shortDate`, `relativeDays`

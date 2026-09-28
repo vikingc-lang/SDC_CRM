@@ -42,7 +42,7 @@ export function ForecastByStage({ data }: { data: { stage: string; count: number
       </div>
       <div className="space-y-3">
         {data.map((d, i) => (
-          <div key={d.stage} className="relative grid grid-cols-[112px_1fr_72px] items-center gap-3" onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}>
+          <div key={`${i}-${d.stage}`} className="relative grid grid-cols-[112px_1fr_72px] items-center gap-3" onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}>
             <div className="truncate text-[13px] text-muted-foreground">{d.stage}</div>
             <div className="relative h-5 cursor-default">
               <div className="absolute inset-y-0 left-0 rounded-r bg-series-track" style={{ width: `${(d.total / max) * 100}%` }} />

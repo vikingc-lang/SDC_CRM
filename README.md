@@ -21,7 +21,13 @@ on the forecast call, when it's too late to act.
   and commit it in one click.
 - **Deal risk you can see:** every deal gets a risk score with the reason: stale, no champion, sentiment drop.
 - **Aiden, your AI assistant (⌘J):** Aiden answers questions about accounts, deals and pipeline in plain English, grounded in
-  hybrid keyword + semantic search (pgvector).
+  hybrid keyword + semantic search (pgvector). Ask it "how do I…?" and it answers from the help center, with steps
+  and links to the right screen.
+- **A help center for every role (the ? button or the ? key):** a guide for your role (mission, a typical day, a
+  getting-started checklist, and what you are allowed to do, read live from your permissions), every functional
+  area with how-tos, clickable process maps (lead to cash, customer case, campaign, discount approval, renewal,
+  AI suggestion), a live data-model explorer that follows your field security, a glossary, shortcuts and what's
+  new. The help drawer follows the page you are on.
 - **A forecast you can explain:** weighted by stage probability and deal risk, shown by stage and by close month.
 - **Account 360 and stage gates:** the full picture of every account, and clear criteria for moving a deal forward.
 
@@ -205,6 +211,7 @@ npm i playwright && node e2e/lead-to-order.mjs ./e2e-output   # results.json + 2
 node e2e/wave1-journeys.mjs ./w1   # drill-down, pivot, dashboard filters, bulk actions (10 checks)
 node e2e/wave2-journeys.mjs ./w2   # list views, in-place edits, period comparison, report subscriptions (10 checks)
 node e2e/wave3-journeys.mjs ./w3   # custom objects, field security, validation and sharing rules, config transfer (9 checks)
+node e2e/help-journeys.mjs ./help # help center, process maps, data model and Aiden help answers (11 checks)
 node e2e/wave4-journeys.mjs ./w4   # email-to-case, presence routing, support inbox, nurture journeys and tracking (10 checks; needs INBOUND_EMAIL_SECRET)
 ```
 
@@ -301,6 +308,7 @@ Demo intake keys are printed by the seed: the hosted form is `/forms/cf_demo_web
 │       │   ├── scoring.py           # spec §6 health & risk engine
 │       │   ├── pipeline_service.py  # spec §5 stage gates, §7 forecasting, Kanban
 │       │   ├── insights.py          # Aiden: stage-trigger AI actions, briefing, Q&A, drafts
+│       │   ├── help.py              # help center: search, page context, live permissions and data model
 │       │   ├── dedup.py · hierarchy.py · custom_fields.py · privacy.py   # pillars 1–2
 │       │   ├── cpq.py · clm.py · fx.py · pipeline_templates.py          # pillars 3–4
 │       │   ├── mail.py · calendar.py · sla.py · voice.py · search.py    # pillars 5–6
@@ -308,6 +316,7 @@ Demo intake keys are printed by the seed: the hosted form is `/forms/cf_demo_web
 │       │   ├── data_io.py · storage.py · notify.py                      # pillar 10
 │       │   └── jobs.py              # Celery or in-process background jobs
 │       ├── api/v1/           # accounts, contacts, deals, activities, ai, cpq, success, finance, partners (+portal), admin
+│       ├── help/content.py   # help content: role guides, areas and how-tos, processes, glossary
 │       ├── worker.py         # Celery tasks and the beat schedule (run by the scheduler container)
 │       └── seed.py
 └── frontend/                 # Next.js 14 App Router · Tailwind · Radix · @dnd-kit · react-query · lucide

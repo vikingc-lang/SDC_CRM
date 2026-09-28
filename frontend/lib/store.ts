@@ -2,9 +2,9 @@
 
 import { useSyncExternalStore } from "react";
 
-/** Tiny global store for UI state shared across the shell (Quick-Log modal, copilot panel). */
-type State = { quickLogOpen: boolean; quickLogText: string; quickLogAccountId: string | null; copilotOpen: boolean };
-let state: State = { quickLogOpen: false, quickLogText: "", quickLogAccountId: null, copilotOpen: false };
+/** Tiny global store for UI state shared across the shell (Quick-Log modal, copilot panel, help drawer). */
+type State = { quickLogOpen: boolean; quickLogText: string; quickLogAccountId: string | null; copilotOpen: boolean; helpOpen: boolean };
+let state: State = { quickLogOpen: false, quickLogText: "", quickLogAccountId: null, copilotOpen: false, helpOpen: false };
 const listeners = new Set<() => void>();
 
 export const ui = {

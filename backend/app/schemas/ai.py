@@ -96,5 +96,7 @@ class SemanticSearchRequest(BaseModel):
 
 class AskRequest(BaseModel):
     question: str = Field(min_length=2, max_length=2000)
+    mode: Literal["auto", "help"] = "auto"  # help: answer from the help center only (the Help drawer)
+    page: Optional[str] = Field(default=None, max_length=300)  # the page the question was asked from
     account_id: Optional[UUID] = None
     deal_id: Optional[UUID] = None

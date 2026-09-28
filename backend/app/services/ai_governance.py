@@ -32,7 +32,7 @@ log = logging.getLogger(__name__)
 POLICY_KEY = "ai_governance"
 FEATURES = {
     "quick_log": "Quick-Log extraction", "ask": "Ask Aiden", "briefing": "Daily briefing", "draft_email": "Email drafts",
-    "account_brief": "Account brief", "stage_assistant": "Stage assistant", "other": "Other",
+    "account_brief": "Account brief", "stage_assistant": "Stage assistant", "help": "Help answers", "other": "Other",
 }
 DEFAULT_POLICY: dict = {
     "enabled": True,
