@@ -308,7 +308,9 @@ async def decide(request_id: uuid.UUID, body: DecisionIn, db: AsyncSession = Dep
 @router.post("/documents", status_code=201)
 async def generate_document(body: DocumentIn, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("documents", "create"))):
     deal = await _deal(db, p, body.deal_id, "documents")
-    quote = await db.get(Quote, body.quote_id) if body.quote_id else None
+    quote = await _quote(db, p, body.quote_id) if body.quote_id else None
+    if quote is not None and quote.deal_id != deal.id:
+        raise HTTPException(422, "That quote belongs to another opportunity")  # never put another deal's pricing in a document
     if body.doc_type == "order_form" and quote is None:
         quote = (await db.execute(select(Quote).where(Quote.deal_id == deal.id, Quote.status.in_(("approved", "sent", "accepted")))
                                   .order_by(Quote.created_at.desc()))).scalars().first()

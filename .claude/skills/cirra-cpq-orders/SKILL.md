@@ -26,6 +26,8 @@ description: Cirra quote-to-order - products, price books, volume tiers, promoti
 
 ## Rules
 - Prices are always computed server-side (`rebuild`); never trust client totals.
+- Load quotes only through `_quote(db, p, id)` (scope via the quote's deal), and a document's quote must belong to
+  the document's deal (422 otherwise), so one deal's pricing can never land in another deal's contract.
 - Approval levels come from `approval_policies` + `approval_groups` (discount %, payment terms, deal size,
   credit hold, credit risk) and are decided in chain order `cpq.CHAIN`: sales manager → deal desk → VP sales →
   finance → legal (`app_settings` `approval_chain`).

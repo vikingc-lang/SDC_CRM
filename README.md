@@ -105,6 +105,9 @@ mail relay).
 
 ### Operations
 
+- **Secrets:** leave `JWT_SECRET` empty in `.env` and each install generates its own sign-in and encryption keys
+  on first start (kept on the data volume). With `ENVIRONMENT` set to anything but development, the API and workers
+  refuse to start with a missing, short or published secret.
 - **Health checks:** `/health/live` (the process answers; used for liveness, so a database blip never restarts pods) and
   `/health/ready` (database reachable and migrated to this build's schema, Redis reachable; 503 otherwise). `/health`
   remains for simple uptime checks.

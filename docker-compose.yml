@@ -104,6 +104,8 @@ services:
       DATABASE_URL: postgresql+asyncpg://cirra_user:${POSTGRES_PASSWORD:-cirra_secure_password}@db:5432/cirra_crm
       REDIS_URL: redis://redis:6379/0
       RUN_MIGRATIONS: "false"
+    volumes:
+      - cirra_files:/data   # shares the generated per-install secrets with the api and worker
     command: ["celery", "-A", "app.worker", "beat", "--loglevel=info", "--schedule", "/tmp/celerybeat-schedule"]
 
   # Local speech-to-text for Quick-Log voice notes (set TRANSCRIPTION_PROVIDER=whisper_asr).

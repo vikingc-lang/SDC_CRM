@@ -24,6 +24,10 @@ description: Cirra administration, security and governance - sign-in with lockou
   `components/security.tsx`, `app/login`.
 
 ## Rules
+- **Secrets:** `JWT_SECRET` has no default. `enforce_secure_settings()` (called by `main.py` and `worker.py`)
+  refuses to start outside `ENVIRONMENT=development|dev|local|test` when it (or `DATA_ENCRYPTION_KEY`) is missing,
+  shorter than 32 characters or a published value (`KNOWN_INSECURE_SECRETS`); development only warns. The container
+  entrypoint generates both per install on the data volume when `JWT_SECRET` is empty. Never add a secret default.
 - Identity/permission/key management endpoints use `authorize_person` (API keys refused).
 - Never log secrets, tokens, server replies from SMTP/webhooks, or response bodies.
 - Security fixes ship with a regression test (`test_review_fixes*.py`, `test_scope_regressions.py`).

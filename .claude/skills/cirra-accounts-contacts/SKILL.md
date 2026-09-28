@@ -24,6 +24,9 @@ description: Cirra accounts, contacts and the customer 360 - account 360 view, h
 - Account custom fields live in `custom_metadata` (`health_breakdown`, `domain_unverified`, `source` are reserved
   keys); contacts/deals/leads use `custom_fields`. Always output through `custom_fields.redact()`.
 - New accounts get a territory via `performance.assign(db, account)`.
+- Duplicate review (`/admin/dedup`) only lists and acts on pairs where both records are in the caller's scope
+  (404 otherwise, also for dismiss); merging deletes a record, so it needs update **and delete** on the resource
+  (AEs can merge their contacts, not accounts). `can_merge` tells the UI.
 
 ## Tests
 `tests/test_platform.py` (dedup, hierarchy, privacy, custom fields, import/export), `test_scoring.py`,

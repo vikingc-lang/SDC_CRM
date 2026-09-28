@@ -1,4 +1,6 @@
 """Application settings, loaded from environment variables (see .env.example)."""
+import logging
+import secrets
 from functools import lru_cache
 from typing import Literal
 
@@ -14,7 +16,9 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://cirra_user:cirra_secure_password@localhost:5432/cirra_crm"
     redis_url: str = "redis://localhost:6379/0"
 
-    jwt_secret: str = "super_secret_jwt_key_change_in_production"
+    # Signs sign-in tokens (and, without DATA_ENCRYPTION_KEY, derives the key for stored credentials). No default:
+    # the container entrypoint generates one per install; see enforce_secure_settings().
+    jwt_secret: str = ""
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60 * 12
 
@@ -111,6 +115,49 @@ class Settings(BaseSettings):
     @property
     def sync_database_url(self) -> str:
         return self.database_url.replace("+asyncpg", "+psycopg2")
+
+
+# Secrets that have been published (old defaults, examples) or are trivially guessable.
+KNOWN_INSECURE_SECRETS = frozenset({
+    "super_secret_jwt_key_change_in_production", "change_me", "change-me", "changeme", "secret", "jwt_secret",
+    "your-secret-key", "cirra", "password",
+})
+DEV_ENVIRONMENTS = ("development", "dev", "local", "test")
+MIN_SECRET_LENGTH = 32
+
+
+def security_problems(s: "Settings") -> list[str]:
+    """What makes this configuration unsafe for real data."""
+    problems = []
+    if not s.jwt_secret or s.jwt_secret.strip().lower() in KNOWN_INSECURE_SECRETS or len(s.jwt_secret) < MIN_SECRET_LENGTH:
+        problems.append(f"JWT_SECRET is missing, a published default or shorter than {MIN_SECRET_LENGTH} characters, "
+                        "so anyone could forge sign-in tokens")
+    if s.data_encryption_key is not None and (s.data_encryption_key.strip().lower() in KNOWN_INSECURE_SECRETS
+                                              or len(s.data_encryption_key) < MIN_SECRET_LENGTH):
+        problems.append(f"DATA_ENCRYPTION_KEY is a published default or shorter than {MIN_SECRET_LENGTH} characters")
+    return problems
+
+
+def enforce_secure_settings(s: "Settings") -> None:
+    """Called at API and worker start. Outside development an unsafe secret stops the process; in development it
+    is allowed with a warning (an empty secret gets a random one for this process only)."""
+    log = logging.getLogger("cirra.security")
+    problems = security_problems(s)
+    if not problems:
+        if s.data_encryption_key is None and s.environment.lower() not in DEV_ENVIRONMENTS:
+            log.warning("DATA_ENCRYPTION_KEY is not set: stored mailbox credentials use a key derived from JWT_SECRET. "
+                        "Set a separate DATA_ENCRYPTION_KEY.")
+        return
+    if s.environment.lower() in DEV_ENVIRONMENTS:
+        if not s.jwt_secret:
+            s.jwt_secret = secrets.token_urlsafe(48)  # sessions end when this process restarts
+        log.warning("INSECURE CONFIGURATION, allowed only because ENVIRONMENT=%s: %s. Never use this setup for real data.",
+                    s.environment, "; ".join(problems))
+        return
+    raise RuntimeError("Refusing to start: " + "; ".join(problems) + ". Set JWT_SECRET (and DATA_ENCRYPTION_KEY) to long "
+                       "random values, e.g. `python -c \"import secrets; print(secrets.token_urlsafe(48))\"`, or leave them "
+                       "empty in docker compose to have them generated on first start. For a local demo only, set "
+                       "ENVIRONMENT=development.")
 
 
 @lru_cache

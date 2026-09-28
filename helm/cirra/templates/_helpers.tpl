@@ -18,6 +18,8 @@ app.kubernetes.io/component: {{ .component }}
 {{- define "cirra.redisUrl" -}}{{ if .Values.redis.enabled }}redis://{{ include "cirra.fullname" . }}-redis:6379/0{{ else }}{{ .Values.externalRedisUrl }}{{ end }}{{- end -}}
 {{/* Environment shared by api and worker */}}
 {{- define "cirra.backendEnv" -}}
+- name: ENVIRONMENT
+  value: {{ .Values.environment | default "production" | quote }}
 - name: POSTGRES_PASSWORD
   valueFrom: { secretKeyRef: { name: {{ include "cirra.secretName" . }}, key: POSTGRES_PASSWORD } }
 - name: DATABASE_URL

@@ -33,6 +33,11 @@ reports `migrations` not at head.
 `/health` (DB ping), `/health/live` (no deps), `/health/ready` (DB, migrations at head, Redis → 503 if not);
 `X-Request-ID` on every response; `LOG_FORMAT=json`; rate limits via `RATE_LIMIT_*`.
 
+## Secrets
+`JWT_SECRET` / `DATA_ENCRYPTION_KEY`: leave empty in compose and `docker-entrypoint.sh` generates them once into
+`/data/secrets` (api, worker and scheduler share the volume). Helm generates them in its Secret and sets
+`ENVIRONMENT=production`, which makes the API refuse weak or published secrets at startup.
+
 ## Settings
 All in `core/config.py` (pydantic-settings from env / `.env`, documented in `.env.example`): database/redis,
 JWT, CORS, `PUBLIC_WEB_URL`, `PUBLIC_API_URL`, LLM/embedding/transcription providers, ERP/enrichment/e-sign

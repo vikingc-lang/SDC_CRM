@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from app.api.v1 import accounts, activities, admin, ai, analytics, auth, campaigns, cases, contacts, cpq, deals, developer, finance, leads, orders, partners, performance, forecasting, success, sync, views, workflows, objects, setup, journeys, inbound
-from app.core.config import settings
+from app.core.config import enforce_secure_settings, settings
 from app.core.database import engine
 from app.core.observability import RequestContextMiddleware, configure_logging
 from app.core.ratelimit import RateLimitMiddleware
@@ -15,6 +15,7 @@ from app.services import validation  # registers the validation-rule change capt
 
 configure_logging()
 log = logging.getLogger(__name__)
+enforce_secure_settings(settings)  # refuse to serve with a forgeable token secret outside development
 
 app = FastAPI(
     title="Cirra API",

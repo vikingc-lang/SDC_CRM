@@ -309,17 +309,44 @@ async def delete_custom_field(field_id: uuid.UUID, db: AsyncSession = Depends(ge
 
 
 # ---- deduplication --------------------------------------------------------------------------------------
+async def _visible_ids(db: AsyncSession, p: Principal, entity: str) -> set | None:
+    """Ids of the accounts or contacts the caller can see (None = all). Duplicate review never shows or touches
+    records outside the caller's row-level scope."""
+    if entity == "account":
+        if not p.is_own_scope("accounts"):
+            return None
+        return set((await db.execute(p.scope_accounts(select(Account.id)))).scalars())
+    if not p.is_own_scope("contacts"):
+        return None
+    return set((await db.execute(p.scope_accounts(select(Contact.id), "contacts", Contact.account_id))).scalars())
+
+
+def _pairs_within(pairs: list[dict], visible: set | None) -> list[dict]:
+    return pairs if visible is None else [c for c in pairs if c["a"]["id"] in visible and c["b"]["id"] in visible]
+
+
+async def _pair(db: AsyncSession, p: Principal, entity: str, id_a: uuid.UUID, id_b: uuid.UUID):
+    model = Account if entity == "account" else Contact
+    visible = await _visible_ids(db, p, entity)
+    a, b = await db.get(model, id_a), await db.get(model, id_b)
+    if a is None or b is None or (visible is not None and not {a.id, b.id} <= visible):
+        raise HTTPException(404, "Record not found")  # same answer for missing and out of scope
+    return a, b
+
+
 @router.get("/dedup")
-async def dedup_candidates(db: AsyncSession = Depends(get_db), _: Principal = Depends(authorize("accounts", "update"))):
-    return {"accounts": await dedup.account_candidates(db), "contacts": await dedup.contact_candidates(db)}
+async def dedup_candidates(db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("accounts", "update"))):
+    return {"accounts": _pairs_within(await dedup.account_candidates(db, limit=500), await _visible_ids(db, p, "account"))[:100],
+            "contacts": _pairs_within(await dedup.contact_candidates(db, limit=500), await _visible_ids(db, p, "contact"))[:100],
+            "can_merge": {"account": p.can("accounts", "delete"), "contact": p.can("contacts", "delete")}}
 
 
 @router.post("/dedup/merge")
 async def merge(body: MergeIn, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("accounts", "update"))):
-    model = Account if body.entity == "account" else Contact
-    survivor, merged = await db.get(model, body.survivor_id), await db.get(model, body.merged_id)
-    if survivor is None or merged is None:
-        raise HTTPException(404, "Record not found")
+    resource = "accounts" if body.entity == "account" else "contacts"
+    if not (p.can(resource, "update") and p.can(resource, "delete")):
+        raise HTTPException(403, f"Merging removes one of the two {resource}; your role can't delete {resource}. Ask a manager to merge them.")
+    survivor, merged = await _pair(db, p, body.entity, body.survivor_id, body.merged_id)
     try:
         fn = dedup.merge_accounts if body.entity == "account" else dedup.merge_contacts
         log = await fn(db, survivor, merged, body.overrides, p.id)
@@ -334,6 +361,7 @@ async def merge(body: MergeIn, db: AsyncSession = Depends(get_db), p: Principal 
 
 @router.post("/dedup/dismiss")
 async def dismiss(body: DismissIn, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("accounts", "update"))):
+    await _pair(db, p, body.entity, body.id_a, body.id_b)
     a, b = sorted((body.id_a, body.id_b), key=str)
     if await db.get(DedupDismissal, (body.entity, a, b)) is None:
         db.add(DedupDismissal(entity=body.entity, id_a=a, id_b=b, dismissed_by=p.id))

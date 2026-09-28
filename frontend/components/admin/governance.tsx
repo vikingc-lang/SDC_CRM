@@ -13,6 +13,7 @@ import { Table, Td } from "@/components/ui/extra";
 import { Input, Select } from "@/components/ui/input";
 import { EmptyState, Skeleton } from "@/components/ui/misc";
 import { api, errorMessage, get } from "@/lib/api";
+import { useMe } from "@/lib/me";
 import { relativeDays } from "@/lib/utils";
 
 interface AuditRow { id: number; user_id: string | null; user: string; entity: string; record_id: string | null; action: string; field_name: string | null;
@@ -123,7 +124,9 @@ const label = (x: Candidate["a"]) => x.name ?? `${x.first_name ?? ""} ${x.last_n
 
 export function DedupPanel() {
   const qc = useQueryClient();
-  const cands = useQuery({ queryKey: ["admin", "dedup"], queryFn: () => get<{ accounts: Candidate[]; contacts: Candidate[] }>("/admin/dedup") });
+  const { can } = useMe();
+  const cands = useQuery({ queryKey: ["admin", "dedup"], queryFn: () => get<{ accounts: Candidate[]; contacts: Candidate[];
+    can_merge: Record<"account" | "contact", boolean> }>("/admin/dedup") });
   const history = useQuery({ queryKey: ["admin", "dedup", "history"], queryFn: () => get<MergeHistory[]>("/admin/dedup/history") });
   const [survivor, setSurvivor] = useState<Record<string, string>>({});
   const done = (msg: string) => { qc.invalidateQueries(); toast.success(msg); };
@@ -151,7 +154,7 @@ export function DedupPanel() {
       <Card>
         <CardHeader icon={<GitMerge className="h-4 w-4" />} title="Duplicate candidates"
           description="Jaro-Winkler + Levenshtein name similarity and registrable-domain matching. Pairs at ≥ 0.97, or on the same domain at ≥ 0.85, merge automatically every night."
-          action={<Button size="sm" variant="outline" loading={auto.isPending} onClick={() => auto.mutate()}><Sparkles className="h-3.5 w-3.5" />Run auto-merge</Button>} />
+          action={can("admin", "update") && <Button size="sm" variant="outline" loading={auto.isPending} onClick={() => auto.mutate()}><Sparkles className="h-3.5 w-3.5" />Run auto-merge</Button>} />
         {cands.isLoading ? <Skeleton className="m-5 h-24" /> : !all.length ? <EmptyState icon={<GitMerge className="h-4 w-4" />} title="No likely duplicates" description="The graph is clean." /> : (
           <ul className="divide-y">
             {all.map((c) => {
@@ -177,7 +180,9 @@ export function DedupPanel() {
                   </div>
                   <div className="flex gap-2">
                     <Button size="sm" variant="ghost" onClick={() => dismiss.mutate(c)}><X className="h-3.5 w-3.5" />Not a duplicate</Button>
-                    <Button size="sm" loading={merge.isPending && merge.variables === c} onClick={() => merge.mutate(c)}><GitMerge className="h-3.5 w-3.5" />Merge</Button>
+                    {cands.data?.can_merge?.[c.entity]
+                      ? <Button size="sm" loading={merge.isPending && merge.variables === c} onClick={() => merge.mutate(c)}><GitMerge className="h-3.5 w-3.5" />Merge</Button>
+                      : <span className="self-center text-[12px] text-muted-foreground" title="Merging removes a record; ask a manager">Merge needs a manager</span>}
                   </div>
                 </li>
               );

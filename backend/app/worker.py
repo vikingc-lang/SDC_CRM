@@ -4,7 +4,9 @@ import asyncio
 from celery import Celery
 from celery.schedules import crontab
 
-from app.core.config import settings
+from app.core.config import enforce_secure_settings, settings
+
+enforce_secure_settings(settings)  # workers decrypt stored credentials: same rules as the API
 
 celery_app = Celery("cirra", broker=settings.redis_url, backend=settings.redis_url)
 
