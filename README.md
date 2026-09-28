@@ -234,6 +234,7 @@ Demo intake keys are printed by the seed: the hosted form is `/forms/cf_demo_web
 
 ```
 ├── .github/workflows/ci.yml  # tests, frontend checks, image builds and Helm lint on every push
+├── .claude/skills/           # Claude Code skills: one per module/component (start with cirra-overview)
 ├── docker-compose.yml        # db (pgvector), redis, ollama, api, worker, scheduler, web (+ whisper "voice" profile)
 ├── helm/cirra/               # Kubernetes chart: api, worker, scheduler, web, optional pgvector/redis/ollama/whisper, zero-egress policy
 ├── .env.example              # every setting, documented
