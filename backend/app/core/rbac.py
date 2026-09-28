@@ -111,9 +111,18 @@ class Principal:
         return self.perm(resource).scope == "own"
 
     # ---- row-level ownership --------------------------------------------------
-    def owned_account_ids(self):
-        """Subquery of account ids this user owns, sells into, or sees through an account sharing rule."""
+    def team_deal_ids(self):
+        """Deals this user works on as a deal-team member (or has a split on)."""
+        from app.models import DealTeamMember
+
+        return select(DealTeamMember.deal_id).where(DealTeamMember.user_id == self.user.id)
+
+    def owned_account_ids(self, include_team: bool = True):
+        """Subquery of account ids this user owns, sells into (owns or is on the team of a deal there), or sees
+        through an account sharing rule."""
         visible = [Account.owner_id == self.user.id, Account.id.in_(select(Deal.account_id).where(Deal.owner_id == self.user.id))]
+        if include_team:
+            visible.append(Account.id.in_(select(Deal.account_id).where(Deal.id.in_(self.team_deal_ids()))))
         if self.shares:
             from app.services import reporting
 
@@ -129,7 +138,7 @@ class Principal:
     def scope_deals(self, stmt):
         if not self.is_own_scope("deals"):
             return stmt
-        return stmt.where(or_(Deal.owner_id == self.user.id, Deal.account_id.in_(self.owned_account_ids())))
+        return stmt.where(or_(Deal.owner_id == self.user.id, Deal.account_id.in_(self.owned_account_ids()), Deal.id.in_(self.team_deal_ids())))
 
     async def ensure_account(self, db: AsyncSession, account_id: uuid.UUID, resource: str = "accounts") -> None:
         """404 (not 403) when a record is outside the user's scope, so existence isn't leaked."""

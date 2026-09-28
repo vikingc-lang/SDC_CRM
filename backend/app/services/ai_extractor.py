@@ -130,6 +130,7 @@ async def extract(raw_text: str, known_accounts: list[tuple[str, str]] | None = 
         SYSTEM_PROMPT,
         f"Today's date is {today.isoformat()}.\n\nRAW SALES NOTES:\n{raw_text}",
         _LLMQuickLog,
+        feature="quick_log",
     )
     if parsed is not None:
         result = _from_llm(parsed)

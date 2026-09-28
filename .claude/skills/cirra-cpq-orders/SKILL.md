@@ -33,6 +33,13 @@ description: Cirra quote-to-order - products, price books, volume tiers, promoti
   finance → legal (`app_settings` `approval_chain`).
 - Documents: the body is always the latest version; the SHA-256 changes per version so parties sign the exact text.
 - Order creation and ERP push are asynchronous; UI shows `submitted` until acknowledged.
+- Tax (`services/tax.py`, engine in `app_settings` key `tax`: none | builtin | india_gst | avalara) is
+  recalculated at the end of every `rebuild` and via `POST /quotes/{id}/tax`, on each line's term total, from
+  the deal ship-to → bill-to → account billing address; exempt deals are never taxed; engine failures leave
+  tax at 0 with `tax_detail.error` and never block the quote. Orders copy `tax_total` / `tax_detail`; the ERP
+  payload carries `tax_total` and `tax_lines`. Products carry an optional `tax_code` (HSN/SAC, Avalara code).
+- Exchange rates: `services/fx.py` `Rates` (a dict of today's rates plus dated history); change rates only via
+  `fx.set_rate` (history row + today's rate). Admin → Tax & currency (`components/admin/taxfx.tsx`).
 
 ## Tests
 `tests/test_deal_desk.py`, `test_revenue.py`, `test_orders.py` (full lead-to-order), `test_post_sale.py` (ERP).

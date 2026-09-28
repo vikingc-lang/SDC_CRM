@@ -218,6 +218,7 @@ export default function QuotePage() {
                 <div key={k as string} className="flex justify-between"><span className="text-muted-foreground">{k}</span><span className="tabular">{fmtMoney(v as number, cur)}</span></div>
               ))}
               <div className="flex justify-between border-t pt-2 text-[15px] font-semibold"><span>TCV</span><span className="tabular">{fmtMoney(dirty ? preview.tcv : quote.tcv, cur)}</span></div>
+              {!dirty && <TaxLines quote={quote} cur={cur} canRecalc={can("quotes", "update") && !quote.locked_at} />}
             </CardBody>
           </Card>
           <Card>
@@ -257,6 +258,32 @@ export default function QuotePage() {
             </Card>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+
+function TaxLines({ quote, cur, canRecalc }: { quote: Quote; cur: string; canRecalc: boolean }) {
+  const qc = useQueryClient();
+  const recalc = useMutation({
+    mutationFn: async () => (await api.post<Quote>(`/quotes/${quote.id}/tax`)).data,
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["quote", quote.id] }); toast.success("Tax recalculated"); },
+    onError: (e) => toast.error(errorMessage(e)),
+  });
+  const t = quote.tax_detail;
+  if (!t || !t.engine || t.engine === "none") return null;
+  return (
+    <div className="space-y-1.5 border-t pt-2">
+      {t.summary.map((s) => (
+        <div key={`${s.name}-${s.rate}`} className="flex justify-between text-[13px]"><span className="text-muted-foreground">{s.name} {s.rate}%</span><span className="tabular">{fmtMoney(s.amount, cur)}</span></div>
+      ))}
+      {t.note && <p className="text-[12px] text-muted-foreground">{t.note}</p>}
+      {t.error && <p className="text-[12px] text-destructive">{t.error}</p>}
+      <div className="flex justify-between text-[15px] font-semibold"><span>Total incl. tax</span><span className="tabular">{fmtMoney(quote.grand_total ?? quote.tcv, cur)}</span></div>
+      <div className="flex items-center justify-between text-[11.5px] text-subtle">
+        <span>Estimated by {t.engine_label} on the full term</span>
+        {canRecalc && <button type="button" className="text-primary hover:underline disabled:opacity-50" disabled={recalc.isPending} onClick={() => recalc.mutate()}>Recalculate</button>}
       </div>
     </div>
   );

@@ -41,7 +41,7 @@ def deal_card(d: Deal, rates: dict | None = None) -> dict:
     probability = stage.default_probability
     open_ = not (stage.is_closed_won or stage.is_closed_lost)
     amount = float(d.amount or 0)
-    amount_usd = fx.to_usd(amount, d.currency, rates or fx.DEFAULT_RATES)
+    amount_usd = fx.to_usd(amount, d.currency, rates or fx.DEFAULT_RATES, on=fx.closed_on(d))
     return {
         "id": d.id,
         "title": d.title,

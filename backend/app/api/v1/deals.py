@@ -12,9 +12,11 @@ from app.core.database import get_db
 from app.core.dialect import nulls_last
 from app.core.rbac import Principal, authorize
 from app.models import (
-    Account, Activity, Attachment, Contact, Deal, DealAlert, DealPartner, DealStageHistory, Document, Order, Partner, Pipeline, PipelineStage, Quote, Task,
+    Account, Activity, Attachment, Contact, Deal, DealAlert, DealPartner, DealSplit, DealStageHistory, DealTeamMember, Document, Order, Partner,
+    Pipeline, PipelineStage, Quote, Task,
 )
-from app.services import custom_fields, fx, insights, orders, pipeline_service, scoring
+from app.models.selling import TEAM_ROLES
+from app.services import custom_fields, deal_team, fx, insights, orders, pipeline_service, scoring
 from app.services.clm import document_out
 from app.services.cpq import quote_out
 from app.services.jobs import enqueue
@@ -317,6 +319,11 @@ async def get_deal(deal_id: uuid.UUID, db: AsyncSession = Depends(get_db), p: Pr
     roles = [c.buying_role for c in contacts if c.status == "active"]
     readiness = await orders.readiness(db, deal)
     deal_orders = (await db.execute(select(Order).where(Order.deal_id == deal_id).order_by(Order.created_at.desc()))).scalars().unique().all()
+    editable = True
+    try:
+        await deal_team.ensure_editable(db, p, deal)
+    except HTTPException:
+        editable = False
     return {
         **card,
         "pipeline": {"id": pipeline.id, "name": pipeline.name, "kind": pipeline.kind},
@@ -340,12 +347,136 @@ async def get_deal(deal_id: uuid.UUID, db: AsyncSession = Depends(get_db), p: Pr
         "order_readiness": readiness,
         "orders": [orders.order_out(o) for o in deal_orders],
         "credit_risk": {"score": deal.account.credit_risk_score, "band": deal.account.credit_risk_band, "credit_hold": deal.account.credit_hold},
+        "can_edit": editable and p.can("deals", "update"),
+        **await _selling(db, deal),
     }
+
+
+async def _selling(db: AsyncSession, deal: Deal) -> dict:
+    lines = await deal_team.lines_of(db, deal.id)
+    return {
+        "amount_source": deal.amount_source,
+        "line_items": [deal_team.line_out(i) for i in lines],
+        "line_items_total": round(sum(float(i.total) for i in lines), 2),
+        "team": [deal_team.member_out(m) for m in await deal_team.team_of(db, deal.id)],
+        "splits": [deal_team.split_out(s, float(deal.amount or 0)) for s in await deal_team.splits_of(db, deal.id)],
+        "team_roles": list(TEAM_ROLES),
+    }
+
+
+class LineItemIn(BaseModel):
+    product_id: uuid.UUID
+    quantity: float = Field(gt=0, le=1_000_000)
+    unit_price: float | None = Field(default=None, ge=0)
+    discount_pct: float = Field(default=0, ge=0, le=100)
+    term_months: int = Field(default=12, ge=1, le=120)
+    description: str | None = Field(default=None, max_length=500)
+
+
+class LineItemsIn(BaseModel):
+    lines: list[LineItemIn] = Field(default_factory=list, max_length=100)
+    amount_source: Literal["manual", "lines"] | None = None
+
+
+class TeamMemberIn(BaseModel):
+    user_id: uuid.UUID
+    role: str
+    access: Literal["read", "edit"] = "read"
+
+
+class SplitIn(BaseModel):
+    user_id: uuid.UUID
+    split_type: Literal["revenue", "overlay"] = "revenue"
+    percent: float = Field(gt=0, le=100)
+
+
+class SplitsIn(BaseModel):
+    splits: list[SplitIn] = Field(default_factory=list, max_length=20)
+
+
+async def _editable_deal(db: AsyncSession, p: Principal, deal_id: uuid.UUID) -> Deal:
+    deal = await _get_deal(db, p, deal_id)
+    await deal_team.ensure_editable(db, p, deal)
+    return deal
+
+
+@router.put("/deals/{deal_id}/products")
+async def set_products(deal_id: uuid.UUID, body: LineItemsIn, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("deals", "update"))):
+    deal = await _editable_deal(db, p, deal_id)
+    try:
+        await deal_team.set_lines(db, deal, [line.model_dump() for line in body.lines], body.amount_source)
+    except deal_team.DealTeamError as e:
+        await db.rollback()
+        raise HTTPException(422, str(e)) from e
+    await db.commit()
+    await db.refresh(deal)
+    return {"deal": deal_card(deal, await fx.rates(db)), **await _selling(db, deal)}
+
+
+@router.post("/deals/{deal_id}/products/quote", status_code=201)
+async def quote_from_products(deal_id: uuid.UUID, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("quotes", "create"))):
+    """A draft quote with the deal's products (list prices from the price book; the line discounts carry over)."""
+    from app.services import cpq
+
+    deal = await _get_deal(db, p, deal_id)
+    lines = await deal_team.lines_of(db, deal.id)
+    if not lines:
+        raise HTTPException(422, "Add products to the deal first")
+    has_primary = (await db.execute(select(Quote.id).where(Quote.deal_id == deal.id, Quote.is_primary.is_(True)))).first()
+    quote = Quote(deal_id=deal.id, quote_number=await cpq.next_quote_number(db), name=f"{deal.title} quote", currency=deal.currency,
+                  term_months=max(i.term_months for i in lines), created_by=p.id, status="draft", is_primary=not has_primary)
+    db.add(quote)
+    await db.flush()
+    try:
+        await cpq.rebuild(db, quote, [{"product_id": i.product_id, "quantity": float(i.quantity), "discount_pct": float(i.discount_pct),
+                                       "description": i.description} for i in lines])
+    except cpq.PricingError as exc:
+        await db.rollback()
+        raise HTTPException(422, str(exc)) from exc
+    await db.commit()
+    return {"id": quote.id, "quote_number": quote.quote_number}
+
+
+@router.put("/deals/{deal_id}/team")
+async def set_team_member(deal_id: uuid.UUID, body: TeamMemberIn, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("deals", "update"))):
+    deal = await _editable_deal(db, p, deal_id)
+    try:
+        await deal_team.set_member(db, deal, body.user_id, body.role, body.access)
+    except deal_team.DealTeamError as e:
+        raise HTTPException(422, str(e)) from e
+    await db.commit()
+    return await _selling(db, deal)
+
+
+@router.delete("/deals/{deal_id}/team/{user_id}")
+async def remove_team_member(deal_id: uuid.UUID, user_id: uuid.UUID, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("deals", "update"))):
+    deal = await _editable_deal(db, p, deal_id)
+    member = await db.get(DealTeamMember, (deal.id, user_id))
+    if member is None:
+        raise HTTPException(404, "Not on the team")
+    if (await db.execute(select(DealSplit.id).where(DealSplit.deal_id == deal.id, DealSplit.user_id == user_id))).first():
+        raise HTTPException(409, "Remove their split first")
+    await db.delete(member)
+    await db.commit()
+    return await _selling(db, deal)
+
+
+@router.put("/deals/{deal_id}/splits")
+async def set_splits(deal_id: uuid.UUID, body: SplitsIn, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("deals", "update"))):
+    deal = await _editable_deal(db, p, deal_id)
+    try:
+        await deal_team.set_splits(db, deal, [x.model_dump() for x in body.splits])
+    except deal_team.DealTeamError as e:
+        await db.rollback()
+        raise HTTPException(422, str(e)) from e
+    await db.commit()
+    return await _selling(db, deal)
 
 
 @router.patch("/deals/{deal_id}")
 async def update_deal(deal_id: uuid.UUID, body: DealUpdate, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("deals", "update"))):
     deal = await _get_deal(db, p, deal_id)
+    await deal_team.ensure_editable(db, p, deal)
     data = body.model_dump(exclude_unset=True)
     if "custom_fields" in data:
         try:
@@ -379,6 +510,7 @@ async def update_deal(deal_id: uuid.UUID, body: DealUpdate, db: AsyncSession = D
 async def change_deal_stage(deal_id: uuid.UUID, body: StageChange, background: BackgroundTasks, db: AsyncSession = Depends(get_db),
                             p: Principal = Depends(authorize("deals", "update"))):
     deal = await _get_deal(db, p, deal_id)
+    await deal_team.ensure_editable(db, p, deal)
     stage = await db.get(PipelineStage, body.stage_id)
     if stage is None:
         raise HTTPException(404, "Stage not found")
@@ -400,6 +532,7 @@ async def change_deal_stage(deal_id: uuid.UUID, body: StageChange, background: B
 @router.delete("/deals/{deal_id}", status_code=204)
 async def delete_deal(deal_id: uuid.UUID, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("deals", "delete"))):
     deal = await _get_deal(db, p, deal_id)
+    await deal_team.ensure_editable(db, p, deal)
     await db.delete(deal)
     await db.commit()
 

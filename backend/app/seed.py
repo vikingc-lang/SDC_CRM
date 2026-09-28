@@ -24,11 +24,11 @@ from app.core.rbac import seed_permissions
 from app.core.security import hash_password
 from app.models import (
     Account, Activity, ApprovalGroup, ApprovalPolicy, AssignmentRule, BundleComponent, Collateral, Contact, Contract, CustomFieldDefinition, Deal, DealPartner, DealRegistration,
-    DealStageHistory, EngagementEvent, FxRate, IntakeKey, Lead, OnboardingMilestone, Partner, Pipeline, PipelineStage, PriceBook,
+    DealStageHistory, EngagementEvent, FxRate, FxRateHistory, IntakeKey, Lead, OnboardingMilestone, Partner, Pipeline, PipelineStage, PriceBook,
     PriceBookEntry, Product, ProductRule, ProductUsage, Promotion, Quote,
-    SupportTicket, Task, User,
+    SupportTicket, Task, TaxRate, User,
 )
-from app.services import campaigns, cases, clm, cpq, embeddings, erp, fx, insights, performance, prm, reporting, scoring, sla, storage
+from app.services import campaigns, cases, clm, cpq, embeddings, erp, fx, insights, performance, prm, reporting, scoring, sla, storage, tax
 from app.services.cpq import LEVEL_LABELS
 from app.services.pipeline_templates import PIPELINES
 from app.services.search import account_document
@@ -271,6 +271,9 @@ async def seed(minimal: bool = False, reset: bool = False) -> None:
         await seed_permissions(db)
         for cur, rate in fx.DEFAULT_RATES.items():
             db.add(FxRate(currency=cur, rate_to_usd=rate))
+            db.add(FxRateHistory(currency=cur, effective_date=date(2000, 1, 1), rate_to_usd=rate, source="initial"))
+        for name, country, region, code, rate in tax.DEFAULT_RATES:
+            db.add(TaxRate(name=name, country=country, region=region, tax_code=code, rate=rate))
         users: dict[str, User] = {}
         for email, name, role, _ in USERS:
             users[email] = User(email=email, full_name=name, role=role, password_hash=hash_password(DEMO_PASSWORD))

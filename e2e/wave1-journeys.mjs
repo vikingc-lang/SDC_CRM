@@ -103,7 +103,7 @@ const shot = (page, name) => page.screenshot({ path: `${OUT}/shots/${name}.png` 
   await step("workflows", "Slack action form, save, test run says what it would post", async () => {
     await q.goto(`${BASE}/admin/workflows/new`); await q.waitForLoadState("networkidle");
     await q.locator("#wf-name").fill(`Slack big deals ${RUN}`);
-    await q.getByLabel("Action type").first().selectOption("post_message");
+    await q.getByLabel("Step type").first().selectOption("post_message");
     await q.getByLabel("Incoming webhook URL").fill("https://hooks.slack.com/services/T000/B000/XYZ");
     await q.getByLabel("Message").last().fill("{{title}} is now {{stage}}");
     await shot(q, "workflow-slack");

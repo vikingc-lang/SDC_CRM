@@ -124,7 +124,7 @@ CHECKS = [
     ('tasks', 'tasks_priority_check', "priority IN ('low', 'normal', 'high', 'urgent')"),
     ('validation_rules', 'validation_rules_applies_on_check', "applies_on IN ('create', 'update', 'both')"),
     ('webhook_deliveries', 'webhook_deliveries_status_check', "status IN ('pending', 'success', 'failed', 'dead')"),
-    ('workflow_runs', 'workflow_runs_status_check', "status IN ('done', 'failed', 'dry_run')"),
+    ('workflow_runs', 'workflow_runs_status_check', "status IN ('done', 'failed', 'dry_run', 'waiting', 'cancelled')"),
 ]
 
 UNIQUES = [

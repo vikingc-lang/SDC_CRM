@@ -455,7 +455,7 @@ async def run_job(job: Literal["risk_scan", "escalations", "renewals", "rescore"
     if job == "workflows":
         from app.services import workflows
 
-        return await workflows.run_scheduled(db)
+        return {**await workflows.run_scheduled(db), **await workflows.resume_waiting(db)}
     if job == "risk_scan":
         return await insights.scan_pipeline(db)
     if job == "escalations":

@@ -83,7 +83,9 @@ export default function ProductsPage() {
                 <div><Label>Family</Label><Input value={draft.family ?? ""} onChange={(e) => setDraft({ ...draft, family: e.target.value })} /></div>
                 <div><Label>Billing</Label><Select value={draft.billing_type} onChange={(e) => setDraft({ ...draft, billing_type: e.target.value as Draft["billing_type"] })}><option value="recurring">Recurring (monthly)</option><option value="one_time">One-time</option></Select></div>
                 <div><Label>Unit</Label><Input value={draft.unit} onChange={(e) => setDraft({ ...draft, unit: e.target.value })} /></div>
-                <div className="sm:col-span-3"><Label>Description</Label><Input value={draft.description ?? ""} onChange={(e) => setDraft({ ...draft, description: e.target.value })} /></div>
+                <div className="sm:col-span-2"><Label>Description</Label><Input value={draft.description ?? ""} onChange={(e) => setDraft({ ...draft, description: e.target.value })} /></div>
+                <div><Label htmlFor="product-tax-code">Tax code</Label><Input id="product-tax-code" maxLength={20} placeholder="e.g. SW054000, 998314" value={draft.tax_code ?? ""}
+                  onChange={(e) => setDraft({ ...draft, tax_code: e.target.value })} /></div>
               </div>
               <div className="space-y-3">
                 <Label>Rate cards</Label>

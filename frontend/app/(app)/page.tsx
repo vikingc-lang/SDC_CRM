@@ -20,6 +20,7 @@ import { get } from "@/lib/api";
 import { ui } from "@/lib/store";
 import type { Activity, Alert, Briefing, DashboardSummary, Deal, Task, User } from "@/lib/types";
 import { money } from "@/lib/utils";
+import { currentLocale } from "@/lib/i18n";
 
 const PRIORITY_ICON = { task: CheckSquare, risk: AlertTriangle, closing: CalendarClock, health: HeartPulse };
 
@@ -46,7 +47,7 @@ export default function DashboardPage() {
     <div className="mx-auto max-w-7xl">
       <PageHeader
         title={`${greeting()}${firstName ? `, ${firstName}` : ""}`}
-        description={new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
+        description={new Date().toLocaleDateString(currentLocale(), { weekday: "long", month: "long", day: "numeric" })}
         actions={
           <>
             <Button variant="outline" size="sm" onClick={() => setNewDeal(true)}><Plus className="h-4 w-4" />New deal</Button>

@@ -30,4 +30,9 @@ description: Cirra activity ledger and engagement - activities timeline, tasks w
 
 ## Gotchas
 - Tests that fake `mail.deliver` must accept `html=None` (added for tracked marketing emails).
-- There are no Outlook/Gmail add-ins or two-way calendar sync; don't assume them.
+- Two-way calendar sync: `services/calendar_sync.py` (Google Calendar, Microsoft Graph; OAuth + PKCE with the
+  state in `sso_login_states`, encrypted tokens, incremental cursors). Pull creates meetings only for events with
+  a CRM contact attendee; push mirrors the user's upcoming meetings; `calendar_links` hold etags and a hash of the
+  synced fields (echo and conflict detection; on a two-sided edit the calendar wins). Tests swap providers via
+  `PROVIDERS` or `calendar_sync.http_transport`. Settings → Calendar sync (`components/preferences.tsx`).
+- There are no Outlook/Gmail add-ins; don't assume them.

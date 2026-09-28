@@ -18,10 +18,12 @@ export type WorkflowAction =
   | { type: "update_field"; field: string; value: string }
   | { type: "emit_event"; event: string }
   | { type: "http_request"; url: string }
-  | { type: "post_message"; channel: "slack" | "teams"; webhook_url: string; text: string };
+  | { type: "post_message"; channel: "slack" | "teams"; webhook_url: string; text: string }
+  | { type: "wait"; days?: number; hours?: number }
+  | { type: "branch"; conditions: Filter[]; then: WorkflowAction[]; else: WorkflowAction[] };
 export interface WorkflowRule {
   id?: string; name: string; description: string | null; enabled: boolean; source: string;
-  trigger: { type: "created" | "updated" | "schedule"; fields?: string[]; repeat_after_days?: number | null };
+  trigger: { type: "created" | "updated" | "schedule"; fields?: string[]; repeat_after_days?: number | null; stop_if_unmatched?: boolean };
   conditions: Filter[]; actions: WorkflowAction[];
 }
 interface RuleRow extends WorkflowRule { id: string; run_count: number; last_run_at: string | null; created_by: string | null }
@@ -44,6 +46,14 @@ export const TEMPLATES: Record<string, Omit<WorkflowRule, "id">> = {
     actions: [{ type: "create_task", title: "Review risk on {{title}} ({{account}})", due_in_days: 2, priority: "high", assign_to: "manager" }],
   },
 };
+
+export function countSteps(steps: WorkflowAction[]): number {
+  return steps.reduce((n, s) => n + 1 + (s.type === "branch" ? countSteps(s.then) + countSteps(s.else) : 0), 0);
+}
+
+export function hasWait(steps: WorkflowAction[]): boolean {
+  return steps.some((s) => s.type === "wait" || (s.type === "branch" && (hasWait(s.then) || hasWait(s.else))));
+}
 
 const SOURCE_LABEL: Record<string, string> = { deals: "Opportunities", leads: "Leads", accounts: "Accounts", contacts: "Contacts", activities: "Activities", tasks: "Tasks", quotes: "Quotes", orders: "Orders", cases: "Cases", campaigns: "Campaigns" };
 
@@ -77,7 +87,7 @@ export function WorkflowsPanel() {
                   {r.description && <span className="block text-[12px] text-muted-foreground">{r.description}</span>}</Td>
                 <Td className="text-[13px]">{SOURCE_LABEL[r.source] ?? r.source}</Td>
                 <Td className="text-[13px]">{triggerText(r)}</Td>
-                <Td className="tabular text-[13px]">{r.actions.length} · {r.run_count} run{r.run_count === 1 ? "" : "s"}</Td>
+                <Td className="tabular text-[13px]">{countSteps(r.actions)}{hasWait(r.actions) ? " (multi-step)" : ""} · {r.run_count} run{r.run_count === 1 ? "" : "s"}</Td>
                 <Td className="text-[12.5px] text-muted-foreground">{r.last_run_at ? relativeDays(r.last_run_at) : "Never"}</Td>
                 <Td><label className="flex items-center gap-2 text-[13px]"><input id={`wf-on-${r.id}`} type="checkbox" checked={r.enabled}
                   disabled={toggle.isPending} onChange={() => toggle.mutate(r.id)} aria-label={`Turn ${r.name} ${r.enabled ? "off" : "on"}`} />{r.enabled ? "On" : "Off"}</label></Td>

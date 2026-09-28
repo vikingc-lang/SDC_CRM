@@ -34,7 +34,6 @@ from app.services.notify import emit, notify
 log = logging.getLogger(__name__)
 
 MAX_DEPTH = 3
-MAX_ACTIONS = 10
 SCHEDULE_BATCH = 200
 TRIGGERS = ("created", "updated", "schedule")
 CHANNELS = ("slack", "teams")
@@ -126,9 +125,13 @@ async def send_pending(db: AsyncSession) -> None:
         detail = [dict(d) for d in run.detail]
         detail[item["index"]] = {"action": item["kind"], "ok": ok, "detail": f"{item['label']}: {what}"}
         run.detail = detail
-        run.status = "done" if all(d["ok"] for d in detail) else "failed"
+        if run.status in ("done", "failed"):  # a waiting run settles its status when it finishes
+            run.status = "done" if all(d["ok"] for d in detail) else "failed"
     await db.commit()
-ACTION_TYPES = ("create_task", "notify", "update_field", "emit_event")
+ACTION_TYPES = ("create_task", "notify", "update_field", "emit_event", "http_request", "post_message", "wait", "branch")
+MAX_STEPS = 25          # every step, including those inside branches
+MAX_BRANCH_DEPTH = 2    # a branch may contain one more level of branches
+RESUME_BATCH = 200
 PRIORITIES = ("low", "normal", "high", "urgent")
 
 
@@ -239,10 +242,39 @@ def validate(source: str, trigger: dict, conditions: list, actions: list) -> Non
         raise WorkflowError(str(e)) from e
     if not actions:
         raise WorkflowError("Add at least one action")
-    if len(actions) > MAX_ACTIONS:
-        raise WorkflowError(f"At most {MAX_ACTIONS} actions per workflow")
+    counter = [0]
+    _validate_steps(ent, source, actions, 0, counter)
+    if counter[0] > MAX_STEPS:
+        raise WorkflowError(f"At most {MAX_STEPS} steps per workflow (including steps inside branches)")
+
+
+def _validate_steps(ent: "Entity", source: str, actions: list, depth: int, counter: list[int]) -> None:
+    if not isinstance(actions, list):
+        raise WorkflowError("Steps must be a list")
     for a in actions:
+        counter[0] += 1
         kind = a.get("type")
+        if kind == "wait":
+            days, hours = a.get("days", 0), a.get("hours", 0)
+            if not (isinstance(days, int) and isinstance(hours, int) and 0 <= days <= 365 and 0 <= hours <= 23):
+                raise WorkflowError("A wait is 0 to 365 days plus 0 to 23 hours")
+            if days == 0 and hours == 0:
+                raise WorkflowError("A wait must be at least one hour")
+            continue
+        if kind == "branch":
+            if depth >= MAX_BRANCH_DEPTH:
+                raise WorkflowError(f"Branches can be nested at most {MAX_BRANCH_DEPTH} deep")
+            if not a.get("conditions"):
+                raise WorkflowError("A branch needs at least one condition")
+            try:
+                reporting.validate_filters(source, a["conditions"])
+            except reporting.ReportError as e:
+                raise WorkflowError(str(e)) from e
+            if not a.get("then") and not a.get("else"):
+                raise WorkflowError("Add steps to at least one side of the branch")
+            _validate_steps(ent, source, a.get("then") or [], depth + 1, counter)
+            _validate_steps(ent, source, a.get("else") or [], depth + 1, counter)
+            continue
         if kind == "create_task":
             if not (a.get("title") or "").strip():
                 raise WorkflowError("A task needs a title")
@@ -322,87 +354,164 @@ async def _recipients(db: AsyncSession, spec: str, owner_id) -> list[uuid.UUID]:
     return []
 
 
-async def execute(db: AsyncSession, rule: WorkflowRule, record_id, trigger: str, dry_run: bool = False) -> list[dict]:
-    """Run every action of ``rule`` on one record. Adds a WorkflowRun; the caller commits."""
+async def execute(db: AsyncSession, rule: WorkflowRule, record_id, trigger: str, dry_run: bool = False,
+                  steps: list | None = None, run: WorkflowRun | None = None) -> list[dict]:
+    """Run ``rule``'s steps on one record (or, resuming ``run``, the steps left after its wait). Adds or updates a
+    WorkflowRun; the caller commits. A wait step stops here: the run is saved as ``waiting`` with the remaining
+    steps, and ``resume_waiting`` carries on when the wait is over. Dry runs pass straight through waits and follow
+    the branch the record matches today."""
     ent = ENTITIES[rule.source]
     obj = await db.get(ent.model, record_id)
     if obj is None:
         return [{"action": "-", "ok": False, "detail": "Record no longer exists"}]
     values = await reporting.record_values(db, rule.source, record_id)
     owner_id = await ent.owner(db, obj)
-    results = []
+    results: list[dict] = []
     outbound: list[dict] = []  # HTTP / chat posts, sent after the commit by send_pending()
-    for a in rule.actions:
+    base = len(run.detail) if run is not None else 0
+    queue = list(steps if steps is not None else rule.actions)
+    resume_at, remaining = None, None
+    while queue:
+        a = queue.pop(0)
         kind = a["type"]
-        try:
-            if kind == "create_task":
-                who = (await _recipients(db, a.get("assign_to", "owner"), owner_id)) or [owner_id]
-                title = render(a["title"], values)[:255]
-                due = date.today() + timedelta(days=int(a.get("due_in_days", 1)))
-                if not dry_run:
-                    db.add(Task(title=title, description=render(a.get("description"), values) or None, due_date=due,
-                                priority=a.get("priority", "normal"), owner_id=who[0], assignee_id=who[0],
-                                account_id=ent.account_id(obj), deal_id=ent.deal_id(obj), source="workflow"))
-                results.append({"action": kind, "ok": True, "detail": f"Task “{title}” due {due.isoformat()}" + ("" if who[0] else " (unassigned)")})
-            elif kind == "notify":
-                ids: list[uuid.UUID] = []
-                for r in a["to"]:
-                    ids += await _recipients(db, r, owner_id)
-                ids = list(dict.fromkeys(ids))
-                title = render(a["title"], values)
-                if not dry_run:
-                    notify(db, ids, "workflow", title, render(a.get("body"), values) or None, ent.link(obj))
-                results.append({"action": kind, "ok": bool(ids), "detail": f"Notified {len(ids)} people: {title}" if ids else "Nobody to notify"})
-            elif kind == "update_field":
-                attr, typ, _ = ent.settable[a["field"]]
-                value = a["value"]
-                if typ == "user":
-                    value = uuid.UUID(str(value))
-                    if not (await db.execute(select(User.id).where(User.id == value, User.is_active.is_(True)))).first():
-                        raise WorkflowError("The chosen user is inactive or deleted")
-                if not dry_run:
-                    if rule.source == "cases":  # through the case service: priority re-times SLAs, owner changes notify
-                        from app.services import cases as case_svc
-
-                        await case_svc.update(db, obj, {attr: value})
-                    else:
-                        setattr(obj, attr, value)
-                results.append({"action": kind, "ok": True, "detail": f"Set {a['field']}"})
-            elif kind == "emit_event":
-                name = f"workflow.{a['event']}"
-                if not dry_run:
-                    emit(db, name, ENTITY_TYPE.get(rule.source, rule.source), record_id, {"workflow": rule.name, "record": values})
-                results.append({"action": kind, "ok": True, "detail": f"Emitted {name}"})
-            elif kind == "http_request":
-                host = a["url"].split("/")[2]
-                if dry_run:
-                    results.append({"action": kind, "ok": True, "detail": f"Would POST the record to {host}"})
-                else:  # sent after this rule's changes commit (send_pending)
-                    outbound.append({"index": len(results), "kind": kind, "label": f"POST {host}", "url": a["url"],
-                                     "payload": {"workflow": rule.name, "source": rule.source, "record_id": str(record_id), "trigger": trigger,
-                                                 "record": values}, "headers": {"X-Cirra-Workflow": str(rule.id)}})
-                    results.append({"action": kind, "ok": True, "detail": f"POST {host}: queued"})
-            elif kind == "post_message":
-                text = render(a["text"], values)
-                where = "Slack" if a["channel"] == "slack" else "Microsoft Teams"
-                if dry_run:
-                    results.append({"action": kind, "ok": True, "detail": f"Would post to {where}: {text[:120]}"})
-                else:
-                    outbound.append({"index": len(results), "kind": kind, "label": where, "url": a["webhook_url"], "payload": {"text": text}})
-                    results.append({"action": kind, "ok": True, "detail": f"{where}: queued"})
-        except Exception as e:  # one failing action must not stop the others
-            log.warning("Workflow %s action %s failed: %s", rule.id, kind, e)
-            results.append({"action": kind, "ok": False, "detail": str(e)[:300]})
-    status = "dry_run" if dry_run else ("done" if all(r["ok"] for r in results) else "failed")
+        if kind == "wait":
+            delta = timedelta(days=int(a.get("days", 0)), hours=int(a.get("hours", 0)))
+            label = _wait_label(a)
+            if dry_run:
+                results.append({"action": kind, "ok": True, "detail": f"Would wait {label}, then continue"})
+                continue
+            resume_at, remaining = datetime.now(timezone.utc) + delta, queue
+            results.append({"action": kind, "ok": True, "detail": f"Waiting {label} (until {resume_at:%Y-%m-%d %H:%M} UTC)"})
+            break
+        if kind == "branch":
+            try:
+                hit = bool(await reporting.match_ids(db, rule.source, a["conditions"], [record_id]))
+            except Exception as e:  # a condition on a deleted field: take the else path, say why
+                log.warning("Workflow %s branch condition failed: %s", rule.id, e)
+                hit = False
+            chosen = (a.get("then") if hit else a.get("else")) or []
+            results.append({"action": kind, "ok": True, "detail": f"Condition {'met' if hit else 'not met'}: "
+                                                                   f"{'then' if hit else 'else'} path ({len(chosen)} steps)"})
+            queue = list(chosen) + queue
+            continue
+        await _do_step(db, rule, ent, obj, record_id, values, owner_id, a, trigger, dry_run, results, outbound, base)
+    status = "dry_run" if dry_run else ("waiting" if resume_at else ("done" if all(r["ok"] for r in results) and
+                                                                    (run is None or all(d["ok"] for d in run.detail)) else "failed"))
     if not dry_run:
-        run = WorkflowRun(id=uuid.uuid4(), rule_id=rule.id, record_id=record_id, trigger=trigger, status=status, detail=results)
-        db.add(run)
+        if run is None:
+            run = WorkflowRun(id=uuid.uuid4(), rule_id=rule.id, record_id=record_id, trigger=trigger, status=status, detail=results)
+            db.add(run)
+        else:
+            run.detail, run.status = [*run.detail, *results], status
+        run.resume_at, run.pending_actions = resume_at, remaining
         for item in outbound:
             item["run_id"] = run.id
         db.info.setdefault("wf_http", []).extend(outbound)
-        rule.run_count = (rule.run_count or 0) + 1
-        rule.last_run_at = datetime.now(timezone.utc)
+        if base == 0:
+            rule.run_count = (rule.run_count or 0) + 1
+            rule.last_run_at = datetime.now(timezone.utc)
     return results
+
+
+def _wait_label(a: dict) -> str:
+    parts = [f"{a.get('days')} day{'s' if a.get('days') != 1 else ''}" if a.get("days") else "",
+             f"{a.get('hours')} hour{'s' if a.get('hours') != 1 else ''}" if a.get("hours") else ""]
+    return " ".join(p for p in parts if p)
+
+
+async def _do_step(db: AsyncSession, rule: WorkflowRule, ent: Entity, obj, record_id, values: dict, owner_id, a: dict, trigger: str,
+                   dry_run: bool, results: list[dict], outbound: list[dict], base: int) -> None:
+    kind = a["type"]
+    try:
+        if kind == "create_task":
+            who = (await _recipients(db, a.get("assign_to", "owner"), owner_id)) or [owner_id]
+            title = render(a["title"], values)[:255]
+            due = date.today() + timedelta(days=int(a.get("due_in_days", 1)))
+            if not dry_run:
+                db.add(Task(title=title, description=render(a.get("description"), values) or None, due_date=due,
+                            priority=a.get("priority", "normal"), owner_id=who[0], assignee_id=who[0],
+                            account_id=ent.account_id(obj), deal_id=ent.deal_id(obj), source="workflow"))
+            results.append({"action": kind, "ok": True, "detail": f"Task “{title}” due {due.isoformat()}" + ("" if who[0] else " (unassigned)")})
+        elif kind == "notify":
+            ids: list[uuid.UUID] = []
+            for r in a["to"]:
+                ids += await _recipients(db, r, owner_id)
+            ids = list(dict.fromkeys(ids))
+            title = render(a["title"], values)
+            if not dry_run:
+                notify(db, ids, "workflow", title, render(a.get("body"), values) or None, ent.link(obj))
+            results.append({"action": kind, "ok": bool(ids), "detail": f"Notified {len(ids)} people: {title}" if ids else "Nobody to notify"})
+        elif kind == "update_field":
+            attr, typ, _ = ent.settable[a["field"]]
+            value = a["value"]
+            if typ == "user":
+                value = uuid.UUID(str(value))
+                if not (await db.execute(select(User.id).where(User.id == value, User.is_active.is_(True)))).first():
+                    raise WorkflowError("The chosen user is inactive or deleted")
+            if not dry_run:
+                if rule.source == "cases":  # through the case service: priority re-times SLAs, owner changes notify
+                    from app.services import cases as case_svc
+
+                    await case_svc.update(db, obj, {attr: value})
+                else:
+                    setattr(obj, attr, value)
+            results.append({"action": kind, "ok": True, "detail": f"Set {a['field']}"})
+        elif kind == "emit_event":
+            name = f"workflow.{a['event']}"
+            if not dry_run:
+                emit(db, name, ENTITY_TYPE.get(rule.source, rule.source), record_id, {"workflow": rule.name, "record": values})
+            results.append({"action": kind, "ok": True, "detail": f"Emitted {name}"})
+        elif kind == "http_request":
+            host = a["url"].split("/")[2]
+            if dry_run:
+                results.append({"action": kind, "ok": True, "detail": f"Would POST the record to {host}"})
+            else:  # sent after this rule's changes commit (send_pending)
+                outbound.append({"index": base + len(results), "kind": kind, "label": f"POST {host}", "url": a["url"],
+                                 "payload": {"workflow": rule.name, "source": rule.source, "record_id": str(record_id), "trigger": trigger,
+                                             "record": values}, "headers": {"X-Cirra-Workflow": str(rule.id)}})
+                results.append({"action": kind, "ok": True, "detail": f"POST {host}: queued"})
+        elif kind == "post_message":
+            text = render(a["text"], values)
+            where = "Slack" if a["channel"] == "slack" else "Microsoft Teams"
+            if dry_run:
+                results.append({"action": kind, "ok": True, "detail": f"Would post to {where}: {text[:120]}"})
+            else:
+                outbound.append({"index": base + len(results), "kind": kind, "label": where, "url": a["webhook_url"], "payload": {"text": text}})
+                results.append({"action": kind, "ok": True, "detail": f"{where}: queued"})
+    except Exception as e:  # one failing action must not stop the others
+        log.warning("Workflow %s action %s failed: %s", rule.id, kind, e)
+        results.append({"action": kind, "ok": False, "detail": str(e)[:300]})
+
+
+async def resume_waiting(db: AsyncSession) -> dict:
+    """Continue runs whose wait is over. A run stops (``cancelled``) when its rule was switched off or its record
+    deleted, and ends early when the record no longer matches the rule's conditions (unless the rule keeps going:
+    ``trigger.stop_if_unmatched = false``). Rows are claimed with SKIP LOCKED so two workers never resume one run."""
+    now = datetime.now(timezone.utc)
+    runs = (await db.execute(select(WorkflowRun).where(WorkflowRun.status == "waiting", WorkflowRun.resume_at <= now)
+                             .order_by(WorkflowRun.resume_at).limit(RESUME_BATCH).with_for_update(skip_locked=True))).scalars().all()
+    stats = {"resumed": 0, "cancelled": 0, "stopped": 0}
+    db.info["wf_depth"] = 1
+    for run in runs:
+        rule = await db.get(WorkflowRule, run.rule_id)
+        record_ok = rule is not None and run.record_id is not None and await db.get(ENTITIES[rule.source].model, run.record_id) is not None
+        if rule is None or not rule.enabled or not record_ok:
+            why = "Workflow switched off" if rule is not None and not rule.enabled else "Record no longer exists"
+            run.detail = [*run.detail, {"action": "resume", "ok": True, "detail": f"Stopped: {why}"}]
+            run.status, run.resume_at, run.pending_actions = "cancelled", None, None
+            stats["cancelled"] += 1
+            continue
+        if rule.conditions and rule.trigger.get("stop_if_unmatched", True) and not await reporting.match_ids(db, rule.source, rule.conditions, [run.record_id]):
+            run.detail = [*run.detail, {"action": "resume", "ok": True, "detail": "Stopped: the record no longer matches the conditions"}]
+            run.status, run.resume_at, run.pending_actions = "done", None, None
+            stats["stopped"] += 1
+            continue
+        db.info["wf_rule"] = rule.id
+        await execute(db, rule, run.record_id, run.trigger, steps=run.pending_actions or [], run=run)
+        stats["resumed"] += 1
+    await db.commit()
+    await send_pending(db)
+    return stats
 
 
 # ---- record triggers ----------------------------------------------------------------------------------

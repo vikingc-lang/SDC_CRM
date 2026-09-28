@@ -6,7 +6,9 @@ import { RbacPanel, UsersPanel } from "@/components/admin/access";
 import { CustomFieldsPanel, GatesPanel } from "@/components/admin/config";
 import { ConfigTransferPanel, ObjectsPanel, SharingRulesPanel, ValidationRulesPanel } from "@/components/admin/platform";
 import { DataPanel } from "@/components/admin/data";
+import { AiGovernancePanel } from "@/components/admin/ai";
 import { AuditPanel, CompliancePanel, DedupPanel } from "@/components/admin/governance";
+import { TaxCurrencyPanel } from "@/components/admin/taxfx";
 import { JobsPanel } from "@/components/admin/integrations";
 import { ApprovalChainPanel, LeadManagementPanel, StagesPanel } from "@/components/admin/leadtoorder";
 import { ApiKeysPanel, IntegrationReference, WebhooksPanel } from "@/components/admin/developer";
@@ -17,7 +19,7 @@ import { SecurityPanel } from "@/components/security";
 import { Tabs } from "@/components/ui/extra";
 import { useMe } from "@/lib/me";
 
-type Tab = "users" | "security" | "rbac" | "audit" | "privacy" | "dedup" | "fields" | "leads" | "workflows" | "service" | "territories" | "chain" | "stages" | "gates" | "data" | "developer" | "jobs" | "objects" | "rules" | "sharing" | "config";
+type Tab = "users" | "security" | "rbac" | "audit" | "privacy" | "dedup" | "fields" | "leads" | "workflows" | "service" | "territories" | "chain" | "stages" | "gates" | "data" | "developer" | "jobs" | "objects" | "rules" | "sharing" | "config" | "ai" | "tax";
 
 export default function AdminPage() {
   const { can } = useMe();
@@ -34,6 +36,8 @@ export default function AdminPage() {
     { value: "sharing", label: "Sharing rules", show: can("admin", "update") },
     { value: "leads", label: "Lead management", show: can("admin", "update") },
     { value: "workflows", label: "Workflows", show: can("admin", "read") },
+    { value: "ai", label: "AI governance", show: can("admin", "read") },
+    { value: "tax", label: "Tax & currency", show: can("finance", "read") && can("admin", "read") },
     { value: "service", label: "Service", show: can("admin", "update") },
     { value: "territories", label: "Territories & incentives", show: can("admin", "update") },
     { value: "chain", label: "Approval chain", show: can("admin", "update") },
@@ -65,6 +69,8 @@ export default function AdminPage() {
       {current === "config" && <ConfigTransferPanel />}
       {current === "leads" && <LeadManagementPanel />}
       {current === "workflows" && <WorkflowsPanel />}
+      {current === "ai" && <AiGovernancePanel />}
+      {current === "tax" && <TaxCurrencyPanel />}
       {current === "service" && <ServicePanel />}
       {current === "territories" && <div className="space-y-6"><TerritoriesPanel /><CommissionPlansPanel /></div>}
       {current === "chain" && <ApprovalChainPanel />}

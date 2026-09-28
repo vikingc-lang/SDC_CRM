@@ -5,6 +5,7 @@ import { AudioLines, Brain, CalendarDays, Copy, Cpu, Database, Inbox, Landmark, 
 import { useState } from "react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/AppShell";
+import { CalendarSyncCard, RegionCard } from "@/components/preferences";
 import { SecurityCard } from "@/components/security";
 import { AidenAvatar } from "@/components/Brand";
 import { Badge } from "@/components/ui/badge";
@@ -52,7 +53,9 @@ export default function SettingsPage() {
       <PageHeader title="Settings" description="Your mail and calendar connections, plus the workspace intelligence layer" />
       <div className="space-y-6">
         <SecurityCard />
+        <RegionCard />
         <MailCard />
+        <CalendarSyncCard />
         <CalendarCard />
         <Card>
           <CardHeader title="Aiden · intelligence layer" icon={<AidenAvatar size={18} />} description="The models behind Aiden, your AI assistant. Configured with environment variables at deploy time." />
@@ -168,7 +171,7 @@ function CalendarCard() {
   });
   return (
     <Card>
-      <CardHeader icon={<CalendarDays className="h-4 w-4 text-muted-foreground" />} title="Calendar"
+      <CardHeader icon={<CalendarDays className="h-4 w-4 text-muted-foreground" />} title="Calendar feed and .ics import"
         description="Subscribe to your tasks and milestones from Outlook, Google Calendar, Apple Calendar or any CalDAV client. Import .ics invites to log meetings with attendees matched to contacts." />
       <CardBody className="space-y-3">
         {feed ? (

@@ -32,6 +32,7 @@ config:
   ECOSYSTEM_WEBHOOKS: "{}"
   MAX_UPLOAD_MB: "25"
   JWT_EXPIRE_MINUTES: "720"
+  FX_FEED_URL: ""                    # daily reference exchange rates; empty = entered by hand
 
 api:
   replicas: 2

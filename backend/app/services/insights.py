@@ -13,7 +13,7 @@ from sqlalchemy import or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Account, Activity, Contact, Deal, PipelineStage, Task
-from app.services import embeddings, llm
+from app.services import agents, embeddings, llm
 from app.services.ai_extractor import detect_signals
 from app.services.serializers import activity_out, days_between
 
@@ -77,10 +77,9 @@ async def run_stage_trigger(db: AsyncSession, deal_id: uuid.UUID, user_id: uuid.
             f"Loss post-mortem for {deal.title} ({deal.account.name}): lost on {reason}. Amount {deal.currency} {float(deal.amount):,.0f}. "
             f"Competitors: {comp}. Rep debrief: {deal.loss_debrief or 'n/a'} Signals before loss: {risks}"
         )
-        memo = Activity(account_id=deal.account_id, deal_id=deal.id, user_id=user_id, activity_type="note", summary=postmortem,
-                        sentiment="negative", source="system")
-        memo.embedding = await embeddings.embed(postmortem)
-        db.add(memo)
+        await agents.propose(db, "stage_assistant", "log_note", deal, f"Loss post-mortem note for {deal.title}",
+                             {"summary": postmortem, "sentiment": "negative", "user_id": str(user_id) if user_id else None},
+                             "The deal closed lost; the post-mortem keeps the reasons and signals searchable for the next deal.")
         insights["postmortem"] = postmortem
         if deal.deal_type == "renewal":
             deal.account.lifecycle_stage = "churned"
@@ -90,16 +89,19 @@ async def run_stage_trigger(db: AsyncSession, deal_id: uuid.UUID, user_id: uuid.
         insights["competitors"] = signals["competitors"] or insights.get("competitors", [])
         insights["pain_points"] = insights.get("pain_points") or signals["pain_points"]
     elif stage.name in ("Solution Demo", "Demo Completed", "Joint Demo"):
-        insights["recap_email"] = await draft_email(db, deal, purpose="demo recap")
+        await agents.propose(db, "stage_assistant", "save_draft", deal, f"Demo recap email draft for {deal.title}",
+                             {"key": "recap_email", "text": await draft_email(db, deal, purpose="demo recap")},
+                             f"The deal reached {stage.name}; a recap sent within a day keeps the evaluation criteria agreed.")
         for title in ("Send demo recap email with agreed evaluation criteria", "Confirm technical validation owner and timeline"):
-            db.add(Task(title=title, due_date=date.today() + timedelta(days=2), account_id=deal.account_id, deal_id=deal.id,
-                        owner_id=deal.owner_id, assignee_id=deal.owner_id, source="ai"))
+            await agents.propose(db, "stage_assistant", "create_task", deal, title, {"title": title, "due_in_days": 2},
+                                 f"Standard follow-up for the {stage.name} stage.")
     elif stage.name in ("Proposal/InfoSec", "Proposal Sent", "Negotiation"):
         days_open = days_between(deal.created_at, now)
         insights["velocity"] = {"days_in_pipeline": days_open, "benchmark_days": 14, "status": "stagnating" if days_open > 14 else "on_pace"}
         if days_open > 14:
-            db.add(Task(title="Deal is behind 14-day velocity benchmark: agree a mutual close plan", due_date=date.today() + timedelta(days=1),
-                        account_id=deal.account_id, deal_id=deal.id, owner_id=deal.owner_id, assignee_id=deal.owner_id, source="ai", priority="high"))
+            title = "Deal is behind 14-day velocity benchmark: agree a mutual close plan"
+            await agents.propose(db, "stage_assistant", "create_task", deal, title, {"title": title, "due_in_days": 1, "priority": "high"},
+                                 f"The deal has been open {days_open} days against a 14-day benchmark.")
 
     insights["last_trigger"] = {"stage": stage.name, "at": now.isoformat()}
     deal.ai_insights = insights
@@ -204,6 +206,7 @@ async def scan_pipeline(db: AsyncSession) -> dict:
         if key not in seen:
             alert.resolved_at = now
             stats["resolved"] += 1
+    stats["close_dates_proposed"] = await agents.pipeline_monitor(db, deals)
     await db.commit()
     return stats
 
@@ -261,6 +264,7 @@ async def briefing(db: AsyncSession, principal) -> dict:
             COPILOT_SYSTEM,
             f"Write a 2-sentence morning briefing for a sales rep based on these priorities:\n{bullet_ctx}",
             max_tokens=400,
+            feature="briefing",
         )
     return {"headline": llm_text or headline, "priorities": priorities[:12], "generated_at": datetime.now(timezone.utc)}
 
@@ -293,6 +297,7 @@ async def ask(db: AsyncSession, question: str, account_id: uuid.UUID | None = No
             f"CRM FACTS:\n{facts['text']}\n\nRELEVANT ACTIVITY NOTES:\n{context or 'none'}\n\nQUESTION: {question}\n"
             "Cite activity notes as [n] when you use them.",
             max_tokens=1200,
+            feature="ask",
         )
     if not answer:
         answer = facts["text"] if facts["text"] else ""
@@ -372,6 +377,7 @@ async def draft_email(db: AsyncSession, deal: Deal, purpose: str = "follow-up") 
             f"(stage: {deal.stage.name}). Recent context:\n{ctx}\nOpen action items: {', '.join(t.title for t in open_tasks) or 'none'}.\n"
             "Include a subject line on the first line as 'Subject: ...'. Under 170 words.",
             max_tokens=800,
+            feature="draft_email",
         )
         if out:
             return out
@@ -400,6 +406,7 @@ async def account_brief(db: AsyncSession, account: Account, deals: list[dict], c
             f"Write a 3-sentence account brief for {account.name} (health {account.health_score}/100).\nDeals:\n{deal_ctx or 'none'}\n"
             f"Stakeholders: {', '.join(f'{c.full_name} ({c.buying_role})' for c in contacts) or 'none'}\nRecent activity:\n{ctx}",
             max_tokens=500,
+            feature="account_brief",
         )
         if out:
             return out

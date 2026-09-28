@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { cn, money } from "@/lib/utils";
+import { currentLocale } from "@/lib/i18n";
 
 /* Charts follow the data-viz reference: single blue series, <=24px bars with 4px data-end
    radius, hairline recessive grid, hover tooltips, text in text tokens (never series color). */
@@ -70,7 +71,7 @@ export function ForecastByMonth({ data }: { data: { month: string; weighted: num
   const top = Math.ceil(max / step) * step;
   const ticks = Array.from({ length: Math.round(top / step) + 1 }, (_, i) => i * step);
   const H = 150;
-  const label = (m: string) => new Date(`${m}-01T00:00:00`).toLocaleDateString("en-US", { month: "short" });
+  const label = (m: string) => new Date(`${m}-01T00:00:00`).toLocaleDateString(currentLocale(), { month: "short" });
   if (!rows.length) return <p className="py-10 text-center text-sm text-muted-foreground">No close dates set on open deals.</p>;
   return (
     <div className="relative flex gap-2">
@@ -91,7 +92,7 @@ export function ForecastByMonth({ data }: { data: { month: string; weighted: num
               <div className={cn("w-full max-w-[24px] rounded-t bg-series-1 transition-opacity", hover !== null && hover !== i && "opacity-60")} style={{ height: Math.max(2, (d.weighted / top) * H) }} />
               {hover === i && (
                 <div className="pointer-events-none absolute z-10 -translate-y-full whitespace-nowrap rounded-md border bg-surface px-2.5 py-1.5 text-xs shadow-pop" style={{ bottom: (d.weighted / top) * H + 8 }}>
-                  <div className="font-medium">{new Date(`${d.month}-01T00:00:00`).toLocaleDateString("en-US", { month: "long", year: "numeric" })}</div>
+                  <div className="font-medium">{new Date(`${d.month}-01T00:00:00`).toLocaleDateString(currentLocale(), { month: "long", year: "numeric" })}</div>
                   <div className="tabular">Weighted {money(d.weighted)}</div>
                 </div>
               )}

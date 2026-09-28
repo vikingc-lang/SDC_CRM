@@ -28,10 +28,10 @@ audit_enabled: ContextVar[bool] = ContextVar("audit_enabled", default=True)
 
 _SKIP_FIELDS = {"embedding", "search_tsv", "updated_at", "created_at", "password_hash", "secret_encrypted", "key",
                 "mfa_secret", "mfa_recovery_hashes", "mfa_last_step", "session_version", "last_login_at",
-                "key_hash", "secret_enc", "cursor_event_id", "consecutive_failures", "last_success_at", "last_failure_at", "last_used_at"}
+                "key_hash", "secret_enc", "token_encrypted", "sync_token", "remote_etag", "local_hash", "cursor_event_id", "consecutive_failures", "last_success_at", "last_failure_at", "last_used_at"}
 _UNAUDITED = {
     "AuditLog", "ConsentEvent", "ErasureLog", "Notification", "SubjectKey", "IntegrationEvent", "ErpSyncRun",
-    "CollateralDownload", "SsoLoginState", "WorkflowRun", "WebhookDelivery",
+    "CollateralDownload", "SsoLoginState", "WorkflowRun", "WebhookDelivery", "AiUsage", "CalendarLink", "NumberSequence",
 }
 _MAX = 4000
 

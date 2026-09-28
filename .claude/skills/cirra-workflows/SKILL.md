@@ -21,6 +21,11 @@ description: Cirra no-code workflow engine - rules with created / field-changed 
 - Workflow sessions are system sessions: validation rules and field security don't apply.
 - Outbound URLs must be https to public hosts (`developer.clean_url` + `_blocked_host`).
 - Per-rule failures roll back that rule only and are recorded in `workflow_runs`.
+- Steps are a list; `wait` ({days, hours}) stops the run as `waiting` with `pending_actions` + `resume_at`;
+  `resume_waiting` (job `workflow_waits`, every 5 min, SKIP LOCKED) continues it, cancelling when the rule is
+  off or the record gone and stopping when the record no longer matches (unless `trigger.stop_if_unmatched`
+  is false). `branch` ({conditions, then, else}) is evaluated on the record at that moment. Limits:
+  `MAX_STEPS` 25 including nested, `MAX_BRANCH_DEPTH` 2. Run statuses: done | failed | dry_run | waiting | cancelled.
 
 ## Recipes
 - New record type: add an `Entity` to `ENTITIES` (model, label, watch map, owner, link, account/deal getters,
@@ -29,7 +34,8 @@ description: Cirra no-code workflow engine - rules with created / field-changed 
   and add its form to the workflow editor.
 
 ## Tests
-`tests/test_workflows.py`, `test_wave1.py`, `test_wave1_review.py` (after-commit HTTP, SSRF, no body logging).
+`tests/test_workflows.py`, `test_wave1.py`, `test_wave1_review.py` (after-commit HTTP, SSRF, no body logging),
+`test_p0_depth.py` (wait / branch / resume / stop / cancel).
 Always `await workflows.drain()` before asserting on workflow effects.
 
 ## Gotchas

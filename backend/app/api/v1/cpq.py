@@ -41,6 +41,7 @@ class ProductIn(BaseModel):
     unit: str = "user / month"
     active: bool = True
     product_type: Literal["standard", "bundle"] = "standard"
+    tax_code: str | None = Field(default=None, max_length=20)  # left unchanged when not sent
     prices: list[PriceIn] = []
 
 
@@ -110,8 +111,9 @@ async def list_products(include_inactive: bool = False, db: AsyncSession = Depen
 
 
 async def _apply_product(db: AsyncSession, product: Product, body: ProductIn) -> None:
-    for k, v in body.model_dump(exclude={"prices"}).items():
-        setattr(product, k, v)
+    skip = {"prices"} | ({"tax_code"} if "tax_code" not in body.model_fields_set else set())
+    for k, v in body.model_dump(exclude=skip).items():
+        setattr(product, k, (v.strip() or None) if k == "tax_code" and v else v)
     for price in body.prices:
         tiers = sorted([t.model_dump() for t in price.tiers], key=lambda t: t["min_qty"])
         if tiers[0]["min_qty"] > 1:

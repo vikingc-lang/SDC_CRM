@@ -34,6 +34,8 @@ class Order(Base):
     ship_to: Mapped[dict] = mapped_column(JSONB, default=dict)
     tax_exempt: Mapped[bool] = mapped_column(Boolean, default=False)
     total: Mapped[Decimal] = mapped_column(Numeric(16, 2), default=0)
+    tax_total: Mapped[Decimal] = mapped_column(Numeric(16, 2), default=0, server_default="0")
+    tax_detail: Mapped[dict] = mapped_column(JSONB, default=dict)
     erp_order_id: Mapped[str | None] = mapped_column(String(64))
     erp_status: Mapped[str | None] = mapped_column(String(40))
     erp_message: Mapped[str | None] = mapped_column(Text)

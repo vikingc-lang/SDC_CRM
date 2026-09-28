@@ -213,6 +213,10 @@ async def rebuild(db: AsyncSession, quote: Quote, lines: list[dict]) -> Quote:
                 a.status = "superseded"
         quote.status, quote.approved_at = "draft", None
     await db.flush()
+    from app.services import tax
+
+    await tax.apply_to_quote(db, quote, deal)
+    await db.flush()
     await db.refresh(quote, ["lines", "approvals"])
     return quote
 
@@ -364,6 +368,7 @@ def quote_out(q: Quote) -> dict:
         "term_months": q.term_months, "payment_terms": q.payment_terms, "status": q.status, "valid_until": q.valid_until,
         "list_total": float(q.list_total), "discount_total": float(q.discount_total), "max_discount_pct": float(q.max_discount_pct),
         "one_time_total": float(q.one_time_total), "acv": float(q.acv), "tcv": float(q.tcv), "notes": q.notes,
+        "tax_total": float(q.tax_total or 0), "tax_detail": q.tax_detail or {}, "grand_total": float(q.tcv) + float(q.tax_total or 0),
         "approved_at": q.approved_at, "created_at": q.created_at, "promo_code": q.promo_code,
         "promo_discount_total": float(q.promo_discount_total or 0), "is_primary": q.is_primary, "locked_at": q.locked_at,
         "custom_terms": q.custom_terms, "billing_frequency": q.billing_frequency, "price_book_id": q.price_book_id,
@@ -388,7 +393,7 @@ def quote_out(q: Quote) -> dict:
 
 def product_out(p: Product) -> dict:
     return {"id": p.id, "sku": p.sku, "name": p.name, "description": p.description, "family": p.family,
-            "billing_type": p.billing_type, "unit": p.unit, "active": p.active, "product_type": p.product_type,
+            "billing_type": p.billing_type, "unit": p.unit, "active": p.active, "product_type": p.product_type, "tax_code": p.tax_code,
             "prices": [{"currency": e.currency, "tiers": sorted(e.tiers, key=lambda t: t["min_qty"])} for e in p.prices if e.price_book_id is None]}
 
 

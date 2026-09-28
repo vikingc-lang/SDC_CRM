@@ -120,6 +120,29 @@ mail relay).
   log with status and duration. `LOG_FORMAT=json` switches the whole API to one JSON object per line for log shippers.
 - **Response hardening:** `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer` and a deny-all CSP on API
   responses (the API only serves JSON; the interactive docs are exempt).
+- **AI governance:**
+  - Every model call is metered: tokens, cost, latency and outcome, per person and per feature.
+  - Organisation and per-person monthly budgets, and daily call limits, fall back to the rule-based engine
+    instead of failing.
+  - Personal data (emails, phones, cards, IBANs, national ids) is masked before prompts and restored in answers.
+  - Prompt-injection attempts are flagged (or blocked) and all CRM text is fenced as untrusted.
+  - AI agents change records only through proposals, under per-agent permissions, and apply automatically or
+    after the owner approves (Approvals → AI suggestions).
+  - Configured in Admin → AI governance.
+- **Selling depth:**
+  - Opportunity products priced from the account's price books.
+  - Deal teams with read or edit access that extends row-level scope.
+  - Revenue and overlay splits that drive quota credit and commission.
+  - Workflows with waits and if/otherwise branches that resume on schedule.
+- **Finance:**
+  - Dated exchange rates: closed business converts at its close-date rate; optional daily reference feed.
+  - Tax on quotes and orders from a built-in rate table, India GST (CGST + SGST / IGST) or Avalara AvaTax
+    (Admin → Tax & currency).
+- **Calendar and language:**
+  - Two-way Google Calendar and Microsoft 365 sync (Settings → Calendar sync; OAuth apps configured by the
+    `*_CALENDAR_*` settings).
+  - Per-user language (English, Spanish, French, German, Hindi) with local number, currency, date and time-zone
+    formats (Settings → Language and region).
 - **Database portability:** PostgreSQL is the reference database. Models use portable types, the full schema
   (checks, uniques, indexes) is declared in the models, and database-specific SQL lives in one adapter. The same
   schema therefore builds on MySQL, SQL Server, Oracle or SQLite, and `python -m app.dbtools schema|copy|verify`

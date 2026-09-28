@@ -69,6 +69,8 @@ class User(Base):
     # Bumped to revoke every outstanding access token (MFA reset, deactivation)
     session_version: Mapped[int] = mapped_column(Integer, default=0)
     last_login_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    locale: Mapped[str | None] = mapped_column(String(10))  # UI language and formats, e.g. "en-US", "de-DE"; None = browser
+    timezone: Mapped[str | None] = mapped_column(String(64))  # IANA zone for dates in the UI and emails; None = browser
     created_at: Mapped[datetime] = _created(nullable=False)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now(), onupdate=func.now(), nullable=False)
 
@@ -255,6 +257,7 @@ class Deal(Base):
     incoterms: Mapped[str | None] = mapped_column(String(10))
     lead_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("leads.id", ondelete="SET NULL", use_alter=True))
     forecast_category: Mapped[str | None] = mapped_column(String(12))  # rep override of the stage's category
+    amount_source: Mapped[str] = mapped_column(String(6), default="manual", server_default="manual")  # manual | lines
     stage_entered_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now(), nullable=False)
     closed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     created_at: Mapped[datetime] = _created(nullable=False)
@@ -368,6 +371,9 @@ from app.models.performance import *  # noqa: E402,F401,F403
 from app.models.marketing import *  # noqa: E402,F401,F403
 from app.models.developer import *  # noqa: E402,F401,F403
 from app.models.engagement import *  # noqa: E402,F401,F403
+from app.models.governance import *  # noqa: E402,F401,F403
+from app.models.selling import *  # noqa: E402,F401,F403
+from app.models.calendars import *  # noqa: E402,F401,F403
 
 from app.models import schema_rules as _schema_rules  # noqa: E402
 

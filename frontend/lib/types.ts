@@ -75,7 +75,14 @@ export interface DealDetail extends Deal {
   partners: { id: UUID; partner: { id: UUID; name: string; tier: string }; role: string; split_pct: number; commission_rate: number | null }[];
   order_details?: OrderDetails; order_readiness?: ReadinessCheck[]; orders?: Order[];
   credit_risk?: { score: number | null; band: string | null; credit_hold: boolean };
+  can_edit?: boolean;
+  amount_source: "manual" | "lines"; line_items: LineItem[]; line_items_total: number; team: TeamMember[]; splits: Split[]; team_roles: string[];
 }
+
+export interface LineItem { id?: UUID; product_id: UUID; sku?: string; name?: string; description?: string | null; billing_type?: string; unit?: string;
+  quantity: number; unit_price: number | null; discount_pct: number; term_months: number; total?: number }
+export interface TeamMember { user: { id: UUID; full_name: string; role: string }; role: string; access: "read" | "edit"; added_at: string }
+export interface Split { id?: UUID; user: { id: UUID; full_name: string }; split_type: "revenue" | "overlay"; percent: number; amount?: number }
 
 export interface Account360 {
   account: {
@@ -131,6 +138,7 @@ export interface Me {
   partner: { id: UUID; name: string; tier: string } | null;
   permissions: Record<string, Perm>;
   security: { mfa_enabled: boolean; mfa_required: boolean; recovery_codes_left: number; sso_linked: boolean; has_password: boolean };
+  preferences?: { locale: string | null; timezone: string | null };
 }
 
 export interface GateRule { type: string; label?: string; [k: string]: unknown }
@@ -148,9 +156,12 @@ export interface Quote { id: UUID; deal_id: UUID; quote_number: string; name: st
   approved_at: string | null; created_at: string; deal: { id: UUID; title: string; account: { id: UUID; name: string; credit_hold: boolean } } | null;
   lines: QuoteLine[]; approvals: ApprovalReq[]; required_approvals?: { required_role: string; reason: string; level?: number }[]; documents?: DocumentSummary[];
   is_primary?: boolean; locked_at?: string | null; promo_code?: string | null; promo_discount_total?: number; custom_terms?: string | null;
-  billing_frequency?: "annual" | "quarterly" | "monthly"; price_book_id?: UUID | null; current_level?: number | null }
+  billing_frequency?: "annual" | "quarterly" | "monthly"; price_book_id?: UUID | null; current_level?: number | null;
+  tax_total?: number; grand_total?: number; tax_detail?: TaxDetail }
+export interface TaxDetail { engine?: string; engine_label?: string; total: number; summary: { name: string; rate: number; amount: number }[];
+  note: string | null; error: string | null }
 export interface Product { id: UUID; sku: string; name: string; description: string | null; family: string | null; billing_type: "recurring" | "one_time";
-  unit: string; active: boolean; product_type?: "standard" | "bundle"; prices: { currency: string; tiers: { min_qty: number; unit_price: number }[] }[] }
+  unit: string; active: boolean; product_type?: "standard" | "bundle"; tax_code?: string | null; prices: { currency: string; tiers: { min_qty: number; unit_price: number }[] }[] }
 
 export interface Signer { id: UUID; name: string; email: string; party: "customer" | "company"; order: number; status: string; signed_at: string | null;
   signed_ip: string | null; signature_text: string | null; sign_url: string | null }

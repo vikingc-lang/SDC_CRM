@@ -99,7 +99,8 @@ async def create_order(db: AsyncSession, deal: Deal, user: User | None, *, enfor
                   payment_terms=quote.payment_terms, billing_frequency=quote.billing_frequency, term_months=quote.term_months, start_date=start,
                   requested_delivery_date=deal.requested_delivery_date, incoterms=deal.incoterms,
                   bill_to=deal.bill_to or account.billing_address or {}, ship_to=deal.ship_to or {}, tax_exempt=deal.tax_exempt,
-                  total=quote.tcv, submitted_at=datetime.now(timezone.utc), created_by=user.id if user else None)
+                  total=quote.tcv, tax_total=quote.tax_total or 0, tax_detail=quote.tax_detail or {},
+                  submitted_at=datetime.now(timezone.utc), created_by=user.id if user else None)
     db.add(order)
     await db.flush()
     line_no = {}
@@ -135,7 +136,8 @@ def sales_order_payload(order: Order, account: Account) -> dict:
         "start_date": order.start_date.isoformat() if order.start_date else None,
         "requested_delivery_date": order.requested_delivery_date.isoformat() if order.requested_delivery_date else None,
         "incoterms": order.incoterms, "bill_to": order.bill_to, "ship_to": order.ship_to, "tax_exempt": order.tax_exempt,
-        "total": float(order.total),
+        "total": float(order.total), "tax_total": float(order.tax_total or 0),
+        "tax_lines": (order.tax_detail or {}).get("summary", []),
         "lines": [{"line_no": l.line_no, "parent_line_no": l.parent_line_no, "sku": l.sku, "description": l.name, "quantity": float(l.quantity),
                    "unit_list_price": float(l.unit_list_price), "discount_pct": float(l.discount_pct), "net_unit_price": float(l.net_unit_price),
                    "line_total": float(l.line_total), "billing_type": l.billing_type, "billing_schedule": l.billing_schedule} for l in order.lines],
@@ -259,7 +261,7 @@ def order_out(o: Order) -> dict:
         "deal_id": o.deal_id, "quote_id": o.quote_id, "contract_id": o.contract_id, "currency": o.currency, "po_number": o.po_number,
         "payment_terms": o.payment_terms, "billing_frequency": o.billing_frequency, "term_months": o.term_months, "start_date": o.start_date,
         "requested_delivery_date": o.requested_delivery_date, "incoterms": o.incoterms, "bill_to": o.bill_to, "ship_to": o.ship_to,
-        "tax_exempt": o.tax_exempt, "total": float(o.total), "erp_order_id": o.erp_order_id, "erp_status": o.erp_status,
+        "tax_exempt": o.tax_exempt, "total": float(o.total), "tax_total": float(o.tax_total or 0), "tax_detail": o.tax_detail or {}, "erp_order_id": o.erp_order_id, "erp_status": o.erp_status,
         "erp_message": o.erp_message, "erp_attempts": o.erp_attempts, "submitted_at": o.submitted_at, "erp_sent_at": o.erp_sent_at,
         "erp_acknowledged_at": o.erp_acknowledged_at, "created_at": o.created_at,
         "lines": [{"line_no": l.line_no, "parent_line_no": l.parent_line_no, "sku": l.sku, "name": l.name, "quantity": float(l.quantity),

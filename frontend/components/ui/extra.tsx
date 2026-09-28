@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { cn } from "@/lib/utils";
+import { currentLocale } from "@/lib/i18n";
 
 export function Tabs<T extends string>({ tabs, value, onChange, className }: {
   tabs: { value: T; label: React.ReactNode; count?: number }[]; value: T; onChange: (v: T) => void; className?: string;
@@ -75,7 +76,7 @@ export function StatusPill({ status }: { status: string }) {
 export function fmtMoney(value: number | null | undefined, currency = "USD", compact = false) {
   const v = value ?? 0;
   try {
-    return new Intl.NumberFormat("en-US", { style: "currency", currency, maximumFractionDigits: compact || Math.abs(v) >= 1000 ? 0 : 2,
+    return new Intl.NumberFormat(currentLocale(), { style: "currency", currency, maximumFractionDigits: compact || Math.abs(v) >= 1000 ? 0 : 2,
       notation: compact && Math.abs(v) >= 10_000 ? "compact" : "standard" }).format(v);
   } catch {
     return `${currency} ${v.toLocaleString()}`;

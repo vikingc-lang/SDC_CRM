@@ -212,13 +212,23 @@ def _plan_out(p: CommissionPlan | None) -> dict | None:
             "roles": p.roles or [], "member_ids": [str(m) for m in p.member_ids or []], "active": p.active}
 
 
-async def scorecard(db: AsyncSession, user: User, period: str, rates: dict, plans: list[CommissionPlan], deals=None) -> dict:
-    deals = deals if deals is not None else await forecasting.deals_in(db, [user.id], period)
-    roll = forecasting.rollup(deals, rates)
+async def scorecard(db: AsyncSession, user: User, period: str, rates: dict, plans: list[CommissionPlan], deals=None, shares=None) -> dict:
+    """Quota attainment and commission. A deal with revenue splits credits each person their share; otherwise the
+    owner gets all of it (services/deal_team.py)."""
+    from app.services import deal_team
+
+    if deals is None:
+        deals = await forecasting.deals_in(db, [user.id], period, with_splits=True)
+    if shares is None:
+        shares = await deal_team.revenue_shares(db, [d.id for d in deals])
+    weights = {d.id: deal_team.credit(d, user.id, shares) for d in deals}
+    deals = [d for d in deals if weights[d.id] > 0]
+    roll = forecasting.rollup(deals, rates, weights)
     quota = await quota_of(db, user.id, period)
     closed = roll["closed"]
     plan = plan_for(plans, user)
-    won = [{"id": d.id, "title": d.title, "account": d.account.name, "amount_usd": fx.to_usd(float(d.amount or 0), d.currency, rates),
+    won = [{"id": d.id, "title": d.title, "account": d.account.name,
+            "amount_usd": round(fx.to_usd(float(d.amount or 0), d.currency, rates, on=fx.closed_on(d)) * weights[d.id], 2), "credit_pct": round(weights[d.id] * 100, 2),
             "closed_at": d.closed_at.isoformat() if d.closed_at else None} for d in deals if d.stage.is_closed_won]
     base, tiers = (float(plan.base_rate), plan.tiers or []) if plan else (0.0, [])
     comm = commission(closed, quota, base, tiers) if plan else {"total": 0.0, "lines": []}
@@ -245,10 +255,13 @@ async def team_view(db: AsyncSession, manager: User, period: str) -> dict:
     rates = await fx.rates(db)
     plans = list((await db.execute(select(CommissionPlan))).scalars().all())
     members = await forecasting.team_members(db, manager)
-    all_deals = await forecasting.deals_in(db, [u.id for u in members], period) if members else []
+    from app.services import deal_team
+
+    all_deals = await forecasting.deals_in(db, [u.id for u in members], period, with_splits=True) if members else []
+    shares = await deal_team.revenue_shares(db, [d.id for d in all_deals])
     rows = []
     for u in members:
-        card = await scorecard(db, u, period, rates, plans, [d for d in all_deals if d.owner_id == u.id])
+        card = await scorecard(db, u, period, rates, plans, [d for d in all_deals if deal_team.credit(d, u.id, shares) > 0], shares)
         card.pop("statement")
         rows.append(card)
     rows.sort(key=lambda r: (r["attainment_pct"] is None, -(r["attainment_pct"] or 0), -r["closed"]))

@@ -34,6 +34,10 @@ celery_app.conf.beat_schedule = {
     "journeys": _every("journeys", crontab(minute="*/5")),                     # nurture journey steps
     "case-routing": _every("case_routing", crontab()),                         # push waiting cases to free agents, every minute
     "support-mail": _every("support_mail", crontab(minute="*/2")),            # email-to-case from the support mailbox
+    "workflow-waits": _every("workflow_waits", crontab(minute="*/5")),        # resume multi-step workflows after a wait
+    "ai-housekeeping": _every("ai_housekeeping", crontab(hour=4, minute=30)),  # AI log retention, expire stale agent suggestions
+    "calendar-sync": _every("calendar_sync", crontab(minute="*/10")),         # two-way Google / Microsoft calendar sync
+    "fx-feed": _every("fx_feed", crontab(hour=17, minute=15)),                 # daily reference exchange rates (when FX_FEED_URL is set)
 }
 
 

@@ -66,9 +66,15 @@ def category(deal: Deal) -> str:
     return deal.forecast_category or deal.stage.forecast_category or "pipeline"
 
 
-async def deals_in(db: AsyncSession, owner_ids, period: str) -> list[Deal]:
+async def deals_in(db: AsyncSession, owner_ids, period: str, with_splits: bool = False) -> list[Deal]:
+    """Deals in the period owned by ``owner_ids`` (and, with ``with_splits``, deals where they hold a revenue split)."""
+    from app.models import DealSplit
+
     start, end = period_range(period)
-    stmt = (select(Deal).join(PipelineStage, PipelineStage.id == Deal.stage_id).where(Deal.owner_id.in_(list(owner_ids)))
+    who = Deal.owner_id.in_(list(owner_ids))
+    if with_splits:
+        who = or_(who, Deal.id.in_(select(DealSplit.deal_id).where(DealSplit.user_id.in_(list(owner_ids)), DealSplit.split_type == "revenue")))
+    stmt = (select(Deal).join(PipelineStage, PipelineStage.id == Deal.stage_id).where(who)
             .where(or_(and_(PipelineStage.is_closed_won.is_(False), PipelineStage.is_closed_lost.is_(False),
                             Deal.target_close_date.between(start, end)),
                        and_(PipelineStage.is_closed_won.is_(True), cast(Deal.closed_at, Date).between(start, end))))
@@ -76,12 +82,13 @@ async def deals_in(db: AsyncSession, owner_ids, period: str) -> list[Deal]:
     return list((await db.execute(stmt)).scalars().unique().all())
 
 
-def rollup(deals: list[Deal], rates: dict) -> dict:
+def rollup(deals: list[Deal], rates: dict, weights: dict | None = None) -> dict:
+    """Totals by forecast category; ``weights`` ({deal_id: share}) credits part of a deal (revenue splits)."""
     by = {c: 0.0 for c in CATEGORIES}
     counts = {c: 0 for c in CATEGORIES}
     for d in deals:
         c = category(d)
-        by[c] += fx.to_usd(float(d.amount or 0), d.currency, rates)
+        by[c] += fx.to_usd(float(d.amount or 0), d.currency, rates, on=fx.closed_on(d)) * (weights.get(d.id, 1.0) if weights is not None else 1.0)
         counts[c] += 1
     by = {k: round(v, 2) for k, v in by.items()}
     return {**by, "counts": counts, "commit_call": round(by["closed"] + by["commit"], 2),
@@ -90,7 +97,7 @@ def rollup(deals: list[Deal], rates: dict) -> dict:
 
 def deal_out(d: Deal, rates: dict) -> dict:
     return {"id": d.id, "title": d.title, "account": d.account.name, "stage": d.stage.name, "owner_id": d.owner_id,
-            "amount_usd": fx.to_usd(float(d.amount or 0), d.currency, rates), "close_date": d.target_close_date,
+            "amount_usd": fx.to_usd(float(d.amount or 0), d.currency, rates, on=fx.closed_on(d)), "close_date": d.target_close_date,
             "closed_at": d.closed_at, "category": category(d), "overridden": bool(d.forecast_category) and not (d.stage.is_closed_won or d.stage.is_closed_lost),
             "stage_category": d.stage.forecast_category, "risk_score": d.risk_score, "is_closed": d.stage.is_closed_won or d.stage.is_closed_lost}
 

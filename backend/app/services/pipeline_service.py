@@ -386,17 +386,17 @@ async def win_loss(db: AsyncSession, principal=None) -> dict:
         if d.stage.is_closed_lost:
             r = reasons.setdefault(d.loss_reason or "other", {"reason": d.loss_reason or "other", "label": LOSS_TAXONOMY.get(d.loss_reason or "other"), "count": 0, "amount": 0.0, "debriefs": []})
             r["count"] += 1
-            r["amount"] += fx.to_usd(float(d.amount), d.currency, rates)
+            r["amount"] += fx.to_usd(float(d.amount), d.currency, rates, on=fx.closed_on(d))
             if d.loss_debrief:
                 r["debriefs"].append({"deal_id": d.id, "title": d.title, "account": d.account.name, "debrief": d.loss_debrief})
             if d.loss_competitor:
                 competitors[d.loss_competitor]["count"] += 1
-                competitors[d.loss_competitor]["amount"] += fx.to_usd(float(d.amount), d.currency, rates)
+                competitors[d.loss_competitor]["amount"] += fx.to_usd(float(d.amount), d.currency, rates, on=fx.closed_on(d))
     won = [d for d in deals if d.stage.is_closed_won]
     lost = [d for d in deals if d.stage.is_closed_lost]
     return {
-        "won": {"count": len(won), "amount": round(sum(fx.to_usd(float(d.amount), d.currency, rates) for d in won), 2)},
-        "lost": {"count": len(lost), "amount": round(sum(fx.to_usd(float(d.amount), d.currency, rates) for d in lost), 2)},
+        "won": {"count": len(won), "amount": round(sum(fx.to_usd(float(d.amount), d.currency, rates, on=fx.closed_on(d)) for d in won), 2)},
+        "lost": {"count": len(lost), "amount": round(sum(fx.to_usd(float(d.amount), d.currency, rates, on=fx.closed_on(d)) for d in lost), 2)},
         "win_rate": round(100 * len(won) / len(deals), 1) if deals else None,
         "loss_reasons": sorted(({**r, "amount": round(r["amount"], 2)} for r in reasons.values()), key=lambda r: -r["count"]),
         "competitors": sorted(({"competitor": k, **v} for k, v in competitors.items()), key=lambda c: -c["count"]),

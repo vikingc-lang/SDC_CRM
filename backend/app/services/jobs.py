@@ -128,6 +128,36 @@ async def job_workflows() -> None:
         await workflows.run_scheduled(db)
 
 
+async def job_workflow_waits() -> None:
+    async with SessionLocal() as db:
+        await workflows.resume_waiting(db)
+
+
+async def job_ai_housekeeping() -> None:
+    from app.services import agents, ai_governance
+
+    await ai_governance.purge()
+    async with SessionLocal() as db:
+        await agents.expire(db)
+
+
+async def job_calendar_sync() -> None:
+    from app.services import calendar_sync
+
+    async with SessionLocal() as db:
+        await calendar_sync.sync_all(db)
+
+
+async def job_fx_feed() -> None:
+    from app.services import fx
+
+    if not settings.fx_feed_url:
+        return
+    async with SessionLocal() as db:
+        await fx.import_feed(db, settings.fx_feed_url)
+        await db.commit()
+
+
 async def job_report_subscriptions() -> None:
     from app.services import subscriptions
 
@@ -180,6 +210,10 @@ JOBS = {
     "journeys": job_journeys,
     "case_routing": job_case_routing,
     "support_mail": job_support_mail,
+    "workflow_waits": job_workflow_waits,
+    "ai_housekeeping": job_ai_housekeeping,
+    "calendar_sync": job_calendar_sync,
+    "fx_feed": job_fx_feed,
 }
 
 

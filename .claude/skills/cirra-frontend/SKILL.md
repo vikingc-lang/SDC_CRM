@@ -31,6 +31,11 @@ description: Cirra Next.js 14 frontend conventions - app router pages under app/
   `subtle`); support light and dark mode; use `tabular` for numbers.
 - Accessible labels: every control has a `<Label htmlFor>` or `aria-label` (the browser journeys rely on them).
 - `localStorage` only for per-browser conveniences, wrapped in try/catch (see `listviews.tsx`).
+- Localisation (`lib/i18n.tsx`): the user's locale (`me.preferences.locale`, else the browser) drives number,
+  currency and date formats through `money`, `fmtNumber`, `fmtDateTime`, `shortDate`, `relativeDays`
+  (`lib/utils`) and `fmtMoney` (`ui/extra`); never hard-code `"en-US"`. UI strings: `const t = useT()` then
+  `t("key", vars)`; add the key to `en` and the other dictionaries (missing keys fall back to English).
+  English output is unchanged byte for byte, so existing journeys keep working.
 
 ## Checks (host has no node_modules)
 ```bash

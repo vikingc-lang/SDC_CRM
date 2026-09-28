@@ -1,12 +1,12 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Bell, FlaskConical, Globe, ListChecks, MessageSquare, PenLine, Plus, Radio, Save, Trash2, Zap } from "lucide-react";
+import { ArrowLeft, Bell, Clock, FlaskConical, GitBranch, Globe, ListChecks, MessageSquare, PenLine, Plus, Radio, Save, Trash2, Zap } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { TEMPLATES, type WorkflowRule as Rule, type WorkflowAction as Action } from "@/components/admin/workflows";
+import { TEMPLATES, countSteps, hasWait, type WorkflowRule as Rule, type WorkflowAction as Action } from "@/components/admin/workflows";
 import { type CatalogueField, FilterRow, IconX, nice } from "@/components/filters";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,7 +23,12 @@ interface Entity {
   settable: { key: string; label: string; kind: "user" | "enum"; options: string[] | null }[]; fields: CatalogueField[];
 }
 interface Meta { entities: Entity[]; periods: string[]; roles: string[]; priorities: string[]; users: { id: string; name: string; role: string }[] }
-interface Run { id: string; record: string | null; trigger: string; status: string; detail: { action: string; ok: boolean; detail: string }[]; created_at: string }
+interface Run {
+  id: string; record: string | null; trigger: string; status: string; detail: { action: string; ok: boolean; detail: string }[]; created_at: string;
+  resume_at: string | null; steps_left: number;
+}
+const MAX_STEPS = 25;
+const MAX_DEPTH = 2;
 interface DryRun {
   matched?: boolean; results?: { action: string; ok: boolean; detail: string }[];
   matching_count?: number; capped?: boolean; sample?: { id: string; name: string; results: { action: string; ok: boolean; detail: string }[] }[];
@@ -36,6 +41,8 @@ const ACTION_META: Record<Action["type"], { label: string; icon: typeof Bell }> 
   emit_event: { label: "Send an event to connected systems", icon: Radio },
   http_request: { label: "Call a webhook (HTTP POST)", icon: Globe },
   post_message: { label: "Post to Slack or Microsoft Teams", icon: MessageSquare },
+  wait: { label: "Wait, then continue", icon: Clock },
+  branch: { label: "If / otherwise (branch)", icon: GitBranch },
 };
 
 function blank(entity: Entity): Omit<Rule, "id"> {
@@ -49,6 +56,8 @@ function newAction(type: Action["type"], entity: Entity): Action {
   if (type === "update_field") { const s = entity.settable[0]; return { type, field: s?.key ?? "", value: s?.options?.[0] ?? "" }; }
   if (type === "http_request") return { type, url: "" };
   if (type === "post_message") return { type, channel: "slack", webhook_url: "", text: "" };
+  if (type === "wait") return { type, days: 1, hours: 0 };
+  if (type === "branch") { const f = entity.fields[0]; return { type, conditions: [{ field: f.key, op: f.ops[0], value: "" }], then: [newAction("notify", entity)], else: [] }; }
   return { type, event: "" };
 }
 
@@ -81,6 +90,11 @@ export default function WorkflowEditorPage() {
     mutationFn: async () => (await api.post<DryRun>(`/workflows/${id}/test`, {})).data,
     onSuccess: setDry, onError: (e) => toast.error(errorMessage(e)),
   });
+  const cancelRun = useMutation({
+    mutationFn: async (runId: string) => api.post(`/workflows/runs/${runId}/cancel`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["workflows", id, "runs"] }); toast.success("Run cancelled"); },
+    onError: (e) => toast.error(errorMessage(e)),
+  });
   const del = useMutation({
     mutationFn: async () => api.delete(`/workflows/${id}`),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["workflows"] }); toast.success("Workflow deleted"); router.push("/admin?tab=workflows"); },
@@ -89,7 +103,6 @@ export default function WorkflowEditorPage() {
   if (!meta.data || !rule) return <Skeleton className="h-[600px]" />;
   const entity = meta.data.entities.find((e) => e.key === rule.source)!;
   const set = (patch: Partial<Rule>) => setRule({ ...rule, ...patch });
-  const setAction = (k: number, a: Action) => { const as = [...rule.actions]; as[k] = a; set({ actions: as }); };
   const people = [{ value: "owner", label: `The ${entity.label.toLowerCase()}'s owner` }, { value: "manager", label: "The owner's manager" },
     ...meta.data.users.map((u) => ({ value: `user:${u.id}`, label: u.name }))];
   const fieldKeys = entity.fields.map((f) => f.key);
@@ -166,29 +179,16 @@ export default function WorkflowEditorPage() {
           </div>
         </Step>
 
-        <Step n="Then" title="Actions" hint={`Insert record values with {{field}}, e.g. {{${fieldKeys[0]}}}. Available: ${fieldKeys.join(", ")}.`}>
-          <div className="space-y-3">
-            {rule.actions.map((a, k) => {
-              const Icon = ACTION_META[a.type].icon;
-              return (
-                <div key={k} className="rounded-lg border p-3">
-                  <div className="mb-2 flex items-center gap-2">
-                    <Icon className="h-4 w-4 text-primary" />
-                    <Select aria-label="Action type" className="h-8 w-auto text-[13px]" value={a.type} onChange={(e) => setAction(k, newAction(e.target.value as Action["type"], entity))}>
-                      {(Object.keys(ACTION_META) as Action["type"][]).filter((t) => t !== "update_field" || entity.settable.length).map((t) => <option key={t} value={t}>{ACTION_META[t].label}</option>)}
-                    </Select>
-                    <span className="flex-1" />
-                    {rule.actions.length > 1 && <IconX label="Remove action" onClick={() => set({ actions: rule.actions.filter((_, j) => j !== k) })} />}
-                  </div>
-                  <ActionFields idp={`wf-a${k}`} a={a} entity={entity} people={people} meta={meta.data!} onChange={(na) => setAction(k, na)} />
-                </div>
-              );
-            })}
-            {rule.actions.length < 10 && (
-              <button type="button" className="inline-flex items-center gap-1 text-[13px] text-primary hover:underline" onClick={() => set({ actions: [...rule.actions, newAction("create_task", entity)] })}>
-                <Plus className="h-3.5 w-3.5" />Add action</button>
-            )}
-          </div>
+        <Step n="Then" title="Steps" hint={`Steps run in order. A wait pauses this record's run (it resumes on schedule); a branch picks a path by the record's values at that moment. Insert record values with {{field}}, e.g. {{${fieldKeys[0]}}}. Available: ${fieldKeys.join(", ")}.`}>
+          <StepList idp="wf-s" steps={rule.actions} depth={0} total={countSteps(rule.actions)} entity={entity} people={people} meta={meta.data}
+            onChange={(actions) => set({ actions })} />
+          {hasWait(rule.actions) && (
+            <label className="mt-3 flex items-center gap-2 text-[13px]">
+              <input id="wf-stop-unmatched" type="checkbox" checked={rule.trigger.stop_if_unmatched ?? true}
+                onChange={(e) => set({ trigger: { ...rule.trigger, stop_if_unmatched: e.target.checked } })} />
+              After a wait, stop if the record no longer meets the conditions
+            </label>
+          )}
         </Step>
 
         {dry && <DryRunCard dry={dry} onClose={() => setDry(null)} />}
@@ -197,14 +197,16 @@ export default function WorkflowEditorPage() {
           <Card>
             <CardHeader title="Recent runs" description={`${existing.data?.enabled ? "On" : "Off"} · last 50 runs`} />
             {!runs.data ? <Skeleton className="m-5 h-24" /> : !runs.data.length ? <p className="px-5 pb-5 text-[13px] text-muted-foreground">No runs yet.</p> : (
-              <Table head={["When", "Record", "Trigger", "Result", "Details"]} minWidth={720}>
+              <Table head={["When", "Record", "Trigger", "Result", "Details", ""]} minWidth={760}>
                 {runs.data.map((r) => (
                   <tr key={r.id}>
                     <Td className="whitespace-nowrap text-[12.5px] text-muted-foreground">{relativeDays(r.created_at)}</Td>
                     <Td className="text-[13px]">{r.record ?? "—"}</Td>
                     <Td className="text-[13px]">{nice(r.trigger)}</Td>
-                    <Td><StatusPill status={r.status === "done" ? "completed" : "failed"} /></Td>
+                    <Td><StatusPill status={r.status === "done" ? "completed" : r.status === "waiting" ? "pending" : r.status === "cancelled" ? "cancelled" : "failed"} />
+                      {r.status === "waiting" && r.resume_at && <span className="mt-0.5 block text-[11.5px] text-muted-foreground">resumes {new Date(r.resume_at).toLocaleString()} · {r.steps_left} step{r.steps_left === 1 ? "" : "s"} left</span>}</Td>
                     <Td className="text-[12.5px] text-muted-foreground">{r.detail.map((d) => d.detail).join(" · ")}</Td>
+                    <Td>{r.status === "waiting" && <Button variant="ghost" size="sm" loading={cancelRun.isPending && cancelRun.variables === r.id} onClick={() => cancelRun.mutate(r.id)}>Cancel</Button>}</Td>
                   </tr>
                 ))}
               </Table>
@@ -212,6 +214,68 @@ export default function WorkflowEditorPage() {
           </Card>
         )}
       </div>
+    </div>
+  );
+}
+
+function StepList({ idp, steps, depth, total, entity, people, meta, onChange }: {
+  idp: string; steps: Action[]; depth: number; total: number; entity: Entity; people: { value: string; label: string }[]; meta: Meta;
+  onChange: (steps: Action[]) => void;
+}) {
+  const setStep = (k: number, a: Action) => { const as = [...steps]; as[k] = a; onChange(as); };
+  const types = (Object.keys(ACTION_META) as Action["type"][]).filter((t) => (t !== "update_field" || entity.settable.length) && (t !== "branch" || depth < MAX_DEPTH));
+  return (
+    <div className="space-y-3">
+      {steps.map((a, k) => {
+        const Icon = ACTION_META[a.type].icon;
+        return (
+          <div key={k} className={cn("rounded-lg border p-3", a.type === "wait" && "border-dashed bg-muted/40", a.type === "branch" && "border-primary/30")}>
+            <div className="mb-2 flex items-center gap-2">
+              <span className="w-5 text-right text-[11.5px] tabular text-subtle">{k + 1}</span>
+              <Icon className="h-4 w-4 text-primary" />
+              <Select aria-label="Step type" id={`${idp}${k}-type`} className="h-8 w-auto text-[13px]" value={a.type} onChange={(e) => setStep(k, newAction(e.target.value as Action["type"], entity))}>
+                {types.map((t) => <option key={t} value={t}>{ACTION_META[t].label}</option>)}
+              </Select>
+              <span className="flex-1" />
+              {(steps.length > 1 || depth > 0) && <IconX label="Remove step" onClick={() => onChange(steps.filter((_, j) => j !== k))} />}
+            </div>
+            {a.type === "wait" ? (
+              <div className="flex flex-wrap items-center gap-2 text-[13px]">
+                <span>Wait</span>
+                <Input aria-label="Days" id={`${idp}${k}-days`} type="number" min={0} max={365} className="h-8 w-20" value={a.days ?? 0}
+                  onChange={(e) => setStep(k, { ...a, days: Math.min(365, Math.max(0, Number(e.target.value) || 0)) })} /><span>days</span>
+                <Input aria-label="Hours" id={`${idp}${k}-hours`} type="number" min={0} max={23} className="h-8 w-20" value={a.hours ?? 0}
+                  onChange={(e) => setStep(k, { ...a, hours: Math.min(23, Math.max(0, Number(e.target.value) || 0)) })} /><span>hours, then continue with the next step</span>
+              </div>
+            ) : a.type === "branch" ? (
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  <p className="text-[12px] font-medium uppercase tracking-wide text-muted-foreground">If all of these are true</p>
+                  {a.conditions.map((f, j) => <FilterRow key={j} f={f} src={entity} periods={meta.periods}
+                    onChange={(nf) => { const cs = [...a.conditions]; cs[j] = nf; setStep(k, { ...a, conditions: cs }); }}
+                    onRemove={() => setStep(k, { ...a, conditions: a.conditions.filter((_, i) => i !== j) })} />)}
+                  <button type="button" className="inline-flex items-center gap-1 text-[13px] text-primary hover:underline"
+                    onClick={() => { const f = entity.fields[0]; setStep(k, { ...a, conditions: [...a.conditions, { field: f.key, op: f.ops[0], value: "" }] }); }}>
+                    <Plus className="h-3.5 w-3.5" />Add condition</button>
+                </div>
+                {(["then", "else"] as const).map((side) => (
+                  <div key={side} className="border-l-2 border-primary/30 pl-3">
+                    <p className="mb-2 text-[12px] font-medium uppercase tracking-wide text-muted-foreground">{side === "then" ? "Then" : "Otherwise"}</p>
+                    <StepList idp={`${idp}${k}${side}`} steps={a[side]} depth={depth + 1} total={total} entity={entity} people={people} meta={meta}
+                      onChange={(sub) => setStep(k, { ...a, [side]: sub })} />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <ActionFields idp={`${idp}${k}`} a={a} entity={entity} people={people} meta={meta} onChange={(na) => setStep(k, na)} />
+            )}
+          </div>
+        );
+      })}
+      {total < MAX_STEPS && (
+        <button type="button" className="inline-flex items-center gap-1 text-[13px] text-primary hover:underline" onClick={() => onChange([...steps, newAction(depth ? "notify" : "create_task", entity)])}>
+          <Plus className="h-3.5 w-3.5" />Add step</button>
+      )}
     </div>
   );
 }
@@ -232,7 +296,8 @@ function Step({ n, title, hint, children }: { n: string; title: string; hint?: s
 }
 
 function ActionFields({ idp, a, entity, people, meta, onChange }: {
-  idp: string; a: Action; entity: Entity; people: { value: string; label: string }[]; meta: Meta; onChange: (a: Action) => void;
+  idp: string; a: Exclude<Action, { type: "wait" } | { type: "branch" }>; entity: Entity; people: { value: string; label: string }[]; meta: Meta;
+  onChange: (a: Action) => void;
 }) {
   if (a.type === "create_task") return (
     <div className="grid gap-2 sm:grid-cols-2">

@@ -37,6 +37,7 @@ class Product(Base):
     unit: Mapped[str] = mapped_column(String(40), default="user / month")
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     product_type: Mapped[str] = mapped_column(String(10), default="standard")
+    tax_code: Mapped[str | None] = mapped_column(String(20))  # e.g. SaaS / HSN-SAC code; picks product-specific tax rates
     created_at: Mapped[datetime] = _ts(nullable=False)
 
     prices: Mapped[list["PriceBookEntry"]] = relationship(back_populates="product", lazy="selectin", cascade="all, delete-orphan")
@@ -93,6 +94,8 @@ class Quote(Base):
     locked_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     custom_terms: Mapped[str | None] = mapped_column(Text)
     billing_frequency: Mapped[str] = mapped_column(String(10), default="annual")
+    tax_total: Mapped[Decimal] = mapped_column(Numeric(16, 2), default=0, server_default="0")
+    tax_detail: Mapped[dict] = mapped_column(JSONB, default=dict)  # engine, lines by jurisdiction, errors
     created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     approved_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     created_at: Mapped[datetime] = _ts(nullable=False)

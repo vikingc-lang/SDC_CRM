@@ -3,6 +3,7 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { Table, Td } from "@/components/ui/extra";
 import { cn, money, shortDate } from "@/lib/utils";
+import { currentLocale } from "@/lib/i18n";
 
 /* Report charts follow the data-viz method: one series in brand teal (--series-1); multi-series in the
    validated categorical order (--cat-1..7, rest folded into "Other"), assigned alphabetically so a value
@@ -38,14 +39,14 @@ const MAX_BARS = 15;
 export function fmtValue(v: unknown, col: RCol, compact = false): string {
   if (v === null || v === undefined || v === "") return col.role === "dimension" ? "(blank)" : "—";
   if (col.type === "money") return money(Number(v), { compact });
-  if (col.type === "number") return Number(v).toLocaleString("en-US", { maximumFractionDigits: 1, notation: compact && Math.abs(Number(v)) >= 10_000 ? "compact" : "standard" });
+  if (col.type === "number") return Number(v).toLocaleString(currentLocale(), { maximumFractionDigits: 1, notation: compact && Math.abs(Number(v)) >= 10_000 ? "compact" : "standard" });
   if (col.type === "bool") return v ? "Yes" : "No";
   if (col.type === "date") {
     const s = String(v).slice(0, 10), d = new Date(`${s}T00:00:00`);
     switch (col.bucket) {
       case "year": return String(d.getFullYear());
       case "quarter": return `Q${Math.floor(d.getMonth() / 3) + 1} ${d.getFullYear()}`;
-      case "month": return d.toLocaleDateString("en-US", { month: "short", year: "numeric" });
+      case "month": return d.toLocaleDateString(currentLocale(), { month: "short", year: "numeric" });
       case "week": return `Wk of ${shortDate(s)}`;
       default: return shortDate(s, true);
     }

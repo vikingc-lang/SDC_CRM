@@ -123,8 +123,22 @@ async def runs(rule_id: uuid.UUID, db: AsyncSession = Depends(get_db), _: Princi
     for r in rows:
         vals = await reporting.record_values(db, rule.source, r.record_id) if r.record_id else {}
         name = next((vals[k] for k in ("title", "name", "quote_number", "order_number", "subject") if vals.get(k)), None)
-        out.append({"id": r.id, "record_id": r.record_id, "record": name, "trigger": r.trigger, "status": r.status, "detail": r.detail, "created_at": r.created_at})
+        out.append({"id": r.id, "record_id": r.record_id, "record": name, "trigger": r.trigger, "status": r.status, "detail": r.detail, "created_at": r.created_at,
+                    "resume_at": r.resume_at, "steps_left": len(r.pending_actions or []) if r.status == "waiting" else 0})
     return out
+
+
+@router.post("/runs/{run_id}/cancel")
+async def cancel_run(run_id: uuid.UUID, db: AsyncSession = Depends(get_db), _: Principal = Depends(authorize("admin", "update"))):
+    run = await db.get(WorkflowRun, run_id)
+    if run is None:
+        raise HTTPException(404, "Run not found")
+    if run.status != "waiting":
+        raise HTTPException(409, "Only a waiting run can be cancelled")
+    run.status, run.resume_at, run.pending_actions = "cancelled", None, None
+    run.detail = [*run.detail, {"action": "resume", "ok": True, "detail": "Cancelled by an admin"}]
+    await db.commit()
+    return {"id": run.id, "status": run.status}
 
 
 @router.post("/{rule_id}/test")

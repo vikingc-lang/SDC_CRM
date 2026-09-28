@@ -3,8 +3,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Stamp, X } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { AiSuggestions } from "@/components/aisuggestions";
 import { PageHeader } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -12,6 +13,8 @@ import { StatusPill, Tabs, fmtMoney } from "@/components/ui/extra";
 import { Input } from "@/components/ui/input";
 import { EmptyState, Skeleton } from "@/components/ui/misc";
 import { api, errorMessage, get } from "@/lib/api";
+import { useT } from "@/lib/i18n";
+import { useMe } from "@/lib/me";
 import { relativeDays } from "@/lib/utils";
 
 interface ApprovalItem {
@@ -22,6 +25,23 @@ interface ApprovalItem {
 }
 
 export default function ApprovalsPage() {
+  const t = useT();
+  const { can } = useMe();
+  const [section, setSection] = useState<"quotes" | "ai">("quotes");
+  useEffect(() => { if (new URLSearchParams(window.location.search).get("tab") === "ai") setSection("ai"); }, []);
+  const sections = [{ value: "quotes" as const, label: t("approvals.quotes") }, ...(can("deals", "read") ? [{ value: "ai" as const, label: t("approvals.ai") }] : [])];
+  return (
+    <div className="mx-auto max-w-5xl">
+      <PageHeader title={t("nav.approvals")} description={section === "ai"
+        ? "Changes Aiden's agents want to make to your deals. Approving applies the change; everything is kept in the record."
+        : "Deal desk chain: Sales Manager → Deal Desk → VP Sales → Finance → Legal. Each level decides only after the one before it approves."} />
+      {sections.length > 1 && <Tabs value={section} onChange={setSection} tabs={sections} />}
+      {section === "ai" ? <AiSuggestions /> : <QuoteApprovals />}
+    </div>
+  );
+}
+
+function QuoteApprovals() {
   const [tab, setTab] = useState<"pending" | "decided">("pending");
   const [comments, setComments] = useState<Record<string, string>>({});
   const qc = useQueryClient();
@@ -32,8 +52,7 @@ export default function ApprovalsPage() {
     onError: (e) => toast.error(errorMessage(e)),
   });
   return (
-    <div className="mx-auto max-w-5xl">
-      <PageHeader title="Approvals" description="Deal desk chain: Sales Manager → Deal Desk → VP Sales → Finance → Legal. Each level decides only after the one before it approves." />
+    <div>
       <Tabs value={tab} onChange={setTab} tabs={[{ value: "pending", label: "Waiting" }, { value: "decided", label: "Decided" }]} />
       {isLoading && <Skeleton className="h-40 w-full" />}
       {data && !data.length && <Card><EmptyState icon={<Stamp className="h-4 w-4" />} title={tab === "pending" ? "Nothing waiting on approval" : "No decisions yet"} /></Card>}

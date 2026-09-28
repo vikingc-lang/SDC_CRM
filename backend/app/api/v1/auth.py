@@ -237,7 +237,38 @@ async def me(user: User = Depends(get_current_user), db: AsyncSession = Depends(
         "security": {"mfa_enabled": user.mfa_enabled, "mfa_required": identity.mfa_required_for(pol, user),
                      "recovery_codes_left": len(user.mfa_recovery_hashes or []), "sso_linked": bool(user.sso_subject),
                      "has_password": user.password_hash != "!sso"},
+        "preferences": {"locale": user.locale, "timezone": user.timezone},
     }
+
+
+LOCALES = ("en-US", "en-GB", "en-IN", "es-ES", "es-MX", "fr-FR", "de-DE", "hi-IN")
+
+
+class PreferencesIn(BaseModel):
+    locale: str | None = None
+    timezone: str | None = None
+
+
+@router.patch("/users/me/preferences")
+async def set_preferences(body: PreferencesIn, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Language and number/date formats (``locale``; empty = follow the browser) and time zone."""
+    data = body.model_dump(exclude_unset=True)
+    if "locale" in data:
+        if data["locale"] and data["locale"] not in LOCALES:
+            raise HTTPException(422, f"Choose one of: {', '.join(LOCALES)}")
+        user.locale = data["locale"] or None
+    if "timezone" in data:
+        tz = (data["timezone"] or "").strip() or None
+        if tz:
+            from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+            try:
+                ZoneInfo(tz)
+            except (ZoneInfoNotFoundError, ValueError) as e:
+                raise HTTPException(422, "Unknown time zone") from e
+        user.timezone = tz
+    await db.commit()
+    return {"locale": user.locale, "timezone": user.timezone}
 
 
 @router.get("/users")

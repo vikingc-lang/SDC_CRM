@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, ForeignKey, Integer, LargeBinary, Numeric, SmallInteger, String, Text, func
+from sqlalchemy import BigInteger, Boolean, ForeignKey, Index, Integer, LargeBinary, Numeric, SmallInteger, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -292,13 +292,16 @@ class WorkflowRule(Base):
 
 class WorkflowRun(Base):
     __tablename__ = "workflow_runs"
+    __table_args__ = (Index("ix_workflow_runs_waiting", "status", "resume_at"),)
 
     id: Mapped[uuid.UUID] = _pk()
     rule_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workflow_rules.id", ondelete="CASCADE"))
     record_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     trigger: Mapped[str] = mapped_column(String(20))
-    status: Mapped[str] = mapped_column(String(10))
+    status: Mapped[str] = mapped_column(String(10))  # done | failed | dry_run | waiting | cancelled
     detail: Mapped[list] = mapped_column(JSONB, default=list)
+    resume_at: Mapped[datetime | None] = mapped_column(UTCDateTime())  # a waiting run continues then
+    pending_actions: Mapped[list | None] = mapped_column(JSONB)  # the steps still to run after the wait
     created_at: Mapped[datetime] = _ts()
 
 

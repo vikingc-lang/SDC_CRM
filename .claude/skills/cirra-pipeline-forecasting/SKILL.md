@@ -28,10 +28,20 @@ description: Cirra opportunities and pipeline - multiple pipelines with declarat
   order readiness checks (see `cirra-cpq-orders`).
 - Weighted pipeline = Σ amount_usd × probability × (1 − risk/200). Deal risk = 30 stale + 30 sentiment drop +
   40 no champion.
-- Own-scope roles see deals they own or on accounts they own/sell into (`p.scope_deals`).
+- Own-scope roles see deals they own, deals on accounts they own/sell into, and deals whose team they're on
+  (`p.scope_deals`, `p.team_deal_ids()`; team membership also exposes the deal's account). Edits by someone who
+  sees the deal only through its team need `access = 'edit'` (`deal_team.ensure_editable`, used by every deal
+  write endpoint; `can_edit` in the deal payload).
+- Opportunity products (`services/deal_team.py`, `PUT /deals/{id}/products`) are priced from the account's
+  price books in the deal currency unless a sales price is given; `amount_source = 'lines'` keeps the amount
+  equal to their total; `POST /deals/{id}/products/quote` makes a draft quote (product rules apply).
+- Revenue splits total exactly 100% and replace the owner's credit in quota attainment and commission
+  (`deal_team.credit`, `performance.scorecard`); overlay splits are extra credit. Forecast roll-ups stay by owner.
+- Closed deals convert to USD at their close-date rate (`fx.to_usd(..., on=fx.closed_on(d))`); open ones at today's.
 
 ## Tests
-`tests/test_revenue.py` (gates, loss taxonomy, FX forecast), `test_forecasting.py`, `test_orders.py`.
+`tests/test_revenue.py` (gates, loss taxonomy, FX forecast), `test_forecasting.py`, `test_orders.py`,
+`test_p0_depth.py` (products, team access, split credit, dated FX). Browser: `e2e/p0-journeys.mjs`.
 
 ## Gotchas
 - Deals have no list-view page yet (the pipeline page is a kanban); the report source `deals` supports list views.

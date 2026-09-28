@@ -97,6 +97,22 @@ class Settings(BaseSettings):
     support_imap_user: str | None = None
     support_imap_password: str | None = None
 
+    # Exchange-rate reference feed (ECB euro reference rates XML), loaded daily when set. Empty = rates are entered by hand.
+    fx_feed_url: str = ""
+
+    # Tax engine credentials. The engine itself is chosen in Admin → Tax & currency.
+    avalara_account_id: str | None = None
+    avalara_license_key: str | None = None
+    avalara_company_code: str = "DEFAULT"
+    avalara_environment: Literal["sandbox", "production"] = "sandbox"
+
+    # Two-way calendar sync (OAuth apps registered with Google Cloud / Microsoft Entra ID). Unset = provider hidden.
+    google_calendar_client_id: str | None = None
+    google_calendar_client_secret: str | None = None
+    microsoft_calendar_client_id: str | None = None
+    microsoft_calendar_client_secret: str | None = None
+    microsoft_calendar_tenant: str = "common"
+
     # 'hash' (offline feature-hashing) | 'ollama' | 'aws_bedrock'
     embedding_provider: Literal["hash", "ollama", "aws_bedrock"] = "hash"
     embedding_dim: int = 1536

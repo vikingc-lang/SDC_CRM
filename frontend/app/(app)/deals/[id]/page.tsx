@@ -9,6 +9,7 @@ import { useParams } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 import { ActivityTimeline } from "@/components/ActivityTimeline";
+import { ProductsCard, TeamCard } from "@/components/dealselling";
 import { AlertsBanner, DocumentsCard, PartnersCard, QuotesCard } from "@/components/panels";
 import { fmtMoney } from "@/components/ui/extra";
 import { useMe } from "@/lib/me";
@@ -218,6 +219,8 @@ export default function DealPage() {
           {(deal.pipeline.name === "Enterprise Solution Sale" || (deal.orders?.length ?? 0) > 0) && (
             <OrderPanel deal={deal} canEdit={can("deals", "update")} canOrder={can("orders", "create")} />
           )}
+          <ProductsCard dealId={deal.id} currency={deal.currency} selling={deal} canEdit={(deal.can_edit ?? can("deals", "update")) && !closed}
+            canQuote={can("quotes", "create") && !closed} />
           <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
             <QuotesCard dealId={deal.id} quotes={deal.quotes} canCreate={can("quotes", "create") && !closed} />
             <DocumentsCard dealId={deal.id} documents={deal.documents} canCreate={can("documents", "create")}
@@ -253,6 +256,7 @@ export default function DealPage() {
               ))}
             </CardBody>
           </Card>
+          <TeamCard dealId={deal.id} owner={deal.owner} amount={deal.amount} currency={deal.currency} selling={deal} canEdit={deal.can_edit ?? can("deals", "update")} />
           <PartnersCard dealId={deal.id} partners={deal.partners} canEdit={can("deals", "update")} />
           <Card>
             <CardHeader title="Stage-gate audit trail" icon={<History className="h-4 w-4 text-muted-foreground" />} />
