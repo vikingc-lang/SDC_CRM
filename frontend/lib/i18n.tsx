@@ -33,7 +33,7 @@ const en: Dict = {
   "nav.help": "Help center", "shell.help": "Help",
   "group.revenue": "Revenue", "group.marketing": "Marketing", "group.customers": "Customers", "group.workspace": "Workspace", "group.objects": "Custom objects",
   "shell.quick_log": "Quick-Log", "shell.search": "Search, or paste meeting notes to log…", "shell.settings": "Settings & AI engine", "shell.sign_out": "Sign out",
-  "shell.notifications": "Notifications", "shell.unread": "{n} unread", "shell.caught_up": "You are all caught up.", "shell.suite": "SDC Solutions suite",
+  "shell.notifications": "Notifications", "shell.unread": "{n} unread", "shell.caught_up": "You are all caught up.", "shell.all_notifications": "See all notifications", "shell.notification_settings": "Settings", "shell.offline": "You're offline. Showing what was saved on this device; changes are sent when you reconnect.", "shell.queued": "{n} change(s) waiting to be sent", "shell.suite": "SDC Solutions suite",
   "shell.portfolio": "SDC Solutions portfolio", "shell.current": "Current", "shell.open_menu": "Open menu", "shell.close_menu": "Close menu",
   "common.save": "Save", "common.cancel": "Cancel", "common.delete": "Delete", "common.remove": "Remove", "common.add": "Add", "common.approve": "Approve",
   "common.reject": "Reject", "common.saved": "Saved", "common.none": "None", "common.browser_default": "Browser default",
@@ -56,7 +56,7 @@ const es: Dict = {
   "nav.help": "Centro de ayuda", "shell.help": "Ayuda",
   "group.revenue": "Ingresos", "group.marketing": "Marketing", "group.customers": "Clientes", "group.workspace": "Espacio de trabajo", "group.objects": "Objetos personalizados",
   "shell.quick_log": "Registro rápido", "shell.search": "Busca o pega notas de reunión para registrarlas…", "shell.settings": "Configuración y motor de IA",
-  "shell.sign_out": "Cerrar sesión", "shell.notifications": "Notificaciones", "shell.unread": "{n} sin leer", "shell.caught_up": "Estás al día.",
+  "shell.sign_out": "Cerrar sesión", "shell.notifications": "Notificaciones", "shell.unread": "{n} sin leer", "shell.caught_up": "Estás al día.", "shell.all_notifications": "Ver todas las notificaciones", "shell.notification_settings": "Configuración", "shell.offline": "Sin conexión. Se muestra lo guardado en este dispositivo; los cambios se enviarán al reconectar.", "shell.queued": "{n} cambio(s) pendientes de enviar",
   "shell.suite": "Suite SDC Solutions", "shell.portfolio": "Cartera de SDC Solutions", "shell.current": "Actual", "shell.open_menu": "Abrir menú", "shell.close_menu": "Cerrar menú",
   "common.save": "Guardar", "common.cancel": "Cancelar", "common.delete": "Eliminar", "common.remove": "Quitar", "common.add": "Añadir", "common.approve": "Aprobar",
   "common.reject": "Rechazar", "common.saved": "Guardado", "common.none": "Ninguno", "common.browser_default": "Predeterminado del navegador",
@@ -79,7 +79,7 @@ const fr: Dict = {
   "nav.help": "Centre d'aide", "shell.help": "Aide",
   "group.revenue": "Revenus", "group.marketing": "Marketing", "group.customers": "Clients", "group.workspace": "Espace de travail", "group.objects": "Objets personnalisés",
   "shell.quick_log": "Saisie rapide", "shell.search": "Rechercher, ou coller des notes de réunion à enregistrer…", "shell.settings": "Paramètres et moteur d'IA",
-  "shell.sign_out": "Se déconnecter", "shell.notifications": "Notifications", "shell.unread": "{n} non lues", "shell.caught_up": "Vous êtes à jour.",
+  "shell.sign_out": "Se déconnecter", "shell.notifications": "Notifications", "shell.unread": "{n} non lues", "shell.caught_up": "Vous êtes à jour.", "shell.all_notifications": "Voir toutes les notifications", "shell.notification_settings": "Paramètres", "shell.offline": "Hors ligne. Affichage des données enregistrées sur cet appareil ; les modifications seront envoyées à la reconnexion.", "shell.queued": "{n} modification(s) en attente d'envoi",
   "shell.suite": "Suite SDC Solutions", "shell.portfolio": "Portefeuille SDC Solutions", "shell.current": "Actuel", "shell.open_menu": "Ouvrir le menu", "shell.close_menu": "Fermer le menu",
   "common.save": "Enregistrer", "common.cancel": "Annuler", "common.delete": "Supprimer", "common.remove": "Retirer", "common.add": "Ajouter", "common.approve": "Approuver",
   "common.reject": "Refuser", "common.saved": "Enregistré", "common.none": "Aucun", "common.browser_default": "Par défaut du navigateur",
@@ -102,7 +102,7 @@ const de: Dict = {
   "nav.help": "Hilfe-Center", "shell.help": "Hilfe",
   "group.revenue": "Umsatz", "group.marketing": "Marketing", "group.customers": "Kunden", "group.workspace": "Arbeitsbereich", "group.objects": "Eigene Objekte",
   "shell.quick_log": "Schnellerfassung", "shell.search": "Suchen oder Besprechungsnotizen zum Erfassen einfügen…", "shell.settings": "Einstellungen und KI",
-  "shell.sign_out": "Abmelden", "shell.notifications": "Benachrichtigungen", "shell.unread": "{n} ungelesen", "shell.caught_up": "Alles erledigt.",
+  "shell.sign_out": "Abmelden", "shell.notifications": "Benachrichtigungen", "shell.unread": "{n} ungelesen", "shell.caught_up": "Alles erledigt.", "shell.all_notifications": "Alle Benachrichtigungen", "shell.notification_settings": "Einstellungen", "shell.offline": "Offline. Es werden die auf diesem Gerät gespeicherten Daten angezeigt; Änderungen werden beim Wiederverbinden gesendet.", "shell.queued": "{n} Änderung(en) warten auf Versand",
   "shell.suite": "SDC Solutions Suite", "shell.portfolio": "SDC Solutions Portfolio", "shell.current": "Aktuell", "shell.open_menu": "Menü öffnen", "shell.close_menu": "Menü schließen",
   "common.save": "Speichern", "common.cancel": "Abbrechen", "common.delete": "Löschen", "common.remove": "Entfernen", "common.add": "Hinzufügen", "common.approve": "Freigeben",
   "common.reject": "Ablehnen", "common.saved": "Gespeichert", "common.none": "Keine", "common.browser_default": "Wie im Browser",
@@ -125,7 +125,7 @@ const hi: Dict = {
   "nav.help": "सहायता केंद्र", "shell.help": "सहायता",
   "group.revenue": "राजस्व", "group.marketing": "मार्केटिंग", "group.customers": "ग्राहक", "group.workspace": "कार्यक्षेत्र", "group.objects": "कस्टम ऑब्जेक्ट",
   "shell.quick_log": "त्वरित लॉग", "shell.search": "खोजें, या लॉग करने के लिए मीटिंग नोट्स चिपकाएँ…", "shell.settings": "सेटिंग्स और AI इंजन",
-  "shell.sign_out": "साइन आउट", "shell.notifications": "सूचनाएँ", "shell.unread": "{n} अपठित", "shell.caught_up": "सब कुछ देख लिया गया है।",
+  "shell.sign_out": "साइन आउट", "shell.notifications": "सूचनाएँ", "shell.unread": "{n} अपठित", "shell.caught_up": "सब कुछ देख लिया गया है।", "shell.all_notifications": "सभी सूचनाएँ देखें", "shell.notification_settings": "सेटिंग्स", "shell.offline": "आप ऑफ़लाइन हैं। इस डिवाइस पर सहेजा गया डेटा दिख रहा है; दोबारा जुड़ने पर बदलाव भेजे जाएँगे।", "shell.queued": "{n} बदलाव भेजे जाने की प्रतीक्षा में",
   "shell.suite": "SDC Solutions सुइट", "shell.portfolio": "SDC Solutions पोर्टफ़ोलियो", "shell.current": "वर्तमान", "shell.open_menu": "मेनू खोलें", "shell.close_menu": "मेनू बंद करें",
   "common.save": "सहेजें", "common.cancel": "रद्द करें", "common.delete": "हटाएँ", "common.remove": "निकालें", "common.add": "जोड़ें", "common.approve": "स्वीकृत करें",
   "common.reject": "अस्वीकार करें", "common.saved": "सहेजा गया", "common.none": "कोई नहीं", "common.browser_default": "ब्राउज़र के अनुसार",
@@ -183,8 +183,24 @@ export function LocaleProvider({ children }: { children: React.ReactNode }) {
   active = { locale, timeZone };  // formatting helpers read this synchronously during render
   const value = useMemo(() => ({ locale, lang: langOf(locale), timeZone }), [locale, timeZone]);
   useEffect(() => { document.documentElement.lang = locale; }, [locale]);
+  usePageTranslation(value.lang);
   // Changing language re-renders the whole tree once so every formatted value follows.
   return <Ctx.Provider value={value}><div key={`${locale}|${timeZone ?? ""}`} className="contents">{children}</div></Ctx.Provider>;
+}
+
+/** Translates rendered page copy not yet converted to `t()` keys (lib/translate.ts). */
+function usePageTranslation(lang: Lang) {
+  useEffect(() => {
+    if (lang === "en") return;
+    let stopped = false;
+    let translator: { stop: () => void } | null = null;
+    import("@/lib/translate").then(({ loadTranslator }) => loadTranslator(lang, Object.values(MESSAGES[lang]))).then((t) => {
+      if (!t || stopped) return;
+      translator = t;
+      t.start();
+    }).catch(() => undefined);
+    return () => { stopped = true; translator?.stop(); };
+  }, [lang]);
 }
 
 export function useLocale() {

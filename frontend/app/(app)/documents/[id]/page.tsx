@@ -12,13 +12,13 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { StatusPill } from "@/components/ui/extra";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/misc";
-import { API_URL, api, errorMessage, get, getToken } from "@/lib/api";
+import { API_URL, api, authHeaders, errorMessage, get } from "@/lib/api";
 import { useMe } from "@/lib/me";
 import type { Contact, DocumentSummary } from "@/lib/types";
 import { shortDate } from "@/lib/utils";
 
 async function openPdf(id: string, title: string) {
-  const res = await fetch(`${API_URL}/api/v1/documents/${id}/pdf`, { headers: { Authorization: `Bearer ${getToken()}` } });
+  const res = await fetch(`${API_URL}/api/v1/documents/${id}/pdf`, { headers: authHeaders() });
   if (!res.ok) return toast.error("Could not load the PDF");
   const url = URL.createObjectURL(await res.blob());
   const a = document.createElement("a");

@@ -12,19 +12,28 @@ from datetime import date
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core import context
+from app.core import context, tenancy
 from app.models import CustomFieldDefinition
 
 LEVELS = ("edit", "read", "hidden")
-_cache: dict[str, list] = {}  # entity -> definitions, maintained by reporting.refresh_custom_fields
+_caches: dict[str, dict[str, list]] = {}  # tenant -> entity -> definitions, maintained by reporting.refresh_custom_fields
+
+
+class _TenantCache:
+    """The current tenant's definitions by entity (read-only view)."""
+
+    def get(self, entity: str, default=None):
+        return _caches.get(tenancy.slug(), {}).get(entity, default)
+
+
+_cache = _TenantCache()
 
 
 def set_cache(defs) -> None:
-    global _cache
     by: dict[str, list] = {}
     for d in defs:
         by.setdefault(d.entity, []).append(d)
-    _cache = by
+    _caches[tenancy.slug()] = by
 
 
 def level(defn, role: str | None) -> str:

@@ -21,6 +21,7 @@ import json
 import logging
 import time
 
+from app.core import tenancy
 from app.core.config import settings
 
 log = logging.getLogger(__name__)
@@ -87,7 +88,7 @@ class RateLimitMiddleware:
         bucket, limit, identity = classify(scope["path"], headers.get("authorization", ""))
         ip = (scope.get("client") or ("unknown", 0))[0]
         window = int(time.time() // WINDOW)
-        count = await hit(f"rl:{bucket}:{identity or 'ip:' + ip}:{window}")
+        count = await hit(f"rl:{tenancy.rate_key_prefix()}{bucket}:{identity or 'ip:' + ip}:{window}")  # each tenant has its own budget
         if count is None:
             return await self.app(scope, receive, send)
         remaining = max(0, limit - count)

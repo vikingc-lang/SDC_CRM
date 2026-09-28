@@ -129,6 +129,10 @@ async def create_user(body: UserIn, db: AsyncSession = Depends(get_db), _: Princ
         raise HTTPException(422, "Partner users need a partner organisation")
     if (await db.execute(select(User.id).where(User.email == body.email.lower()))).first():
         raise HTTPException(409, "A user with this email exists")
+    from app.core import tenancy
+
+    if body.is_active and body.role != "partner" and not await tenancy.can_add_user(db):
+        raise HTTPException(409, "This workspace has reached its user limit. Deactivate a user or raise the plan limit.")
     import secrets
 
     temp = body.password or secrets.token_urlsafe(12)

@@ -12,6 +12,7 @@ import uuid
 
 from fastapi import BackgroundTasks
 
+from app.core import tenancy
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.services import cases, developer, insights, performance, scoring, workflows
@@ -191,6 +192,34 @@ async def job_case_routing() -> None:
             await db.commit()
 
 
+async def job_notifications() -> None:
+    from app.services import notify
+
+    async with SessionLocal() as db:
+        await notify.deliver_pending(db)
+
+
+async def job_notification_digests() -> None:
+    from app.services import notify
+
+    async with SessionLocal() as db:
+        await notify.send_digests(db)
+
+
+async def job_segments() -> None:
+    from app.services import cdp
+
+    async with SessionLocal() as db:
+        await cdp.refresh_all(db)
+
+
+async def job_connectors() -> None:
+    from app.services import connectors
+
+    async with SessionLocal() as db:
+        await connectors.run_all(db)
+
+
 async def job_support_mail() -> None:
     from app.services import email_to_case
 
@@ -227,21 +256,38 @@ JOBS = {
     "ai_housekeeping": job_ai_housekeeping,
     "calendar_sync": job_calendar_sync,
     "fx_feed": job_fx_feed,
+    "notifications": job_notifications,
+    "notification_digests": job_notification_digests,
+    "segments": job_segments,
+    "connectors": job_connectors,
 }
 
 
-async def _run_safely(name: str, *args: str | None) -> None:
+async def run_in_tenants(name: str, *args: str | None, tenant: str | None = None) -> None:
+    """Run a job in the tenant it was queued from, or (scheduled jobs, no tenant) once in every active tenant."""
+    for slug in [tenant] if tenant else await tenancy.active_slugs():
+        try:
+            async with tenancy.use(slug):
+                await JOBS[name](*args)
+                await workflows.drain()  # automation the job's changes triggered
+        except Exception:  # one tenant's failure must not stop the others (or crash the API process)
+            log.exception("Background job %s failed in workspace %s", name, slug)
+            if tenant:
+                raise
+
+
+async def _run_safely(name: str, *args: str | None, tenant: str | None = None) -> None:
     try:
-        await JOBS[name](*args)
-        await workflows.drain()  # automation the job's changes triggered
+        await run_in_tenants(name, *args, tenant=tenant or tenancy.DEFAULT)
     except Exception:  # background work must never crash the API process
-        log.exception("Background job %s failed", name)
+        pass
 
 
 def enqueue(background: BackgroundTasks, name: str, *args: str | None) -> None:
+    tenant = tenancy.slug()  # the job runs against the workspace that queued it
     if settings.use_celery:
         from app.worker import run_job
 
-        run_job.delay(name, *args)
+        run_job.apply_async(args=(name, *args), kwargs={"tenant": tenant})
     else:
-        background.add_task(_run_safely, name, *args)
+        background.add_task(_run_safely, name, *args, tenant=tenant)

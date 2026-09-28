@@ -25,6 +25,7 @@ from jinja2.sandbox import SandboxedEnvironment
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import tenancy
 from app.core.config import settings
 from app.core.dialect import next_number
 from app.models import (
@@ -491,7 +492,7 @@ async def send_for_signature(db: AsyncSession, doc: Document, signers: list[dict
 
 
 def sign_url(token: str) -> str:
-    return f"{settings.public_web_url.rstrip('/')}/sign/{token}"
+    return f"{tenancy.web_url()}/sign/{token}"
 
 
 def link_expired(req: SignatureRequest) -> bool:

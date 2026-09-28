@@ -7,6 +7,7 @@ import { CustomFieldsPanel, GatesPanel } from "@/components/admin/config";
 import { ConfigTransferPanel, ObjectsPanel, SharingRulesPanel, ValidationRulesPanel } from "@/components/admin/platform";
 import { DataPanel } from "@/components/admin/data";
 import { AiGovernancePanel } from "@/components/admin/ai";
+import { ConnectorsPanel } from "@/components/admin/connectors";
 import { AuditPanel, CompliancePanel, DedupPanel } from "@/components/admin/governance";
 import { TaxCurrencyPanel } from "@/components/admin/taxfx";
 import { JobsPanel } from "@/components/admin/integrations";
@@ -19,7 +20,7 @@ import { SecurityPanel } from "@/components/security";
 import { Tabs } from "@/components/ui/extra";
 import { useMe } from "@/lib/me";
 
-type Tab = "users" | "security" | "rbac" | "audit" | "privacy" | "dedup" | "fields" | "leads" | "workflows" | "service" | "territories" | "chain" | "stages" | "gates" | "data" | "developer" | "jobs" | "objects" | "rules" | "sharing" | "config" | "ai" | "tax";
+type Tab = "users" | "security" | "rbac" | "audit" | "privacy" | "dedup" | "fields" | "leads" | "workflows" | "service" | "territories" | "chain" | "stages" | "gates" | "data" | "developer" | "jobs" | "objects" | "rules" | "sharing" | "config" | "ai" | "tax" | "connectors";
 
 export default function AdminPage() {
   const { can } = useMe();
@@ -45,6 +46,7 @@ export default function AdminPage() {
     { value: "gates", label: "Stage gates", show: can("admin", "update") },
     { value: "data", label: "Import / export", show: can("data", "create") || can("data", "export") },
     { value: "developer", label: "API & webhooks", show: can("admin", "update") },
+    { value: "connectors", label: "Connectors", show: can("admin", "update") },
     { value: "jobs", label: "Jobs", show: can("admin", "update") },
     { value: "config", label: "Configuration", show: can("admin", "read") },
   ];
@@ -78,6 +80,7 @@ export default function AdminPage() {
       {current === "gates" && <GatesPanel />}
       {current === "data" && <DataPanel />}
       {current === "developer" && <div className="space-y-6"><ApiKeysPanel /><WebhooksPanel /><IntegrationReference /></div>}
+      {current === "connectors" && <ConnectorsPanel />}
       {current === "jobs" && <JobsPanel />}
     </div>
   );

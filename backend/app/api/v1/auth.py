@@ -238,7 +238,18 @@ async def me(user: User = Depends(get_current_user), db: AsyncSession = Depends(
                      "recovery_codes_left": len(user.mfa_recovery_hashes or []), "sso_linked": bool(user.sso_subject),
                      "has_password": user.password_hash != "!sso"},
         "preferences": {"locale": user.locale, "timezone": user.timezone},
+        "workspace": _workspace(),
     }
+
+
+def _workspace() -> dict | None:
+    """The tenant workspace this session belongs to (None in a single-workspace install)."""
+    from app.core import tenancy
+
+    if tenancy.slug() == tenancy.DEFAULT:
+        return None
+    info = tenancy._registry.get(tenancy.slug())
+    return {"slug": tenancy.slug(), "name": info.name if info else tenancy.slug()}
 
 
 LOCALES = ("en-US", "en-GB", "en-IN", "es-ES", "es-MX", "fr-FR", "de-DE", "hi-IN")

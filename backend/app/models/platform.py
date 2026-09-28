@@ -13,6 +13,7 @@ __all__ = [
     "ConsentEvent", "ErasureLog", "Notification", "Attachment", "MailboxConnection", "DealAlert", "FxRate",
     "IntegrationEvent", "ErpSyncRun", "SsoLoginState", "SavedReport", "Dashboard", "WorkflowRule", "WorkflowRun", "ForecastSubmission", "ForecastAdjustment",
     "ListView", "ReportSubscription", "CustomObject", "CustomRecord", "ValidationRule", "SharingRule", "NumberSequence", "WorkflowEvent",
+    "PushSubscription",
 ]
 
 
@@ -141,7 +142,29 @@ class Notification(Base):
     title: Mapped[str] = mapped_column(String(300))
     body: Mapped[str | None] = mapped_column(Text)
     link: Mapped[str | None] = mapped_column(String(300))
+    priority: Mapped[str] = mapped_column(String(6), default="normal", server_default="normal")  # normal | high
     read_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    archived_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    snoozed_until: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    # Delivery beyond the app (email, push, chat): when each channel was handled; set once delivery ran
+    delivery: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
+    delivered_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    created_at: Mapped[datetime] = _ts(nullable=False)
+
+
+class PushSubscription(Base):
+    """A browser or installed app that receives Web Push notifications for a user (one per device)."""
+    __tablename__ = "push_subscriptions"
+    __table_args__ = (Index("ix_push_subscriptions_user", "user_id"),)
+
+    id: Mapped[uuid.UUID] = _pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    endpoint: Mapped[str] = mapped_column(Text, unique=True)
+    p256dh: Mapped[str] = mapped_column(String(200))
+    auth: Mapped[str] = mapped_column(String(64))
+    user_agent: Mapped[str | None] = mapped_column(String(200))
+    failures: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    last_used_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     created_at: Mapped[datetime] = _ts(nullable=False)
 
 

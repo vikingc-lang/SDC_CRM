@@ -8,7 +8,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.core.database import Base
 from app.core.types import JSONB, UTCDateTime, UUID
 
-__all__ = ["ApiKey", "WebhookSubscription", "WebhookDelivery"]
+__all__ = ["ApiKey", "WebhookSubscription", "WebhookDelivery", "Connector"]
 
 
 def _pk() -> Mapped[uuid.UUID]:
@@ -64,3 +64,21 @@ class WebhookDelivery(Base):
     duration_ms: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now())
     delivered_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+
+
+class Connector(Base):
+    """A configured pre-built integration (Slack, Microsoft Teams, Mailchimp, BambooHR; services/connectors.py).
+    ``config`` holds the non-secret settings; ``secret`` the Fernet-encrypted credentials."""
+    __tablename__ = "connectors"
+
+    id: Mapped[uuid.UUID] = _pk()
+    kind: Mapped[str] = mapped_column(String(20))
+    name: Mapped[str] = mapped_column(String(120))
+    config: Mapped[dict] = mapped_column(JSONB, default=dict)
+    secret: Mapped[str | None] = mapped_column(Text)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    state: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")  # cursors and counters
+    last_run_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    last_error: Mapped[str | None] = mapped_column(String(500))
+    created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now(), nullable=False)

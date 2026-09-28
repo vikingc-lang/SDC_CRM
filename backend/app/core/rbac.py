@@ -16,6 +16,7 @@ from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import tenancy
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.models import Account, Deal, RolePermission, User
@@ -149,7 +150,7 @@ class Principal:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
 
 
-_cache: dict[str, tuple[float, dict[str, Perm]]] = {}
+_cache: dict[tuple[str, str], tuple[float, dict[str, Perm]]] = {}  # (tenant, role)
 _TTL = 30.0
 
 
@@ -158,18 +159,19 @@ def invalidate_cache() -> None:
 
 
 async def load_matrix(db: AsyncSession, role: str) -> dict[str, Perm]:
-    hit = _cache.get(role)
+    key = (tenancy.slug(), role)
+    hit = _cache.get(key)
     if hit and time.monotonic() - hit[0] < _TTL:
         return hit[1]
     rows = (await db.execute(select(RolePermission).where(RolePermission.role == role))).scalars().all()
     # defaults first, stored overrides on top: resources added in later releases get sensible access
     matrix = {res: Perm(**spec) for res, spec in DEFAULT_MATRIX.get(role, {}).items()}
     matrix.update({r.resource: Perm(r.can_create, r.can_read, r.can_update, r.can_delete, r.can_export, r.scope) for r in rows})
-    _cache[role] = (time.monotonic(), matrix)
+    _cache[key] = (time.monotonic(), matrix)
     return matrix
 
 
-_share_cache: dict[str, tuple[float, list]] = {}
+_share_cache: dict[tuple[str, str], tuple[float, list]] = {}  # (tenant, role)
 
 
 def invalidate_shares() -> None:
@@ -180,12 +182,13 @@ async def load_shares(db: AsyncSession, role: str) -> list[list[dict]]:
     """Criteria of the active account sharing rules that include ``role``."""
     from app.models import SharingRule
 
-    hit = _share_cache.get(role)
+    key = (tenancy.slug(), role)
+    hit = _share_cache.get(key)
     if hit and time.monotonic() - hit[0] < _TTL:
         return hit[1]
     rules = (await db.execute(select(SharingRule).where(SharingRule.active.is_(True)))).scalars().all()
     out = [list(r.criteria or []) for r in rules if role in (r.roles or [])]
-    _share_cache[role] = (time.monotonic(), out)
+    _share_cache[key] = (time.monotonic(), out)
     return out
 
 

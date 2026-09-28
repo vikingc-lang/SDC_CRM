@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     jwt_expire_minutes: int = 60 * 12
 
     cors_origins: str = "http://localhost:3000"
+    # Also allow origins matching this regex (tenant web hosts, e.g. ^https://[a-z0-9-]+\.cirra\.example$)
+    cors_origin_regex: str | None = None
     public_web_url: str = "http://localhost:3000"
 
     # Encrypts stored secrets (mailbox passwords). Derived from JWT_SECRET when unset.
@@ -119,6 +121,17 @@ class Settings(BaseSettings):
     microsoft_calendar_client_id: str | None = None
     microsoft_calendar_client_secret: str | None = None
     microsoft_calendar_tenant: str = "common"
+
+    # Web Push to browsers and the installed app. Unset = a key pair is generated once and kept (encrypted) in the database.
+    vapid_public_key: str | None = None
+    vapid_private_key: str | None = None
+    vapid_subject: str = "mailto:admin@cirra.local"
+
+    # Multi-tenancy (core/tenancy.py): each tenant workspace has its own database on this server, created with
+    # `python -m app.tenants create`. Requests are routed by host name; the X-Cirra-Tenant header also works when
+    # TENANT_HEADER is true (API clients and local development).
+    multi_tenant: bool = False
+    tenant_header: bool = True
 
     # 'hash' (offline feature-hashing) | 'ollama' | 'aws_bedrock'
     embedding_provider: Literal["hash", "ollama", "aws_bedrock"] = "hash"

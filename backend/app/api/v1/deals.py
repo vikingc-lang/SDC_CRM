@@ -12,11 +12,12 @@ from app.core.database import get_db
 from app.core.dialect import nulls_last
 from app.core.rbac import Principal, authorize
 from app.models import (
-    Account, Activity, Attachment, Contact, Deal, DealAlert, DealPartner, DealSplit, DealStageHistory, DealTeamMember, Document, Order, Partner,
+    Account, Activity, Attachment, Contact, Deal, DealAlert, DealContact, DealPartner, DealSplit, DealStageHistory, DealTeamMember, Document,
+    Order, Partner,
     Pipeline, PipelineStage, Quote, Task,
 )
 from app.models.selling import TEAM_ROLES
-from app.services import custom_fields, deal_team, fx, insights, orders, pipeline_service, scoring
+from app.services import custom_fields, deal_team, fx, insights, orders, pipeline_service, scoring, stakeholders
 from app.services.clm import document_out
 from app.services.cpq import quote_out
 from app.services.jobs import enqueue
@@ -316,7 +317,7 @@ async def get_deal(deal_id: uuid.UUID, db: AsyncSession = Depends(get_db), p: Pr
     docs = (await db.execute(select(Document).where(Document.deal_id == deal_id).order_by(Document.created_at.desc()))).scalars().unique().all()
     partners = (await db.execute(select(DealPartner).where(DealPartner.deal_id == deal_id))).scalars().unique().all()
     alerts = (await db.execute(select(DealAlert).where(DealAlert.deal_id == deal_id, DealAlert.resolved_at.is_(None)))).scalars().unique().all()
-    roles = [c.buying_role for c in contacts if c.status == "active"]
+    roles = sorted(await stakeholders.deal_roles(db, deal))
     readiness = await orders.readiness(db, deal)
     deal_orders = (await db.execute(select(Order).where(Order.deal_id == deal_id).order_by(Order.created_at.desc()))).scalars().unique().all()
     editable = True
@@ -459,6 +460,46 @@ async def remove_team_member(deal_id: uuid.UUID, user_id: uuid.UUID, db: AsyncSe
     await db.delete(member)
     await db.commit()
     return await _selling(db, deal)
+
+
+class CommitteeMemberIn(BaseModel):
+    contact_id: uuid.UUID
+    role: str
+    influence: str = "medium"
+    stance: str = "neutral"
+    is_primary: bool = False
+    notes: str | None = Field(None, max_length=500)
+
+
+@router.get("/deals/{deal_id}/committee")
+async def get_committee(deal_id: uuid.UUID, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("deals", "read"))):
+    """The buying committee: members, coverage for the stage, gaps and who to add."""
+    return await stakeholders.committee(db, await _get_deal(db, p, deal_id))
+
+
+@router.put("/deals/{deal_id}/committee")
+async def set_committee_member(deal_id: uuid.UUID, body: CommitteeMemberIn, db: AsyncSession = Depends(get_db),
+                               p: Principal = Depends(authorize("deals", "update"))):
+    deal = await _editable_deal(db, p, deal_id)
+    try:
+        await stakeholders.upsert_member(db, deal, body.contact_id, role=body.role, influence=body.influence, stance=body.stance,
+                                         is_primary=body.is_primary, notes=body.notes)
+    except stakeholders.StakeholderError as e:
+        raise HTTPException(422, str(e)) from e
+    await db.commit()
+    return await stakeholders.committee(db, deal)
+
+
+@router.delete("/deals/{deal_id}/committee/{contact_id}")
+async def remove_committee_member(deal_id: uuid.UUID, contact_id: uuid.UUID, db: AsyncSession = Depends(get_db),
+                                  p: Principal = Depends(authorize("deals", "update"))):
+    deal = await _editable_deal(db, p, deal_id)
+    member = await db.get(DealContact, (deal.id, contact_id))
+    if member is None:
+        raise HTTPException(404, "Not on the buying committee")
+    await db.delete(member)
+    await db.commit()
+    return await stakeholders.committee(db, deal)
 
 
 @router.put("/deals/{deal_id}/splits")

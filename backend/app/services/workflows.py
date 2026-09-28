@@ -24,6 +24,7 @@ from sqlalchemy import and_, delete, event, func, inspect, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
+from app.core import tenancy
 from app.core.database import SessionLocal
 from app.core.rbac import ROLES
 from app.models import (
@@ -517,23 +518,22 @@ async def resume_waiting(db: AsyncSession) -> dict:
 
 # ---- record triggers ----------------------------------------------------------------------------------
 
-_rules_cache: tuple[float, list[dict]] = (0.0, [])
+_rules_cache: dict[str, tuple[float, list[dict]]] = {}  # tenant -> (loaded at, rules)
 _pending: set[asyncio.Task] = set()
 
 
 def invalidate_cache() -> None:
-    global _rules_cache
-    _rules_cache = (0.0, [])
+    _rules_cache.clear()
 
 
 async def _active_record_rules(db: AsyncSession) -> list[dict]:
-    global _rules_cache
-    if time.monotonic() - _rules_cache[0] < 10:
-        return _rules_cache[1]
+    hit = _rules_cache.get(tenancy.slug())
+    if hit and time.monotonic() - hit[0] < 10:
+        return hit[1]
     rows = (await db.execute(select(WorkflowRule).where(WorkflowRule.enabled.is_(True)))).scalars().all()
     rules = [{"id": r.id, "source": r.source, "trigger": r.trigger, "conditions": r.conditions} for r in rows
              if r.trigger.get("type") in ("created", "updated")]
-    _rules_cache = (time.monotonic(), rules)
+    _rules_cache[tenancy.slug()] = (time.monotonic(), rules)
     return rules
 
 

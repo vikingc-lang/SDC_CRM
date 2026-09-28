@@ -10,12 +10,13 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { ActivityTimeline } from "@/components/ActivityTimeline";
 import { ProductsCard, TeamCard } from "@/components/dealselling";
+import { BuyingCommittee } from "@/components/stakeholders";
 import { AlertsBanner, DocumentsCard, PartnersCard, QuotesCard } from "@/components/panels";
 import { fmtMoney } from "@/components/ui/extra";
 import { useMe } from "@/lib/me";
 import { NewTaskDialog } from "@/components/forms";
 import { OrderPanel } from "@/components/orders";
-import { RiskBadge, RoleBadge, riskTone } from "@/components/indicators";
+import { RiskBadge, riskTone } from "@/components/indicators";
 import { useStageMove } from "@/components/KanbanBoard";
 import { TaskRow } from "@/components/TaskList";
 import { Badge } from "@/components/ui/badge";
@@ -24,7 +25,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/input";
-import { Avatar, Skeleton } from "@/components/ui/misc";
+import { Skeleton } from "@/components/ui/misc";
 import { api, errorMessage, get } from "@/lib/api";
 import { ui } from "@/lib/store";
 import type { DealDetail, KanbanColumn } from "@/lib/types";
@@ -241,21 +242,7 @@ export default function DealPage() {
               {deal.tasks.map((t) => <TaskRow key={t.id} task={t} showContext={false} />)}
             </CardBody>
           </Card>
-          <Card>
-            <CardHeader title="Buying committee" />
-            <CardBody className="space-y-3">
-              {deal.contacts.map((c) => (
-                <div key={c.id} className="flex items-center gap-3">
-                  <Avatar name={c.name} size={30} />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-[13.5px] font-medium">{c.name}{deal.primary_contact?.id === c.id && <span className="ml-1.5 text-[11px] font-normal text-muted-foreground">primary</span>}</p>
-                    <p className="truncate text-[12px] text-muted-foreground">{c.job_title ?? "—"}</p>
-                  </div>
-                  <RoleBadge role={c.buying_role} />
-                </div>
-              ))}
-            </CardBody>
-          </Card>
+          <BuyingCommittee dealId={deal.id} contacts={deal.contacts} canEdit={(deal.can_edit ?? can("deals", "update")) && !closed} />
           <TeamCard dealId={deal.id} owner={deal.owner} amount={deal.amount} currency={deal.currency} selling={deal} canEdit={deal.can_edit ?? can("deals", "update")} />
           <PartnersCard dealId={deal.id} partners={deal.partners} canEdit={can("deals", "update")} />
           <Card>

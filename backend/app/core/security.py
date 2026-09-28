@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 import bcrypt
 import jwt
 
+from app.core import tenancy
 from app.core.config import settings
 
 
@@ -20,7 +21,7 @@ def verify_password(password: str, password_hash: str) -> bool:
 
 def create_access_token(subject: str, role: str, session_version: int = 0, amr: list[str] | None = None) -> str:
     expire = datetime.now(timezone.utc) + timedelta(minutes=settings.jwt_expire_minutes)
-    return jwt.encode({"sub": subject, "role": role, "sv": session_version, "amr": amr or ["pwd"], "exp": expire},
+    return jwt.encode({"sub": subject, "role": role, "sv": session_version, "amr": amr or ["pwd"], "exp": expire, "tid": tenancy.slug()},
                       settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 
@@ -28,17 +29,20 @@ def decode_access_token(token: str) -> dict:
     payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
     if "purpose" in payload:  # a pending-MFA token is not a session
         raise jwt.InvalidTokenError("not an access token")
+    if payload.get("tid", tenancy.DEFAULT) != tenancy.slug():  # a token from another workspace
+        raise jwt.InvalidTokenError("wrong workspace")
     return payload
 
 
 def create_pending_token(subject: str, purpose: str, minutes: int = 10) -> str:
     """Short-lived token proving the password step passed; only redeemable for the named second step."""
     expire = datetime.now(timezone.utc) + timedelta(minutes=minutes)
-    return jwt.encode({"sub": subject, "purpose": purpose, "exp": expire}, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+    return jwt.encode({"sub": subject, "purpose": purpose, "exp": expire, "tid": tenancy.slug()}, settings.jwt_secret,
+                      algorithm=settings.jwt_algorithm)
 
 
 def decode_pending_token(token: str, purpose: str) -> str:
     payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
-    if payload.get("purpose") != purpose:
+    if payload.get("purpose") != purpose or payload.get("tid", tenancy.DEFAULT) != tenancy.slug():
         raise jwt.InvalidTokenError("wrong token purpose")
     return payload["sub"]

@@ -41,6 +41,9 @@ for _ in range(30):
 sys.exit("Database not reachable")
 PY
   alembic upgrade head
+  if [ "${MULTI_TENANT:-false}" = "true" ]; then
+    python -m app.tenants migrate  # every tenant workspace's database follows the primary
+  fi
   if [ "${SEED_DEMO_DATA:-false}" = "true" ]; then
     python -m app.seed
   fi

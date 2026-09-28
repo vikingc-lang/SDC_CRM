@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import tenancy
 from app.core.config import settings
 from app.core.rbac import principal_for
 from app.models import ReportSubscription, SavedReport, User
@@ -119,7 +120,7 @@ async def deliver(db: AsyncSession, sub: ReportSubscription, now: datetime | Non
         if mailer.configured() and user.email:
             slug = "".join(ch if ch.isalnum() else "-" for ch in report.name.lower()).strip("-")[:60] or "report"
             try:
-                await mailer.send(user.email, f"[Cirra] {report.name}", _text(report, result, settings.public_web_url.rstrip("/") + link),
+                await mailer.send(user.email, f"[Cirra] {report.name}", _text(report, result, tenancy.web_url() + link),
                                   [(f"{slug}-{now.date().isoformat()}.csv", reporting.to_csv(result).encode("utf-8"), "text/csv")])
                 emailed += 1
             except mailer.MailError as e:

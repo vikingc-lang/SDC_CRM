@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { BUYING_ROLES } from "@/components/indicators";
 import { DISQUALIFY_REASONS, EVENT_TYPES, ScoreBar } from "@/components/leads";
+import { BehaviorCard } from "@/components/stakeholders";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
@@ -189,6 +190,7 @@ export default function LeadPage() {
               </ol>
             </CardBody>
           </Card>
+          <BehaviorCard path={`/leads/${lead.id}/behavior`} />
         </div>
 
         <div className="space-y-6">

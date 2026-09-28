@@ -10,11 +10,15 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 from app.core.types import UTCDateTime, UUID
 
-__all__ = ["DealLineItem", "DealTeamMember", "DealSplit", "FxRateHistory", "TaxRate", "TEAM_ROLES", "SPLIT_TYPES"]
+__all__ = ["DealLineItem", "DealTeamMember", "DealSplit", "FxRateHistory", "TaxRate", "DealContact", "TEAM_ROLES", "SPLIT_TYPES",
+           "COMMITTEE_ROLES"]
 
 TEAM_ROLES = ("Sales Engineer", "Solution Architect", "Executive Sponsor", "Partner Manager", "Customer Success", "Overlay Specialist",
               "Sales Manager", "Other")
 SPLIT_TYPES = ("revenue", "overlay")
+# A contact's part in one deal's decision (the contact's own buying_role is their usual part across deals)
+COMMITTEE_ROLES = ("Economic Buyer", "Decision Maker", "Champion", "Technical Buyer", "Influencer", "Evaluator", "User",
+                   "Legal Counsel", "Procurement", "Blocker")
 
 
 class DealLineItem(Base):
@@ -100,3 +104,24 @@ class TaxRate(Base):
     name: Mapped[str] = mapped_column(String(60))
     rate: Mapped[Decimal] = mapped_column(Numeric(6, 3))
     active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+
+
+class DealContact(Base):
+    """A contact on a deal's buying committee: their role in this decision, how much weight they carry and where
+    they stand. Drives the stakeholder map, coverage gaps and the missing-roles risk signal."""
+    __tablename__ = "deal_contacts"
+    __table_args__ = (CheckConstraint(f"role IN {COMMITTEE_ROLES}", name="ck_deal_contacts_role"),
+                      CheckConstraint("influence IN ('high', 'medium', 'low')", name="ck_deal_contacts_influence"),
+                      CheckConstraint("stance IN ('champion', 'supporter', 'neutral', 'skeptic', 'blocker')", name="ck_deal_contacts_stance"),
+                      Index("ix_deal_contacts_contact", "contact_id"))
+
+    deal_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("deals.id", ondelete="CASCADE"), primary_key=True)
+    contact_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("contacts.id", ondelete="CASCADE"), primary_key=True)
+    role: Mapped[str] = mapped_column(String(20))
+    influence: Mapped[str] = mapped_column(String(10), default="medium", server_default="medium")
+    stance: Mapped[str] = mapped_column(String(12), default="neutral", server_default="neutral")
+    is_primary: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    notes: Mapped[str | None] = mapped_column(String(500))
+    added_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now(), nullable=False)
+
+    contact = relationship("Contact", lazy="joined")

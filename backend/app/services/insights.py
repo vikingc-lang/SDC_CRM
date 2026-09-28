@@ -161,7 +161,8 @@ def next_best_actions(deal: dict, roles: list[str] | None = None, stage_order: i
 
 async def scan_pipeline(db: AsyncSession) -> dict:
     """Deal risk & slippage copilot: open/resolve alerts for every open deal."""
-    from app.models import Account, Contact, DealAlert, PipelineStage
+    from app.models import DealAlert, PipelineStage
+    from app.services import stakeholders
     from app.services.notify import notify
 
     today = date.today()
@@ -175,7 +176,7 @@ async def scan_pipeline(db: AsyncSession) -> dict:
     seen = set()
     for d in deals:
         f = d.risk_factors or {}
-        roles = set((await db.execute(select(Contact.buying_role).where(Contact.account_id == d.account_id, Contact.status == "active"))).scalars().all())
+        roles = await stakeholders.deal_roles(db, d)
         drift = ((d.account.custom_metadata or {}).get("health_breakdown") or {}).get("sentiment_drift", 0)
         checks = []
         if f.get("days_since_activity") is None or f.get("days_since_activity", 0) > 14:

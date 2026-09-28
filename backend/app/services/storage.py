@@ -11,7 +11,9 @@ from app.models import Attachment
 
 
 def _root() -> Path:
-    root = Path(settings.storage_dir).resolve()
+    from app.core import tenancy
+
+    root = (Path(settings.storage_dir) / tenancy.storage_suffix()).resolve()
     root.mkdir(parents=True, exist_ok=True)
     return root
 

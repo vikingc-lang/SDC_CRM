@@ -17,6 +17,7 @@ export interface Contact {
   phone: string | null; job_title: string | null; buying_role: BuyingRole; account_name?: string | null;
   mobile?: string | null; linkedin_url?: string | null; timezone?: string | null; department?: string | null; status?: "active" | "departed" | "erased";
   relationship_strength?: number | null; rsi_factors?: Record<string, number | string | null>;
+  reports_to_id?: UUID | null; influence?: "high" | "medium" | "low" | null; stance?: "champion" | "supporter" | "neutral" | "skeptic" | "blocker" | null;
   consent?: { email: "granted" | "denied" | "unknown"; basis: string | null; regime: string | null; updated_at: string | null; do_not_sell: boolean;
     opt_out: { email: boolean; phone: boolean; sms: boolean } };
   custom_fields?: Record<string, unknown>;
@@ -138,6 +139,7 @@ export interface Me {
   partner: { id: UUID; name: string; tier: string } | null;
   permissions: Record<string, Perm>;
   security: { mfa_enabled: boolean; mfa_required: boolean; recovery_codes_left: number; sso_linked: boolean; has_password: boolean };
+  workspace?: { slug: string; name: string } | null;
   preferences?: { locale: string | null; timezone: string | null };
 }
 
@@ -189,7 +191,7 @@ export interface Registration { id: UUID; partner: { id: UUID; name: string; tie
   contact_email: string | null; estimated_amount: number; currency: string; territory: string | null; product_interest: string | null; notes: string | null;
   status: string; exclusivity_expires_at: string | null; conflicts: { type: string; severity: string; account?: string; partner?: string; open_deals?: number; expires?: string }[];
   decision_note: string | null; deal_id: UUID | null; created_at: string }
-export interface Notification { id: UUID; kind: string; title: string; body: string | null; link: string | null; read: boolean; created_at: string }
+export interface Notification { id: UUID; kind: string; kind_label?: string; priority?: "normal" | "high"; title: string; body: string | null; link: string | null; read: boolean; created_at: string }
 export interface CustomFieldDef {
   id?: UUID; entity?: string; key: string; label: string; field_type: "text" | "number" | "date" | "select" | "boolean" | "url"; options: string[]; required?: boolean;
   /** Field security for the signed-in user: visible but not editable. */

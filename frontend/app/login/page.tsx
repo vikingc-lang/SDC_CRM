@@ -3,12 +3,12 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ArrowLeft, ArrowRight, Brain, KeyRound, Lock, Sparkles } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Logo } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { MfaEnrollment, RecoveryCodes } from "@/components/security";
-import { api, errorMessage, get, setToken } from "@/lib/api";
+import { api, errorMessage, get, getWorkspace, setToken, setWorkspace } from "@/lib/api";
 
 interface LoginResult { access_token?: string; mfa_required?: boolean; mfa_setup_required?: boolean; mfa_token?: string }
 interface Methods { password: boolean; sso: { enabled: boolean; display_name: string } }
@@ -33,6 +33,13 @@ export default function LoginPage() {
   const [codes, setCodes] = useState<string[]>([]);
   const [pendingToken, setPendingToken] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [workspace, setWs] = useState<string | null>(null);
+  useEffect(() => {
+    // ?workspace=acme picks a tenant workspace (when this site's host name doesn't already imply one)
+    const q = new URLSearchParams(window.location.search).get("workspace");
+    if (q !== null) setWorkspace(q.trim() || null);
+    setWs(getWorkspace());
+  }, []);
   const methods = useQuery({ queryKey: ["auth-methods"], queryFn: () => get<Methods>("/auth/methods"), retry: false });
   const finish = (token: string) => { setToken(token); router.replace("/"); };
   const login = useMutation({
@@ -90,6 +97,10 @@ export default function LoginPage() {
           {step === "password" && <>
           <h1 className="text-2xl font-semibold tracking-tight">Welcome back</h1>
           <p className="mt-1 text-sm text-muted-foreground">Sign in to your private Cirra workspace.</p>
+          {workspace && (
+            <p className="mt-2 text-[12.5px] text-muted-foreground">Workspace <span className="font-medium text-foreground">{workspace}</span> ·{" "}
+              <button type="button" className="text-primary hover:underline" onClick={() => { setWorkspace(null); setWs(null); }}>use the default</button></p>
+          )}
           {ssoOn && (
             <div className="mt-8 space-y-3">
               <Button type="button" variant="outline" className="w-full" size="lg" loading={sso.isPending} onClick={() => sso.mutate()}><KeyRound className="h-4 w-4" />{methods.data!.sso.display_name}</Button>

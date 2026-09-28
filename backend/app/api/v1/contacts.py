@@ -12,7 +12,7 @@ from app.core.database import get_db
 from app.core.rbac import Principal, authorize
 from app.models import Account, Activity, ConsentEvent, Contact, ErasureLog
 from app.schemas.ai import BuyingRole
-from app.services import custom_fields, privacy, scoring
+from app.services import cdp, custom_fields, privacy, scoring, stakeholders
 from app.services.notify import emit
 from app.services.serializers import activity_out, contact_out
 
@@ -47,6 +47,9 @@ class ContactUpdate(BaseModel):
     buying_role: BuyingRole | None = None
     status: Literal["active", "departed"] | None = None
     custom_fields: dict | None = None
+    reports_to_id: uuid.UUID | None = None
+    influence: Literal["high", "medium", "low"] | None = None
+    stance: Literal["champion", "supporter", "neutral", "skeptic", "blocker"] | None = None
 
 
 class ConsentUpdate(BaseModel):
@@ -152,6 +155,11 @@ async def update_contact(contact_id: uuid.UUID, body: ContactUpdate, db: AsyncSe
         contact.departed_at = datetime.now(timezone.utc)  # champion turnover feeds churn early-warning
     elif data.get("status") == "active":
         contact.departed_at = None
+    if "reports_to_id" in data:
+        try:
+            await stakeholders.set_manager(db, contact, data.pop("reports_to_id"))
+        except stakeholders.StakeholderError as exc:
+            raise HTTPException(422, str(exc))
     for field, value in data.items():
         setattr(contact, field, value)
     try:
@@ -161,6 +169,13 @@ async def update_contact(contact_id: uuid.UUID, body: ContactUpdate, db: AsyncSe
     await scoring.rescore_account(db, contact.account_id)
     await db.commit()
     return contact_out(contact)
+
+
+@router.get("/{contact_id}/behavior")
+async def contact_behavior(contact_id: uuid.UUID, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("contacts", "read"))):
+    """What this person did on the website, in email and in the product (the behavioural event store)."""
+    await _get(db, p, contact_id)
+    return await cdp.timeline(db, contact_id=contact_id)
 
 
 @router.post("/{contact_id}/consent")

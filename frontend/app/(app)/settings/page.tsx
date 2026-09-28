@@ -2,9 +2,12 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AudioLines, Brain, CalendarDays, Copy, Cpu, Database, Inbox, Landmark, Mail, RefreshCw, ShieldCheck, Trash2, Upload } from "lucide-react";
-import { useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/AppShell";
+import { InstallAppCard } from "@/components/mobile";
+import { NotificationSettingsCard } from "@/components/notifications";
 import { CalendarSyncCard, RegionCard } from "@/components/preferences";
 import { SecurityCard } from "@/components/security";
 import { AidenAvatar } from "@/components/Brand";
@@ -32,6 +35,11 @@ const ASR_LABEL: Record<string, string> = { disabled: "Disabled (type or paste n
 export default function SettingsPage() {
   const qc = useQueryClient();
   const { me, can } = useMe();
+  const params = useSearchParams();
+  const tab = params.get("tab");
+  useEffect(() => {
+    if (tab) setTimeout(() => document.getElementById(tab)?.scrollIntoView({ behavior: "smooth", block: "start" }), 300);
+  }, [tab]);
   const status = useQuery({ queryKey: ["ai-status"], queryFn: () => get<AIStatus>("/ai/status") });
   const rescore = useMutation({
     mutationFn: async () => (await api.post<{ accounts_rescored: number }>("/admin/jobs/rescore")).data,
@@ -53,6 +61,8 @@ export default function SettingsPage() {
       <PageHeader title="Settings" description="Your mail and calendar connections, plus the workspace intelligence layer" />
       <div className="space-y-6">
         <SecurityCard />
+        <NotificationSettingsCard />
+        <InstallAppCard />
         <RegionCard />
         <MailCard />
         <CalendarSyncCard />

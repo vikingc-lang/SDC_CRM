@@ -27,6 +27,7 @@ def contact_out(c: Contact, account_name: str | None = None) -> dict:
         "email": c.email, "phone": c.phone, "mobile": c.mobile, "linkedin_url": c.linkedin_url, "timezone": c.timezone,
         "department": c.department, "job_title": c.job_title, "buying_role": c.buying_role, "status": c.status,
         "departed_at": c.departed_at, "relationship_strength": c.relationship_strength, "rsi_factors": c.rsi_factors or {},
+        "reports_to_id": c.reports_to_id, "influence": c.influence, "stance": c.stance,
         "consent": {
             "email": c.consent_email, "basis": c.consent_basis, "regime": c.privacy_regime, "updated_at": c.consent_updated_at,
             "do_not_sell": c.do_not_sell, "opt_out": {"email": c.opt_out_email, "phone": c.opt_out_phone, "sms": c.opt_out_sms},

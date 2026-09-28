@@ -23,6 +23,21 @@ on the forecast call, when it's too late to act.
 - **Aiden, your AI assistant (⌘J):** Aiden answers questions about accounts, deals and pipeline in plain English, grounded in
   hybrid keyword + semantic search (pgvector). Ask it "how do I…?" and it answers from the help center, with steps
   and links to the right screen.
+- **A notification center you control:** inbox, unread, snoozed and archived; per kind, choose in the app, email
+  (instant or a daily digest), Web Push on your phone or laptop, or Slack; quiet hours hold everything but urgent ones.
+- **Cirra on your phone:** install it from the browser (PWA). Recently viewed records open offline, notes and tasks
+  added without a connection are queued and sent later, and a bottom tab bar puts Home, Pipeline, Tasks and
+  Notifications under your thumb; phone numbers are tap-to-call.
+- **Buying committees and org charts:** map who decides on each deal (economic buyer, champion, technical buyer…),
+  their influence and stance; coverage, blockers and "who to bring in" suggestions (the champion's manager first);
+  and an org chart per account.
+- **Segments and behaviour:** a website snippet, email opens and clicks, form fills and product events over the API
+  land in one event store; build dynamic segments from attributes plus behaviour and add them to campaigns.
+- **Pre-built connectors:** Slack (channel posts, notification DMs, `/cirra` lookups), Microsoft Teams, Mailchimp
+  (segment sync with consent, unsubscribes back) and BambooHR (provision, managers, deactivate leavers).
+- **Your language:** English, Spanish, French, German and Hindi across the everyday screens, not only the menus.
+- **Multi-tenant when you need it:** one database per tenant workspace, routed by host name; tokens, rate limits,
+  files and background jobs stay inside their tenant (`python -m app.tenants create …`).
 - **A help center for every role (the ? button or the ? key):** a guide for your role (mission, a typical day, a
   getting-started checklist, and what you are allowed to do, read live from your permissions), every functional
   area with how-tos, clickable process maps (lead to cash, customer case, campaign, discount approval, renewal,
@@ -212,6 +227,7 @@ node e2e/wave1-journeys.mjs ./w1   # drill-down, pivot, dashboard filters, bulk 
 node e2e/wave2-journeys.mjs ./w2   # list views, in-place edits, period comparison, report subscriptions (10 checks)
 node e2e/wave3-journeys.mjs ./w3   # custom objects, field security, validation and sharing rules, config transfer (9 checks)
 node e2e/help-journeys.mjs ./help # help center, process maps, data model and Aiden help answers (11 checks)
+node e2e/p0-reach-journeys.mjs ./reach # notifications, committee and org chart, segments, connectors, mobile/offline, Spanish (11 checks)
 node e2e/wave4-journeys.mjs ./w4   # email-to-case, presence routing, support inbox, nurture journeys and tracking (10 checks; needs INBOUND_EMAIL_SECRET)
 ```
 

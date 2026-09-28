@@ -14,6 +14,7 @@ import { NewContactDialog, NewDealDialog, NewTaskDialog } from "@/components/for
 import { HealthMeter, HealthRing, RiskBadge, RoleBadge } from "@/components/indicators";
 import { LogActivityDialog } from "@/components/LogActivityDialog";
 import { AlertsBanner, ContractList, CustomFieldsEditor } from "@/components/panels";
+import { OrgChart } from "@/components/stakeholders";
 import { RelatedObjectRecords } from "@/components/objects";
 import { TaskRow } from "@/components/TaskList";
 import { Badge } from "@/components/ui/badge";
@@ -22,13 +23,13 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Field, StatusPill, Table, Tabs, Td, bytes, fmtMoney } from "@/components/ui/extra";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Avatar, Skeleton } from "@/components/ui/misc";
-import { API_URL, api, errorMessage, get, getToken } from "@/lib/api";
+import { API_URL, api, authHeaders, errorMessage, get } from "@/lib/api";
 import { useMe } from "@/lib/me";
 import { ui } from "@/lib/store";
 import type { Account360 } from "@/lib/types";
 import { money, relativeDays, shortDate } from "@/lib/utils";
 
-type Tab = "overview" | "details" | "hierarchy" | "commercial" | "success" | "files";
+type Tab = "overview" | "people" | "details" | "hierarchy" | "commercial" | "success" | "files";
 
 interface TreeNode { id: string; name: string; domain: string; health_score: number; lifecycle_stage: string; depth: number; is_current: boolean;
   open_pipeline: number; won_revenue: number; contract_spend: number; rollup: Record<string, number>; descendants: number; children: TreeNode[] }
@@ -93,6 +94,7 @@ export default function Account360Page() {
 
       <Tabs value={tab} onChange={setTab} tabs={[
         { value: "overview", label: "Overview" },
+        { value: "people", label: "Org chart" },
         { value: "details", label: "Details" },
         { value: "hierarchy", label: "Hierarchy", count: account.subsidiaries.length || undefined },
         { value: "commercial", label: "Contracts & finance", count: data.contracts.length || undefined },
@@ -101,6 +103,7 @@ export default function Account360Page() {
       ]} />
 
       {tab === "overview" && <Overview data={data} brief={brief.data?.brief} onDialog={setDialog} />}
+      {tab === "people" && <OrgChart accountId={account.id} canEdit={can("contacts", "update")} />}
       {tab === "details" && <Details data={data} />}
       {tab === "hierarchy" && <Hierarchy id={account.id} />}
       {tab === "commercial" && <Commercial data={data} />}
@@ -409,7 +412,7 @@ function Files({ data }: { data: Account360 }) {
     onError: (e) => toast.error(errorMessage(e)),
   });
   const download = async (id: string, name: string) => {
-    const res = await fetch(`${API_URL}/api/v1/files/${id}`, { headers: { Authorization: `Bearer ${getToken()}` } });
+    const res = await fetch(`${API_URL}/api/v1/files/${id}`, { headers: authHeaders() });
     const url = URL.createObjectURL(await res.blob());
     const a = document.createElement("a");
     a.href = url;

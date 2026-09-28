@@ -8,6 +8,7 @@ from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import tenancy
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.dialect import full_text
@@ -299,7 +300,7 @@ async def get_case(case_id: uuid.UUID, db: AsyncSession = Depends(get_db), p: Pr
         "suggested_articles": await svc.suggest_articles(db, f"{c.subject} {c.category or ''}"),
         "other_cases": [{"id": h.id, "case_number": h.case_number, "subject": h.subject, "status": h.status} for h in history],
         "csat": {"score": c.csat_score, "comment": c.csat_comment, "at": c.csat_at,
-                 "survey_url": f"{settings.public_web_url.rstrip('/')}/csat/{c.csat_token}" if c.csat_token else None},
+                 "survey_url": f"{tenancy.web_url()}/csat/{c.csat_token}" if c.csat_token else None},
     }
 
 

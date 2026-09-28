@@ -7,10 +7,13 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: { default: "Cirra · AI CRM", template: "%s · Cirra" },
   description: "Connect what matters. A private-cloud AI CRM from the SDC Solutions portfolio.",
-  icons: { icon: "/icon.svg" },
+  icons: { icon: "/icon.svg", apple: "/apple-touch-icon.png" },
+  manifest: "/manifest.webmanifest",
+  appleWebApp: { capable: true, title: "Cirra", statusBarStyle: "default" },
 };
 
 export const viewport: Viewport = {
+  viewportFit: "cover",
   themeColor: [{ media: "(prefers-color-scheme: light)", color: "#fafafc" }, { media: "(prefers-color-scheme: dark)", color: "#0d0d10" }],
 };
 

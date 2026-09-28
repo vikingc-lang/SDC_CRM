@@ -9,6 +9,7 @@ import { useEffect, useState } from "react";
 import { AidenAvatar, CirraLogo, CirraMark } from "@/components/Brand";
 import { CopilotPanel } from "@/components/CopilotPanel";
 import { HelpDrawer } from "@/components/help";
+import { MobileTabBar, OfflineBanner, useServiceWorker } from "@/components/mobile";
 import { QuickLogModal } from "@/components/QuickLogModal";
 import { Button } from "@/components/ui/button";
 import { Avatar, Dropdown, DropdownContent, DropdownItem, DropdownSeparator, DropdownTrigger, Kbd } from "@/components/ui/misc";
@@ -162,7 +163,7 @@ function Sidebar({ user, onNavigate }: { user?: Me; onNavigate?: () => void }) {
                 <Avatar name={user.full_name} size={26} />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[13px] font-medium">{user.full_name}</span>
-                  <span className="block truncate text-[11.5px] text-muted-foreground">{ROLE_LABELS[user.role] ?? user.role}</span>
+                  <span className="block truncate text-[11.5px] text-muted-foreground">{ROLE_LABELS[user.role] ?? user.role}{user.workspace ? ` · ${user.workspace.name}` : ""}</span>
                 </span>
               </button>
             </DropdownTrigger>
@@ -184,6 +185,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const t = useT();
+  useServiceWorker();
 
   useEffect(() => {
     if (!getToken()) router.replace("/login");
@@ -259,8 +261,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <ThemeToggle />
           </div>
         </header>
-        <main className="flex-1 px-4 py-6 lg:px-8">{children}</main>
+        <OfflineBanner />
+        <main className="flex-1 px-4 pb-24 pt-6 lg:px-8 lg:pb-6">{children}</main>
       </div>
+      <MobileTabBar />
       <QuickLogModal />
       <CopilotPanel />
       <HelpDrawer />
@@ -318,10 +322,14 @@ function NotificationBell() {
               <span className="min-w-0 flex-1">
                 <span className="block text-[13px] font-medium leading-snug">{n.title}</span>
                 {n.body && <span className="block truncate text-[12px] text-muted-foreground">{n.body}</span>}
-                <span className="block text-[11px] capitalize text-subtle">{n.kind} · {relativeDays(n.created_at)}</span>
+                <span className="block text-[11px] text-subtle">{n.kind_label ?? n.kind} · {relativeDays(n.created_at)}</span>
               </span>
             </DropdownItem>
           ))}
+        </div>
+        <div className="flex items-center justify-between border-t px-3 py-2 text-[12.5px]">
+          <Link href="/notifications" className="font-medium text-primary hover:underline">{t("shell.all_notifications")}</Link>
+          <Link href="/settings?tab=notifications" className="text-muted-foreground hover:text-foreground">{t("shell.notification_settings")}</Link>
         </div>
       </DropdownContent>
     </Dropdown>

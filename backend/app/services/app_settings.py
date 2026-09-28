@@ -33,6 +33,8 @@ DEFAULTS: dict[str, dict] = {
     },
     "approval_chain": {"order": ["sales_manager", "deal_desk", "vp_sales", "finance", "legal"]},
     "esign": {"provider": "builtin"},
+    # Website behaviour tracking (services/cdp.py): the snippet's public site key and the sites allowed to send
+    "web_tracking": {"enabled": False, "site_key": "", "domains": []},
     # Customer service SLA targets per case priority
     "case_sla": {
         "critical": {"first_response_hours": 1, "resolve_hours": 8},

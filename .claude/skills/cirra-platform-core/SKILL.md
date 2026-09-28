@@ -66,3 +66,19 @@ description: Cirra platform foundation - RBAC and row-level scope (Principal), a
 - Pydantic `Literal` enums on entity fields were widened to patterns for custom objects; keep the DB check
   constraint in sync (migration 015).
 - Tests that create rules/objects must use unique names and clean up: the test database persists across runs.
+
+## Notifications, tenancy, connectors (migration 021)
+- `services/notify.py`: `notify()` writes the in-app row only; the `notifications` job (`deliver_pending`) sends
+  email / Web Push (`services/webpush.py`, RFC 8291 + VAPID, no third party) / Slack DM per the user's
+  `notification_prefs`; `send_digests` hourly. Add a new kind to `KINDS` (label, description, default channels).
+  API: `api/v1/notifications.py` (inbox views, read/unread/archive/snooze, preferences, push devices, test).
+- `core/tenancy.py`: database per tenant; `RoutingSession.get_bind` picks the tenant engine from `current_tenant`.
+  Anything cached in process memory must be keyed by `tenancy.slug()` (rbac, reporting catalogue, custom fields,
+  workflow rules already are). Links sent out use `tenancy.web_url()` / `tenancy.api_url()`, never the settings.
+  Jobs: `jobs.enqueue` carries the tenant; scheduled jobs run once per active tenant (`run_in_tenants`).
+  CLI: `python -m app.tenants create|list|suspend|resume|migrate|set-hosts|set-limit`.
+- `services/connectors.py`: `CATALOG` (fields, secrets encrypted), `test()` before save, `run_one` (Slack/Teams post
+  outbox events past a cursor; Mailchimp/BambooHR hourly). Tests swap `connectors.transport`.
+- `services/stakeholders.py`: deal committee (`deal_contacts`), org chart (`contacts.reports_to_id`, cycles refused);
+  `deal_roles()` feeds risk alerts and next best actions.
+- `services/cdp.py`: `behavior_events`, `segments` (rules → one SQL query), `/public/t.js` snippet, `/events` API.

@@ -17,7 +17,7 @@ from app.models import (
     Account, Activity, Attachment, Contact, Contract, Deal, DealAlert, DealStageHistory, OnboardingProject,
     PipelineStage, ProductUsage, SupportTicket, Task, Territory,
 )
-from app.services import custom_fields, dedup, erp, fx, hierarchy, performance, scoring
+from app.services import custom_fields, dedup, erp, fx, hierarchy, performance, scoring, stakeholders
 from app.services.clm import contract_out
 from app.services.notify import emit
 from app.services.serializers import activity_out, contact_out, deal_card, task_out, user_brief
@@ -199,6 +199,13 @@ async def delete_account(account_id: uuid.UUID, db: AsyncSession = Depends(get_d
 async def account_hierarchy(account_id: uuid.UUID, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("accounts", "read"))):
     await _get(db, p, account_id)
     return await hierarchy.hierarchy(db, account_id)
+
+
+@router.get("/{account_id}/org-chart")
+async def org_chart(account_id: uuid.UUID, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("contacts", "read"))):
+    """Who reports to whom at this account, with each person's buying role, influence, stance and deal roles."""
+    await _get(db, p, account_id, "contacts")
+    return await stakeholders.org_chart(db, account_id)
 
 
 @router.get("/{account_id}/duplicates")

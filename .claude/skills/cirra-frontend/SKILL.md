@@ -53,3 +53,14 @@ cd <repo> && tar --exclude=node_modules --exclude=.next -cf - frontend | MSYS_NO
 docker compose up -d --build web     # then browse http://localhost:3000
 ```
 Add or update a browser journey in `e2e/` for new flows (see `cirra-testing`).
+
+## Mobile, offline and translation
+- `public/sw.js` (service worker: shell cache, network-first pages and everyday API reads, push) is registered in
+  production builds only (`components/mobile.tsx`). Signing out clears its API cache and the offline outbox.
+- `lib/offline.ts`: POST /activities, POST /tasks and PATCH /tasks/{id} made offline are queued and replayed; other
+  writes fail normally. Mutations use `networkMode: "always"` so they reach the queue.
+- `lib/translate.ts` + `lib/phrases/<lang>.json`: rendered English copy is translated in place for es/fr/de/hi.
+  New UI copy: add it to the phrase catalogues (English text → translation); mark record data with
+  `translate="no"` where it could collide with a UI phrase. Key-based `t()` strings stay the first choice for the shell.
+- Every request sends `X-Cirra-Host` (and `X-Cirra-Tenant` when `?workspace=` was chosen at sign-in); use
+  `authHeaders()` for raw `fetch` downloads.

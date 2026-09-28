@@ -19,6 +19,7 @@ from sqlalchemy import Date, Numeric, and_, case, cast, func, literal, not_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from app.core import tenancy
 from app.core.dialect import concat_words, date_bucket, looks_iso_date, looks_numeric, nulls_first, nulls_last, seconds_between
 from app.core.rbac import Principal
 from app.models import (
@@ -348,19 +349,21 @@ SOURCES: dict[str, Source] = {s.key: s for s in (_deals(), _accounts(), _contact
 CF_TTL = 30.0  # safety net; changes are normally picked up through the definition signature below
 CF_ENTITY = {"accounts": ("account", lambda: Account.custom_metadata), "contacts": ("contact", lambda: Contact.custom_fields),
              "deals": ("deal", lambda: Deal.custom_fields), "leads": ("lead", lambda: Lead.custom_fields)}
-_live: dict[str, Source] = {}
-_live_at = 0.0
-_live_sig: tuple | None = None
+# Per tenant: (live sources, built at, signature, hidden fields by source and role)
+_catalogues: dict[str, tuple[dict, float, tuple | None, dict]] = {}
+
+
+def _cat() -> tuple[dict, float, tuple | None, dict]:
+    return _catalogues.get(tenancy.slug(), ({}, 0.0, None, {}))
 
 
 def src_of(key: str) -> Source | None:
     """The source with its custom fields (static catalogue if custom fields haven't been loaded yet)."""
-    return _live.get(key) or SOURCES.get(key)
+    return _cat()[0].get(key) or SOURCES.get(key)
 
 
 def invalidate_custom_fields() -> None:
-    global _live_at
-    _live_at = 0.0
+    _catalogues.clear()
 
 
 def _custom_expr(col, defn):
@@ -377,7 +380,6 @@ def _custom_expr(col, defn):
 
 
 OBJECT_PREFIX = "obj_"
-_hidden: dict[str, dict[str, set[str]]] = {}  # source -> role -> field keys the role can't see
 
 
 def _cf_field(d, col) -> F:
@@ -415,13 +417,13 @@ def _object_source(obj, defs) -> Source:
 async def refresh_custom_fields(db: AsyncSession, force: bool = False) -> None:
     """Rebuild the live catalogue when field definitions, field security or custom objects change. A one-row
     signature query runs per call, so every API replica sees a change on its very next request."""
-    global _live, _live_at, _live_sig, _hidden
     from app.models import CustomFieldDefinition, CustomObject
     from app.services import custom_fields
 
     sig = tuple((await db.execute(select(
         select(func.count(CustomFieldDefinition.id)).scalar_subquery(), select(func.max(CustomFieldDefinition.updated_at)).scalar_subquery(),
         select(func.count(CustomObject.id)).scalar_subquery(), select(func.max(CustomObject.updated_at)).scalar_subquery()))).one())
+    _live, _live_at, _live_sig, _ = _cat()
     if not force and sig == _live_sig and time.monotonic() - _live_at < CF_TTL:
         return
     defs = (await db.execute(select(CustomFieldDefinition).order_by(CustomFieldDefinition.label))).scalars().all()
@@ -441,7 +443,7 @@ async def refresh_custom_fields(db: AsyncSession, force: bool = False) -> None:
             if src_key and level == "hidden":
                 hidden.setdefault(src_key, {}).setdefault(role, set()).add(f"cf_{d.key}")
     custom_fields.set_cache(defs)
-    _live, _live_at, _live_sig, _hidden = live, time.monotonic(), sig, hidden
+    _catalogues[tenancy.slug()] = (live, time.monotonic(), sig, hidden)
 
 
 def src_for(key: str, p: Principal | None) -> Source | None:
@@ -449,7 +451,7 @@ def src_for(key: str, p: Principal | None) -> Source | None:
     src = src_of(key)
     if src is None or p is None or p.user.role == "super_admin":
         return src
-    gone = _hidden.get(key, {}).get(p.user.role)
+    gone = _cat()[3].get(key, {}).get(p.user.role)
     if not gone:
         return src
     return replace(src, fields={k: f for k, f in src.fields.items() if k not in gone},
@@ -457,7 +459,7 @@ def src_for(key: str, p: Principal | None) -> Source | None:
 
 
 def source_keys() -> list[str]:
-    return list(_live or SOURCES)
+    return list(_cat()[0] or SOURCES)
 
 
 def link_for(key: str) -> str | None:

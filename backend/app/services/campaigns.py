@@ -26,6 +26,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import tenancy
 from app.core.config import settings
 from app.core.rbac import Principal
 from app.models import Account, Campaign, CampaignMember, Contact, Deal, EmailSend, Lead, PipelineStage, User
@@ -158,7 +159,7 @@ async def set_status(db: AsyncSession, campaign: Campaign, member: CampaignMembe
 # ---- email -----------------------------------------------------------------------------------------
 
 def unsubscribe_url(token: str) -> str:
-    return f"{settings.public_web_url.rstrip('/')}/unsubscribe/{token}"
+    return f"{tenancy.web_url()}/unsubscribe/{token}"
 
 
 def render(template: str, person: dict, token: str | None) -> str:
@@ -169,7 +170,7 @@ def render(template: str, person: dict, token: str | None) -> str:
     for key in ("first_name", "last_name", "company"):
         value = person.get(key) or ""
         out = re.sub(r"\{\{\s*" + key + r"\s*\}\}", lambda _m, v=value: v, out)
-    url = unsubscribe_url(token) if token else f"{settings.public_web_url.rstrip('/')}/unsubscribe/<personal-link>"
+    url = unsubscribe_url(token) if token else f"{tenancy.web_url()}/unsubscribe/<personal-link>"
     if re.search(r"\{\{\s*unsubscribe_url\s*\}\}", out):
         return re.sub(r"\{\{\s*unsubscribe_url\s*\}\}", lambda _m: url, out)
     return f"{out.rstrip()}\n\n--\nYou received this because of your interest in our events and content. Unsubscribe: {url}"

@@ -12,10 +12,11 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import log_action
+from app.core import tenancy
 from app.core.database import get_db
 from app.core.rbac import Principal, authorize
 from app.models import AssignmentRule, EngagementEvent, IntakeKey, Lead, User
-from app.services import app_settings, enrichment, leads as svc
+from app.services import app_settings, cdp, enrichment, leads as svc
 
 router = APIRouter(tags=["leads"])
 intake = APIRouter(prefix="/intake", tags=["lead intake (public)"])
@@ -147,6 +148,12 @@ async def create_lead(body: LeadIn, db: AsyncSession = Depends(get_db), p: Princ
         raise HTTPException(422, str(exc))
     await db.commit()
     return {**svc.lead_out(await _fresh(db, lead.id), detail=True), "merged": merged}
+
+
+@router.get("/leads/{lead_id}/behavior")
+async def lead_behavior(lead_id: uuid.UUID, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("leads", "read"))):
+    await _lead(db, p, lead_id)
+    return await cdp.timeline(db, lead_id=lead_id)
 
 
 @router.get("/leads/{lead_id}")
@@ -378,10 +385,11 @@ async def _key(db: AsyncSession, raw: str | None) -> IntakeKey:
     if key is None or not key.active:
         raise HTTPException(401, "Unknown or revoked intake key")
     now = time.monotonic()
-    window = [t for t in _hits.get(key.key_prefix, []) if now - t < 60]
+    bucket = f"{tenancy.slug()}:{key.key_prefix}"
+    window = [t for t in _hits.get(bucket, []) if now - t < 60]
     if len(window) >= RATE_PER_MINUTE:
         raise HTTPException(429, "Too many submissions; slow down")
-    _hits[key.key_prefix] = [*window, now]
+    _hits[bucket] = [*window, now]
     key.last_used_at = datetime.now(timezone.utc)
     return key
 
@@ -416,6 +424,12 @@ async def intake_lead(request: Request, key: str | None = Query(default=None), x
                                          event_detail=(data.get("message") or ik.name)[:300])
     except svc.LeadError as exc:
         raise HTTPException(422, str(exc))
+    from app.services import cdp
+
+    anon = str(data.get("cirra_aid") or "")[:64] or None  # the website snippet adds its visitor id to forms
+    cdp.record(db, "form_submit", lead=lead, anonymous_id=anon, url=request.headers.get("referer"), properties={"form": ik.name}, source="form")
+    if anon and lead.email:
+        await cdp.identify(db, anon, lead.email)
     await db.commit()
     return {"status": "accepted", "lead_id": lead.id, "merged": merged}
 

@@ -39,16 +39,16 @@ celery_app.conf.beat_schedule = {
     "ai-housekeeping": _every("ai_housekeeping", crontab(hour=4, minute=30)),  # AI log retention, expire stale agent suggestions
     "calendar-sync": _every("calendar_sync", crontab(minute="*/10")),         # two-way Google / Microsoft calendar sync
     "fx-feed": _every("fx_feed", crontab(hour=17, minute=15)),                 # daily reference exchange rates (when FX_FEED_URL is set)
+    "notifications": _every("notifications", crontab()),                      # email, push and Slack delivery of new notifications
+    "notification-digests": _every("notification_digests", crontab(minute=0)),  # daily summaries at each person's chosen hour
+    "segments": _every("segments", crontab(minute="*/15")),                   # recompute dynamic segments (entered / left)
+    "connectors": _every("connectors", crontab()),                            # Slack / Teams posts; Mailchimp and BambooHR hourly
 }
+# Scheduled jobs carry no workspace and run once in every active tenant; jobs queued by a request carry theirs.
 
 
 @celery_app.task(name="app.worker.run_job")
-def run_job(name: str, *args):
-    from app.services import workflows
-    from app.services.jobs import JOBS
+def run_job(name: str, *args, tenant: str | None = None):
+    from app.services.jobs import run_in_tenants
 
-    async def _run():
-        await JOBS[name](*args)
-        await workflows.drain()  # finish automation triggered by this job before the loop closes
-
-    asyncio.run(_run())
+    asyncio.run(run_in_tenants(name, *args, tenant=tenant))

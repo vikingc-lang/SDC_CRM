@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { Megaphone, Plus } from "lucide-react";
+import { Filter, Megaphone, Plus } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { PageHeader } from "@/components/AppShell";
@@ -28,7 +28,10 @@ export default function CampaignsPage() {
   return (
     <div className="mx-auto max-w-6xl">
       <PageHeader title="Campaigns" description="Plan campaigns, build member lists, send consent-checked email and see the pipeline each one sources and influences."
-        actions={can("campaigns", "create") && <Button size="sm" onClick={() => setCreating(true)}><Plus className="h-3.5 w-3.5" />New campaign</Button>} />
+        actions={<>
+          <Link href="/campaigns/segments" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-input bg-surface px-2.5 text-[13px] hover:bg-muted"><Filter className="h-3.5 w-3.5" />Segments</Link>
+          {can("campaigns", "create") && <Button size="sm" onClick={() => setCreating(true)}><Plus className="h-3.5 w-3.5" />New campaign</Button>}
+        </>} />
       {!list.data ? <Skeleton className="h-96" /> : <>
         <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
           <StatTile label="Active campaigns" value={String(t!.active)} sub={`${list.data.campaigns.length} in total`} />

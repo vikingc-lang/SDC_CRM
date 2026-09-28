@@ -2,7 +2,7 @@
 from collections.abc import AsyncIterator
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.orm import DeclarativeBase, Session
 from sqlalchemy.pool import NullPool
 
 from app.core.config import settings
@@ -25,7 +25,16 @@ class CirraSession(AsyncSession):
         await super().commit()
 
 
-SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=CirraSession)
+class RoutingSession(Session):
+    """Binds every statement to the current tenant's database (core/tenancy.py); the primary one by default."""
+
+    def get_bind(self, mapper=None, clause=None, **kw):
+        from app.core import tenancy
+
+        return tenancy.sync_bind()
+
+
+SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=CirraSession, sync_session_class=RoutingSession)
 
 
 class Base(DeclarativeBase):

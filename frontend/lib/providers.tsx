@@ -8,7 +8,12 @@ import { LocaleProvider } from "@/lib/i18n";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [client] = useState(
-    () => new QueryClient({ defaultOptions: { queries: { staleTime: 15_000, refetchOnWindowFocus: false, retry: 1 } } }),
+    // Offline: reads still run (the service worker answers from this device's copy) and writes are sent, so the
+    // everyday ones land in the offline outbox (lib/offline.ts) instead of hanging.
+    () => new QueryClient({ defaultOptions: {
+      queries: { staleTime: 15_000, refetchOnWindowFocus: false, retry: 1, networkMode: "offlineFirst" },
+      mutations: { networkMode: "always" },
+    } }),
   );
   return (
     <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>

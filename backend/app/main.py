@@ -6,11 +6,12 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import literal, select, text
 
-from app.api.v1 import accounts, activities, admin, ai, aigov, analytics, calendars, help, auth, campaigns, cases, contacts, cpq, deals, developer, finance, leads, orders, partners, performance, forecasting, success, sync, views, workflows, objects, setup, journeys, inbound
+from app.api.v1 import accounts, activities, admin, ai, aigov, analytics, calendars, connectors, help, notifications, segments, auth, campaigns, cases, contacts, cpq, deals, developer, finance, leads, orders, partners, performance, forecasting, success, sync, views, workflows, objects, setup, journeys, inbound
 from app.core.config import enforce_secure_settings, settings
 from app.core.database import engine
 from app.core.observability import RequestContextMiddleware, configure_logging
 from app.core.ratelimit import RateLimitMiddleware
+from app.core.tenancy import TenantMiddleware
 from app.services import validation  # registers the validation-rule change capture
 
 configure_logging()
@@ -25,9 +26,11 @@ app = FastAPI(
 # Outermost last: request id / access log / security headers wrap CORS, which wraps the rate limiter, so even a
 # 429 carries CORS headers the browser can read and a request id to trace.
 app.add_middleware(RateLimitMiddleware)
+app.add_middleware(TenantMiddleware)  # picks the tenant workspace before rate limits are counted (per tenant)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
+    allow_origin_regex=settings.cors_origin_regex or None,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -39,7 +42,8 @@ for router in (auth.router, accounts.router, contacts.router, deals.router, acti
                success.router, finance.router, partners.router, partners.portal, admin.router, leads.router, leads.intake,
                orders.router, analytics.router, workflows.router, forecasting.router, cases.router, cases.public, performance.router,
                campaigns.router, campaigns.public, developer.router, sync.router, views.router, objects.router, setup.router, journeys.router, inbound.track, inbound.inbound,
-               aigov.router, calendars.router, help.router):
+               aigov.router, calendars.router, help.router, notifications.router, segments.router, segments.public, connectors.router,
+               connectors.public):
     app.include_router(router, prefix="/api/v1")
 
 

@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { ActivityTimeline } from "@/components/ActivityTimeline";
 import { RoleBadge } from "@/components/indicators";
 import { CustomFieldsEditor } from "@/components/panels";
+import { BehaviorCard, StakeholderFields } from "@/components/stakeholders";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
@@ -46,6 +47,8 @@ export default function ContactPage() {
   const qc = useQueryClient();
   const { can } = useMe();
   const { data: c, isLoading } = useQuery({ queryKey: ["contact", id], queryFn: () => get<Profile>(`/contacts/${id}`) });
+  const colleagues = useQuery({ queryKey: ["contacts", "account", c?.account_id], enabled: !!c?.account_id,
+    queryFn: () => get<Contact[] | { items: Contact[] }>("/contacts", { account_id: c!.account_id, limit: 200 }).then((r) => (Array.isArray(r) ? r : r.items)) });
   const [erase, setErase] = useState(false);
   const [confirmText, setConfirmText] = useState("");
   const refresh = () => qc.invalidateQueries({ queryKey: ["contact", id] });
@@ -56,7 +59,7 @@ export default function ContactPage() {
   });
   const patch = useMutation({
     mutationFn: async (body: Record<string, unknown>) => (await api.patch(`/contacts/${id}`, body)).data,
-    onSuccess: () => { refresh(); toast.success("Contact updated"); },
+    onSuccess: () => { refresh(); qc.invalidateQueries({ queryKey: ["org-chart"] }); toast.success("Contact updated"); },
     onError: (e) => toast.error(errorMessage(e)),
   });
   const doErase = useMutation({
@@ -103,12 +106,15 @@ export default function ContactPage() {
             <CardBody>
               <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
                 <Field label="Email">{c.email ? <a className="inline-flex items-center gap-1.5 hover:underline" href={`mailto:${c.email}`}><Mail className="h-3.5 w-3.5 text-muted-foreground" />{c.email}</a> : null}</Field>
-                <Field label="Direct phone">{c.phone ? <span className="inline-flex items-center gap-1.5"><Phone className="h-3.5 w-3.5 text-muted-foreground" />{c.phone}</span> : null}</Field>
-                <Field label="Mobile">{c.mobile ? <span className="inline-flex items-center gap-1.5"><Smartphone className="h-3.5 w-3.5 text-muted-foreground" />{c.mobile}</span> : null}</Field>
+                <Field label="Direct phone">{c.phone ? <a className="inline-flex items-center gap-1.5 hover:underline" href={`tel:${c.phone.replace(/[^+\d]/g, "")}`}><Phone className="h-3.5 w-3.5 text-muted-foreground" />{c.phone}</a> : null}</Field>
+                <Field label="Mobile">{c.mobile ? <a className="inline-flex items-center gap-1.5 hover:underline" href={`tel:${c.mobile.replace(/[^+\d]/g, "")}`}><Smartphone className="h-3.5 w-3.5 text-muted-foreground" />{c.mobile}</a> : null}</Field>
                 <Field label="LinkedIn">{c.linkedin_url ? <a className="inline-flex items-center gap-1.5 text-primary hover:underline" href={c.linkedin_url} target="_blank" rel="noreferrer"><Link2 className="h-3.5 w-3.5" />Profile</a> : null}</Field>
                 <Field label="Time zone">{c.timezone ? <span className="inline-flex items-center gap-1.5"><Clock className="h-3.5 w-3.5 text-muted-foreground" /><LocalTime tz={c.timezone} /></span> : null}</Field>
                 <Field label="Department">{c.department}</Field>
               </dl>
+              <div className="mt-4 border-t pt-4">
+                <StakeholderFields contact={c} colleagues={colleagues.data ?? []} canEdit={!erased && can("contacts", "update")} onSave={(v) => patch.mutate(v)} />
+              </div>
             </CardBody>
           </Card>
           {!!c.custom_field_definitions.length && (
@@ -121,6 +127,7 @@ export default function ContactPage() {
             <CardHeader title="Engagement" />
             <CardBody><ActivityTimeline activities={c.activities} empty={<p className="text-sm text-muted-foreground">No activity linked to this person yet.</p>} /></CardBody>
           </Card>
+          {!erased && <BehaviorCard path={`/contacts/${id}/behavior`} />}
         </div>
 
         <div className="space-y-6">

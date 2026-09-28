@@ -16,6 +16,7 @@ from sqlalchemy import (
     Computed,
     Date,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -31,6 +32,8 @@ from app.core.types import Embedding, JSONB, POSTGRES_ONLY, SearchVector, UTCDat
 
 USER_ROLES = ("super_admin", "sales_manager", "account_executive", "sdr", "auditor", "partner", "support_agent", "marketing")
 ACCOUNT_TIERS = ("SMB", "Mid-Market", "Enterprise")
+INFLUENCE_LEVELS = ("high", "medium", "low")
+STANCES = ("champion", "supporter", "neutral", "skeptic", "blocker")
 BUYING_ROLES = ("Champion", "Decision Maker", "Economic Buyer", "Blocker", "Evaluator", "Influencer", "Legal Counsel", "Procurement")
 ACTIVITY_TYPES = ("meeting", "call", "note", "email", "system", "file", "document")
 SENTIMENTS = ("positive", "neutral", "negative")
@@ -71,6 +74,8 @@ class User(Base):
     last_login_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     locale: Mapped[str | None] = mapped_column(String(10))  # UI language and formats, e.g. "en-US", "de-DE"; None = browser
     timezone: Mapped[str | None] = mapped_column(String(64))  # IANA zone for dates in the UI and emails; None = browser
+    # Per-kind channel choices, digest and quiet hours (services/notify.py); empty = the defaults
+    notification_prefs: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     created_at: Mapped[datetime] = _created(nullable=False)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now(), onupdate=func.now(), nullable=False)
 
@@ -128,7 +133,11 @@ class Account(Base):
 
 class Contact(Base):
     __tablename__ = "contacts"
-    __table_args__ = (CheckConstraint(f"buying_role IN {BUYING_ROLES}", name="ck_contacts_buying_role"),)
+    __table_args__ = (CheckConstraint(f"buying_role IN {BUYING_ROLES}", name="ck_contacts_buying_role"),
+                      CheckConstraint(f"influence IN {INFLUENCE_LEVELS}", name="ck_contacts_influence"),
+                      CheckConstraint(f"stance IN {STANCES}", name="ck_contacts_stance"),
+                      CheckConstraint("reports_to_id <> id", name="ck_contacts_reports_to_self"),
+                      Index("ix_contacts_reports_to", "reports_to_id"))
 
     id: Mapped[uuid.UUID] = _uuid_pk()
     account_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("accounts.id", ondelete="CASCADE"))
@@ -142,6 +151,10 @@ class Contact(Base):
     linkedin_url: Mapped[str | None] = mapped_column(String(255))
     timezone: Mapped[str | None] = mapped_column(String(64))
     department: Mapped[str | None] = mapped_column(String(100))
+    # Org chart and stakeholder map (services/stakeholders.py)
+    reports_to_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("contacts.id", ondelete="SET NULL"))
+    influence: Mapped[str | None] = mapped_column(String(10))  # high | medium | low
+    stance: Mapped[str | None] = mapped_column(String(12))  # champion | supporter | neutral | skeptic | blocker
     status: Mapped[str] = mapped_column(String(20), default="active")
     departed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     consent_email: Mapped[str] = mapped_column(String(20), default="unknown")
@@ -374,6 +387,7 @@ from app.models.engagement import *  # noqa: E402,F401,F403
 from app.models.governance import *  # noqa: E402,F401,F403
 from app.models.selling import *  # noqa: E402,F401,F403
 from app.models.calendars import *  # noqa: E402,F401,F403
+from app.models.tenancy import *  # noqa: E402,F401,F403
 
 from app.models import schema_rules as _schema_rules  # noqa: E402
 

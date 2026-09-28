@@ -25,6 +25,7 @@ import jwt
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import tenancy
 from app.core.config import settings
 from app.core.rbac import ROLES
 from app.models import SsoLoginState, User
@@ -200,7 +201,7 @@ async def save_policy(db: AsyncSession, body: dict) -> dict:
 # ---- OpenID Connect ---------------------------------------------------------------------------
 
 def redirect_uri() -> str:
-    return f"{settings.public_web_url.rstrip('/')}/login/sso/callback"
+    return f"{tenancy.web_url()}/login/sso/callback"
 
 
 _discovery_cache: dict[str, tuple[float, dict]] = {}
@@ -327,6 +328,8 @@ async def _link_user(db: AsyncSession, sso: dict, claims: dict) -> User:
         if user is None:
             if not sso.get("auto_provision"):
                 raise IdentityError(f"No Cirra user exists for {email}. Ask an administrator to invite you.")
+            if not await tenancy.can_add_user(db):
+                raise IdentityError("This workspace has reached its user limit. Ask an administrator to make room.")
             user = User(email=email, full_name=(claims.get("name") or email.split("@")[0])[:150], role=sso.get("default_role") or "sdr",
                         password_hash="!sso", is_active=True)
             db.add(user)

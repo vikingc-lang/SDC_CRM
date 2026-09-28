@@ -7,6 +7,7 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import tenancy
 from app.core.audit import log_action
 from app.core.config import settings
 from app.core.database import get_db
@@ -37,7 +38,7 @@ async def connect(provider: str, db: AsyncSession = Depends(get_db), p: Principa
 @router.get("/oauth/callback", include_in_schema=False)
 async def oauth_callback(state: str = "", code: str = "", error: str | None = None, db: AsyncSession = Depends(get_db)):
     """The provider redirects the browser here; the server-side state identifies the user (no session needed)."""
-    web = settings.public_web_url.rstrip("/")
+    web = tenancy.web_url()
     if error or not code or not state:
         return RedirectResponse(f"{web}/settings?calendar=error&reason={quote(error or 'cancelled')}", status_code=302)
     try:

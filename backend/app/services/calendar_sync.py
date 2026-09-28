@@ -33,6 +33,7 @@ import httpx
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import tenancy
 from app.core.config import settings
 from app.models import Activity, CalendarConnection, CalendarLink, Contact, SsoLoginState, User
 from app.services.mail import decrypt_secret, encrypt_secret
@@ -288,7 +289,7 @@ PROVIDERS = {"google": Google, "microsoft": Microsoft}
 # ---- OAuth ------------------------------------------------------------------------------------------------------
 
 def redirect_uri() -> str:
-    return f"{settings.public_api_url.rstrip('/')}/api/v1/calendar/oauth/callback"
+    return f"{tenancy.api_url()}/api/v1/calendar/oauth/callback"
 
 
 async def start_connect(db: AsyncSession, user: User, provider: str) -> str:

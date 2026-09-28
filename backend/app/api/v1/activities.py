@@ -14,7 +14,7 @@ from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.core.dialect import nulls_last
 from app.core.rbac import Principal, authorize
-from app.models import Account, Activity, Attachment, Contact, MailboxConnection, Notification, Task, User
+from app.models import Account, Activity, Attachment, Contact, MailboxConnection, Task, User
 from app.services import calendar as cal
 from app.services import mail, scoring, sla, storage
 from app.services.jobs import enqueue
@@ -253,29 +253,6 @@ async def delete_task(task_id: uuid.UUID, db: AsyncSession = Depends(get_db), p:
         raise HTTPException(404, "Task not found")
     await db.delete(task)
     await db.commit()
-
-
-# ---- notifications ---------------------------------------------------------------------
-@router.get("/notifications")
-async def list_notifications(unread_only: bool = False, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
-    stmt = select(Notification).where(Notification.user_id == user.id).order_by(Notification.created_at.desc()).limit(50)
-    if unread_only:
-        stmt = stmt.where(Notification.read_at.is_(None))
-    rows = (await db.execute(stmt)).scalars().all()
-    unread = (await db.execute(select(Notification.id).where(Notification.user_id == user.id, Notification.read_at.is_(None)))).all()
-    return {"unread": len(unread), "items": [{"id": n.id, "kind": n.kind, "title": n.title, "body": n.body, "link": n.link,
-                                              "read": n.read_at is not None, "created_at": n.created_at} for n in rows]}
-
-
-@router.post("/notifications/read")
-async def mark_read(ids: list[uuid.UUID] | None = None, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
-    stmt = select(Notification).where(Notification.user_id == user.id, Notification.read_at.is_(None))
-    if ids:
-        stmt = stmt.where(Notification.id.in_(ids))
-    for n in (await db.execute(stmt)).scalars().all():
-        n.read_at = datetime.now(timezone.utc)
-    await db.commit()
-    return {"status": "ok"}
 
 
 # ---- calendar -----------------------------------------------------------------------------

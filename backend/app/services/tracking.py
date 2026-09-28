@@ -24,8 +24,9 @@ from urllib.parse import quote
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import tenancy
 from app.core.config import settings
-from app.models import Campaign, CampaignMember, EmailEvent, EmailSend, Lead
+from app.models import Campaign, CampaignMember, Contact, EmailEvent, EmailSend, Lead
 
 URL = re.compile(r"https?://[^\s<>\"')\]]+")
 PIXEL = bytes.fromhex("47494638396101000100800000000000ffffff21f90401000000002c00000000010001000002024401003b")
@@ -48,7 +49,7 @@ def verify(token: str, url: str, signature: str) -> bool:
 
 
 def _base() -> str:
-    return settings.public_api_url.rstrip("/") + "/api/v1/t"
+    return tenancy.api_url() + "/api/v1/t"
 
 
 def click_url(token: str, url: str) -> str:
@@ -102,6 +103,18 @@ async def _engagement(db: AsyncSession, send: EmailSend, kind: str) -> None:
         await campaigns.set_status(db, campaign, member, "responded")
 
 
+async def _behavior(db: AsyncSession, send: EmailSend, kind: str, url: str | None = None) -> None:
+    """Every open and click also goes to the behavioural event store (services/cdp.py) for segments and profiles."""
+    from app.services import cdp
+
+    member = await db.get(CampaignMember, send.member_id) if send.member_id else None
+    if member is None:
+        return
+    contact = await db.get(Contact, member.contact_id) if member.contact_id else None
+    lead = await db.get(Lead, member.lead_id) if member.lead_id else None
+    cdp.record(db, f"email_{kind}", contact=contact, lead=lead, url=url, properties={"subject": send.subject[:200]}, source="email")
+
+
 async def record_open(db: AsyncSession, token: str) -> None:
     send = (await db.execute(select(EmailSend).where(EmailSend.token == token))).scalar_one_or_none()
     if send is None:
@@ -110,6 +123,7 @@ async def record_open(db: AsyncSession, token: str) -> None:
     send.open_count += 1
     send.opened_at = send.opened_at or datetime.now(timezone.utc)
     db.add(EmailEvent(send_id=send.id, kind="open"))
+    await _behavior(db, send, "open")
     if first:
         await _engagement(db, send, "open")
     await db.flush()
@@ -130,6 +144,7 @@ async def record_click(db: AsyncSession, token: str, url: str, signature: str) -
         send.opened_at, send.open_count = now, send.open_count + 1
         await _engagement(db, send, "open")
     db.add(EmailEvent(send_id=send.id, kind="click", url=url[:2000]))
+    await _behavior(db, send, "click", url)
     if first:
         await _engagement(db, send, "click")
     await db.flush()
