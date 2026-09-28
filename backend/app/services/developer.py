@@ -25,10 +25,10 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
 import httpx
-from sqlalchemy import func, or_, select, text, update
-from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.dialect import insert_ignore, try_lock
 from app.models import ApiKey, IntegrationEvent, User, WebhookDelivery, WebhookSubscription
 from app.services.mail import decrypt_secret, encrypt_secret
 
@@ -179,8 +179,7 @@ async def fan_out(db: AsyncSession, batch: int = 1000) -> int:
         rows = [{"subscription_id": sub.id, "event_id": ev_id, "event_type": ev_type, "next_attempt_at": _now()}
                 for ev_id, ev_type, _ in events if wants(sub, ev_type)]
         if rows:
-            res = await db.execute(pg_insert(WebhookDelivery).values(rows).on_conflict_do_nothing(index_elements=["subscription_id", "event_id"]))
-            created += max(res.rowcount or 0, 0)
+            created += await insert_ignore(db, WebhookDelivery.__table__, rows, ["subscription_id", "event_id"])
         for ev_id, _, at in events:  # advance through the settled prefix only
             if at >= settled_before:
                 break
@@ -251,8 +250,7 @@ async def deliver_due(db: AsyncSession, limit: int = 200) -> dict:
 async def run(db: AsyncSession) -> dict:
     """One webhook cycle. A transaction-scoped advisory lock makes overlapping runs (beat, 'Deliver now',
     Admin > Jobs) skip instead of sending the same deliveries twice."""
-    got = (await db.execute(text("SELECT pg_try_advisory_xact_lock(hashtext('cirra.webhooks'))"))).scalar()
-    if not got:
+    if not await try_lock(db, "cirra.webhooks"):
         return {"queued": 0, "attempted": 0, "succeeded": 0, "skipped": "another webhook run is in progress"}
     created = await fan_out(db)
     out = await deliver_due(db)

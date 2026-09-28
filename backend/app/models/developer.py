@@ -2,11 +2,11 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text, func
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import BigInteger, Boolean, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
+from app.core.types import JSONB, UTCDateTime, UUID
 
 __all__ = ["ApiKey", "WebhookSubscription", "WebhookDelivery"]
 
@@ -25,10 +25,10 @@ class ApiKey(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     read_only: Mapped[bool] = mapped_column(Boolean, default=False)
     created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
-    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    last_used_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now())
 
 
 class WebhookSubscription(Base):
@@ -43,10 +43,10 @@ class WebhookSubscription(Base):
     cursor_event_id: Mapped[int] = mapped_column(BigInteger, default=0)
     consecutive_failures: Mapped[int] = mapped_column(Integer, default=0)
     disabled_reason: Mapped[str | None] = mapped_column(String(200))
-    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    last_failure_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_success_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    last_failure_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now())
 
 
 class WebhookDelivery(Base):
@@ -58,9 +58,9 @@ class WebhookDelivery(Base):
     event_type: Mapped[str] = mapped_column(String(60))
     status: Mapped[str] = mapped_column(String(10), default="pending")
     attempts: Mapped[int] = mapped_column(Integer, default=0)
-    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    next_attempt_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now())
     response_code: Mapped[int | None] = mapped_column(Integer)
     error: Mapped[str | None] = mapped_column(String(500))
     duration_ms: Mapped[int | None] = mapped_column(Integer)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now())
+    delivered_at: Mapped[datetime | None] = mapped_column(UTCDateTime())

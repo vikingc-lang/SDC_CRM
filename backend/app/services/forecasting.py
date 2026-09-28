@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from datetime import date, timedelta
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import Date, and_, cast, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Deal, ForecastAdjustment, ForecastSubmission, PipelineStage, User
@@ -71,7 +71,7 @@ async def deals_in(db: AsyncSession, owner_ids, period: str) -> list[Deal]:
     stmt = (select(Deal).join(PipelineStage, PipelineStage.id == Deal.stage_id).where(Deal.owner_id.in_(list(owner_ids)))
             .where(or_(and_(PipelineStage.is_closed_won.is_(False), PipelineStage.is_closed_lost.is_(False),
                             Deal.target_close_date.between(start, end)),
-                       and_(PipelineStage.is_closed_won.is_(True), func.date(Deal.closed_at).between(start, end))))
+                       and_(PipelineStage.is_closed_won.is_(True), cast(Deal.closed_at, Date).between(start, end))))
             .order_by(Deal.amount.desc()))
     return list((await db.execute(stmt)).scalars().unique().all())
 

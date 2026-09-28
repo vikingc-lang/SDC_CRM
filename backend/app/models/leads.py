@@ -3,11 +3,11 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text, func
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import BigInteger, Boolean, ForeignKey, Integer, Numeric, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from app.core.types import JSONB, UTCDateTime, UUID
 
 __all__ = ["Lead", "EngagementEvent", "AssignmentRule", "IntakeKey", "AppSetting"]
 
@@ -16,8 +16,9 @@ def _pk() -> Mapped[uuid.UUID]:
     return mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 
 
-def _ts() -> Mapped[datetime]:
-    return mapped_column(DateTime(timezone=True), server_default=func.now())
+def _ts(nullable: bool | None = None) -> Mapped[datetime]:
+    # nullability follows the Mapped[...] annotation unless given
+    return mapped_column(UTCDateTime(), server_default=func.now(), **({} if nullable is None else {"nullable": nullable}))
 
 
 class Lead(Base):
@@ -49,24 +50,24 @@ class Lead(Base):
     consent_email: Mapped[str] = mapped_column(String(20), default="unknown")
     privacy_regime: Mapped[str | None] = mapped_column(String(10))
     consent_source: Mapped[str | None] = mapped_column(String(200))
-    consent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    consent_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     duplicate_matches: Mapped[list] = mapped_column(JSONB, default=list)
     enrichment: Mapped[dict] = mapped_column(JSONB, default=dict)
-    enriched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    enriched_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     assignment_rule_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    assigned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    mql_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    assigned_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    mql_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     converted_account_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("accounts.id", ondelete="SET NULL"))
     converted_contact_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("contacts.id", ondelete="SET NULL"))
     converted_deal_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("deals.id", ondelete="SET NULL"))
-    converted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    converted_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     converted_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     disqualified_reason: Mapped[str | None] = mapped_column(String(40))
     disqualify_note: Mapped[str | None] = mapped_column(Text)
     external_id: Mapped[str | None] = mapped_column(String(200), unique=True)
     custom_fields: Mapped[dict] = mapped_column(JSONB, default=dict)
     created_at: Mapped[datetime] = _ts()
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now(), onupdate=func.now())
 
     owner = relationship("User", foreign_keys=[owner_id], lazy="joined")
 
@@ -113,7 +114,7 @@ class IntakeKey(Base):
     source: Mapped[str] = mapped_column(String(20), default="api")
     campaign: Mapped[str | None] = mapped_column(String(120))
     active: Mapped[bool] = mapped_column(Boolean, default=True)
-    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_used_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = _ts()
 
@@ -124,4 +125,4 @@ class AppSetting(Base):
     key: Mapped[str] = mapped_column(String(60), primary_key=True)
     value: Mapped[dict] = mapped_column(JSONB)
     updated_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now(), onupdate=func.now())

@@ -3,11 +3,11 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text, func
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import BigInteger, Boolean, ForeignKey, Integer, SmallInteger, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
+from app.core.types import JSONB, UTCDateTime, UUID
 
 __all__ = ["InboundEmail", "AgentPresence", "Journey", "JourneyEnrollment", "EmailSend", "EmailEvent"]
 
@@ -30,7 +30,7 @@ class InboundEmail(Base):
     status: Mapped[str] = mapped_column(String(12))  # case_created | appended | unmatched | ignored | converted | dismissed
     detail: Mapped[str | None] = mapped_column(String(300))
     case_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("support_tickets.id", ondelete="SET NULL"))
-    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    received_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now())
 
 
 class AgentPresence(Base):
@@ -39,9 +39,9 @@ class AgentPresence(Base):
 
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
     status: Mapped[str] = mapped_column(String(10), default="offline")  # available | busy | away | offline
-    capacity: Mapped[int] = mapped_column(Integer, default=5)
-    last_assigned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    capacity: Mapped[int] = mapped_column(SmallInteger, default=5)
+    last_assigned_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now(), onupdate=func.now())
 
 
 class Journey(Base):
@@ -56,9 +56,9 @@ class Journey(Base):
     steps: Mapped[list] = mapped_column(JSONB, default=list)
     sender_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
-    activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    activated_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now(), onupdate=func.now())
 
 
 class JourneyEnrollment(Base):
@@ -68,11 +68,11 @@ class JourneyEnrollment(Base):
     journey_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("journeys.id", ondelete="CASCADE"))
     member_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("campaign_members.id", ondelete="CASCADE"))
     step: Mapped[int] = mapped_column(Integer, default=0)
-    next_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    next_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     status: Mapped[str] = mapped_column(String(10), default="active")  # active | completed | exited
     exit_reason: Mapped[str | None] = mapped_column(String(80))
-    enrolled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    enrolled_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now(), onupdate=func.now())
 
 
 class EmailSend(Base):
@@ -90,10 +90,10 @@ class EmailSend(Base):
     subject: Mapped[str] = mapped_column(String(300))
     message_id: Mapped[str | None] = mapped_column(String(500))
     delivered: Mapped[bool] = mapped_column(Boolean, default=False)
-    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    opened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sent_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now())
+    opened_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     open_count: Mapped[int] = mapped_column(Integer, default=0)
-    clicked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    clicked_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     click_count: Mapped[int] = mapped_column(Integer, default=0)
 
 
@@ -104,4 +104,4 @@ class EmailEvent(Base):
     send_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("email_sends.id", ondelete="CASCADE"))
     kind: Mapped[str] = mapped_column(String(6))  # open | click
     url: Mapped[str | None] = mapped_column(Text)
-    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    occurred_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now())

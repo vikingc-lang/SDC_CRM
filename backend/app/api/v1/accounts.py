@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.dialect import nulls_last
 from app.core.rbac import Principal, authorize
 from app.models import (
     Account, Activity, Attachment, Contact, Contract, Deal, DealAlert, DealStageHistory, OnboardingProject,
@@ -217,7 +218,7 @@ async def account_360(account_id: uuid.UUID, db: AsyncSession = Depends(get_db),
     for a in atts:
         if a.activity_id:
             att_by_activity.setdefault(a.activity_id, []).append({"id": a.id, "filename": a.filename, "size_bytes": a.size_bytes, "content_type": a.content_type})
-    tasks = (await db.execute(select(Task).where(Task.account_id == account_id).order_by(Task.completed, Task.due_date.nulls_last()))).scalars().unique().all()
+    tasks = (await db.execute(select(Task).where(Task.account_id == account_id).order_by(Task.completed, nulls_last(Task.due_date)))).scalars().unique().all()
     history = (await db.execute(
         select(DealStageHistory).join(Deal, DealStageHistory.deal_id == Deal.id).where(Deal.account_id == account_id).order_by(DealStageHistory.changed_at.desc()).limit(20)
     )).scalars().unique().all()

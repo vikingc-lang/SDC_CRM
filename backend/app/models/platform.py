@@ -2,17 +2,17 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, LargeBinary, Numeric, String, Text, func
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import BigInteger, Boolean, ForeignKey, Integer, LargeBinary, Numeric, SmallInteger, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from app.core.types import JSONB, UTCDateTime, UUID
 
 __all__ = [
     "RolePermission", "AuditLog", "CustomFieldDefinition", "MergeLog", "DedupDismissal", "SubjectKey",
     "ConsentEvent", "ErasureLog", "Notification", "Attachment", "MailboxConnection", "DealAlert", "FxRate",
     "IntegrationEvent", "ErpSyncRun", "SsoLoginState", "SavedReport", "Dashboard", "WorkflowRule", "WorkflowRun", "ForecastSubmission", "ForecastAdjustment",
-    "ListView", "ReportSubscription", "CustomObject", "CustomRecord", "ValidationRule", "SharingRule",
+    "ListView", "ReportSubscription", "CustomObject", "CustomRecord", "ValidationRule", "SharingRule", "NumberSequence",
 ]
 
 
@@ -20,8 +20,9 @@ def _pk() -> Mapped[uuid.UUID]:
     return mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 
 
-def _ts() -> Mapped[datetime]:
-    return mapped_column(DateTime(timezone=True), server_default=func.now())
+def _ts(nullable: bool | None = None) -> Mapped[datetime]:
+    # nullability follows the Mapped[...] annotation unless given
+    return mapped_column(UTCDateTime(), server_default=func.now(), **({} if nullable is None else {"nullable": nullable}))
 
 
 class RolePermission(Base):
@@ -65,8 +66,8 @@ class CustomFieldDefinition(Base):
     options: Mapped[list] = mapped_column(JSONB, default=list)
     required: Mapped[bool] = mapped_column(Boolean, default=False)
     access: Mapped[dict] = mapped_column(JSONB, default=dict)  # field security: {role: "read" | "hidden"}; absent = editable
-    created_at: Mapped[datetime] = _ts()
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    created_at: Mapped[datetime] = _ts(nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now(), onupdate=func.now())
 
 
 class MergeLog(Base):
@@ -81,7 +82,7 @@ class MergeLog(Base):
     score: Mapped[float | None] = mapped_column(Numeric(5, 4))
     automatic: Mapped[bool] = mapped_column(Boolean, default=False)
     merged_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
-    created_at: Mapped[datetime] = _ts()
+    created_at: Mapped[datetime] = _ts(nullable=False)
 
 
 class DedupDismissal(Base):
@@ -91,7 +92,7 @@ class DedupDismissal(Base):
     id_a: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     id_b: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     dismissed_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
-    created_at: Mapped[datetime] = _ts()
+    created_at: Mapped[datetime] = _ts(nullable=False)
 
 
 class SubjectKey(Base):
@@ -101,14 +102,14 @@ class SubjectKey(Base):
 
     contact_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     key: Mapped[bytes] = mapped_column(LargeBinary)
-    created_at: Mapped[datetime] = _ts()
+    created_at: Mapped[datetime] = _ts(nullable=False)
 
 
 class ConsentEvent(Base):
     __tablename__ = "consent_events"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    contact_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), index=True)
+    contact_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     event_type: Mapped[str] = mapped_column(String(30))
     channel: Mapped[str | None] = mapped_column(String(20))
     regulation: Mapped[str | None] = mapped_column(String(10))
@@ -140,15 +141,15 @@ class Notification(Base):
     title: Mapped[str] = mapped_column(String(300))
     body: Mapped[str | None] = mapped_column(Text)
     link: Mapped[str | None] = mapped_column(String(300))
-    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    created_at: Mapped[datetime] = _ts()
+    read_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    created_at: Mapped[datetime] = _ts(nullable=False)
 
 
 class Attachment(Base):
     __tablename__ = "attachments"
 
     id: Mapped[uuid.UUID] = _pk()
-    account_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("accounts.id", ondelete="CASCADE"), index=True)
+    account_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("accounts.id", ondelete="CASCADE"))
     activity_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("activities.id", ondelete="CASCADE"))
     filename: Mapped[str] = mapped_column(String(255))
     content_type: Mapped[str] = mapped_column(String(120))
@@ -156,7 +157,7 @@ class Attachment(Base):
     sha256: Mapped[str] = mapped_column(String(64))
     storage_key: Mapped[str] = mapped_column(String(255))
     uploaded_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
-    created_at: Mapped[datetime] = _ts()
+    created_at: Mapped[datetime] = _ts(nullable=False)
 
 
 class MailboxConnection(Base):
@@ -173,10 +174,10 @@ class MailboxConnection(Base):
     username: Mapped[str | None] = mapped_column(String(255))
     secret_encrypted: Mapped[str | None] = mapped_column(Text)
     last_uid: Mapped[int] = mapped_column(BigInteger, default=0)
-    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_synced_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     status: Mapped[str] = mapped_column(String(20), default="active")
     last_error: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime] = _ts()
+    created_at: Mapped[datetime] = _ts(nullable=False)
 
 
 class DealAlert(Base):
@@ -188,8 +189,8 @@ class DealAlert(Base):
     severity: Mapped[str] = mapped_column(String(10))
     message: Mapped[str] = mapped_column(Text)
     details: Mapped[dict] = mapped_column(JSONB, default=dict)
-    created_at: Mapped[datetime] = _ts()
-    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = _ts(nullable=False)
+    resolved_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
 
     deal = relationship("Deal", lazy="joined")
 
@@ -199,7 +200,7 @@ class FxRate(Base):
 
     currency: Mapped[str] = mapped_column(String(3), primary_key=True)
     rate_to_usd: Mapped[float] = mapped_column(Numeric(14, 6))
-    updated_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _ts(nullable=False)
 
 
 class IntegrationEvent(Base):
@@ -214,7 +215,7 @@ class IntegrationEvent(Base):
     payload: Mapped[dict] = mapped_column(JSONB)
     targets: Mapped[list] = mapped_column(JSONB, default=list)
     created_at: Mapped[datetime] = _ts()
-    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    delivered_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
 
 
 class ErpSyncRun(Base):
@@ -226,8 +227,8 @@ class ErpSyncRun(Base):
     status: Mapped[str] = mapped_column(String(20), default="running")
     stats: Mapped[dict] = mapped_column(JSONB, default=dict)
     error: Mapped[str | None] = mapped_column(Text)
-    started_at: Mapped[datetime] = _ts()
-    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    started_at: Mapped[datetime] = _ts(nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
 
 
 class SsoLoginState(Base):
@@ -253,7 +254,7 @@ class SavedReport(Base):
     definition: Mapped[dict] = mapped_column(JSONB)
     visibility: Mapped[str] = mapped_column(String(10), default="private")
     created_at: Mapped[datetime] = _ts()
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now(), onupdate=func.now())
 
 
 class Dashboard(Base):
@@ -267,7 +268,7 @@ class Dashboard(Base):
     visibility: Mapped[str] = mapped_column(String(10), default="private")
     tiles: Mapped[list] = mapped_column(JSONB, default=list)
     created_at: Mapped[datetime] = _ts()
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now(), onupdate=func.now())
 
 
 class WorkflowRule(Base):
@@ -283,10 +284,10 @@ class WorkflowRule(Base):
     conditions: Mapped[list] = mapped_column(JSONB, default=list)
     actions: Mapped[list] = mapped_column(JSONB, default=list)
     created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
-    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_run_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     run_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = _ts()
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now(), onupdate=func.now())
 
 
 class WorkflowRun(Base):
@@ -327,7 +328,7 @@ class ForecastAdjustment(Base):
     commit_amount: Mapped[float] = mapped_column(Numeric(15, 2))
     best_case_amount: Mapped[float] = mapped_column(Numeric(15, 2))
     note: Mapped[str | None] = mapped_column(Text)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now(), onupdate=func.now())
 
 
 class ListView(Base):
@@ -343,7 +344,7 @@ class ListView(Base):
     filters: Mapped[list] = mapped_column(JSONB, default=list)
     sort: Mapped[dict] = mapped_column(JSONB, default=dict)
     created_at: Mapped[datetime] = _ts()
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now(), onupdate=func.now())
 
 
 class ReportSubscription(Base):
@@ -355,11 +356,11 @@ class ReportSubscription(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     recipient_ids: Mapped[list] = mapped_column(JSONB, default=list)
     frequency: Mapped[str] = mapped_column(String(10))
-    weekday: Mapped[int] = mapped_column(Integer, default=0)
-    day_of_month: Mapped[int] = mapped_column(Integer, default=1)
-    hour: Mapped[int] = mapped_column(Integer, default=7)
+    weekday: Mapped[int] = mapped_column(SmallInteger, default=0)
+    day_of_month: Mapped[int] = mapped_column(SmallInteger, default=1)
+    hour: Mapped[int] = mapped_column(SmallInteger, default=7)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
-    last_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_sent_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     last_status: Mapped[str | None] = mapped_column(String(200))
     created_at: Mapped[datetime] = _ts()
 
@@ -374,7 +375,7 @@ class CustomObject(Base):
     plural_label: Mapped[str] = mapped_column(String(80))
     description: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = _ts()
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now(), onupdate=func.now())
 
 
 class CustomRecord(Base):
@@ -389,7 +390,7 @@ class CustomRecord(Base):
     data: Mapped[dict] = mapped_column(JSONB, default=dict)
     created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = _ts()
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now(), onupdate=func.now())
 
 
 class ValidationRule(Base):
@@ -405,7 +406,7 @@ class ValidationRule(Base):
     applies_on: Mapped[str] = mapped_column(String(10), default="both")
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = _ts()
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now(), onupdate=func.now())
 
 
 class SharingRule(Base):
@@ -419,4 +420,13 @@ class SharingRule(Base):
     roles: Mapped[list] = mapped_column(JSONB, default=list)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = _ts()
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now(), onupdate=func.now())
+
+
+class NumberSequence(Base):
+    """Named counters for document numbers ("case", "quote:2026", ...) and "lock:" rows for cross-worker locks
+    (see core/dialect.py next_number / try_lock). A row lock serialises increments on every database."""
+    __tablename__ = "number_sequences"
+
+    name: Mapped[str] = mapped_column(String(60), primary_key=True)
+    value: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")

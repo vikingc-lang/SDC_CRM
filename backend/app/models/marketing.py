@@ -3,11 +3,11 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Date, DateTime, ForeignKey, Numeric, String, Text, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Date, ForeignKey, Numeric, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
+from app.core.types import UTCDateTime, UUID
 
 __all__ = ["Campaign", "CampaignMember"]
 
@@ -33,9 +33,9 @@ class Campaign(Base):
     expected_revenue: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=0)
     email_subject: Mapped[str | None] = mapped_column(String(200))
     email_body: Mapped[str | None] = mapped_column(Text)
-    last_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    last_sent_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now(), onupdate=func.now())
 
 
 class CampaignMember(Base):
@@ -49,6 +49,6 @@ class CampaignMember(Base):
     status: Mapped[str] = mapped_column(String(12), default="targeted")
     source: Mapped[str] = mapped_column(String(10), default="manual")
     token: Mapped[str] = mapped_column(String(48), unique=True)
-    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    sent_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    responded_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    added_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now())

@@ -3,11 +3,11 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, func
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import Boolean, Date, ForeignKey, Integer, Numeric, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from app.core.types import JSONB, UTCDateTime, UUID
 
 __all__ = ["Order", "OrderLine"]
 
@@ -38,12 +38,12 @@ class Order(Base):
     erp_status: Mapped[str | None] = mapped_column(String(40))
     erp_message: Mapped[str | None] = mapped_column(Text)
     erp_attempts: Mapped[int] = mapped_column(Integer, default=0)
-    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    erp_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    erp_acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    submitted_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    erp_sent_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    erp_acknowledged_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now(), onupdate=func.now())
 
     lines: Mapped[list["OrderLine"]] = relationship(back_populates="order", lazy="selectin", cascade="all, delete-orphan", order_by="OrderLine.line_no")
     account = relationship("Account", lazy="joined")

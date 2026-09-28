@@ -35,6 +35,7 @@ from sqlalchemy import delete, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import _fmt, log_action
+from app.core.dialect import is_postgres, search_words, trigrams
 from app.models import (
     Account, Activity, Attachment, Contact, Contract, Deal, DedupDismissal, Document, Invoice, MergeLog, OnboardingProject,
     ProductUsage, SupportTicket, Task,
@@ -107,16 +108,31 @@ async def _dismissed(db: AsyncSession, entity: str) -> set[tuple]:
 
 
 async def account_candidates(db: AsyncSession, limit: int = 100) -> list[dict]:
-    """Blocking with pg_trgm + registrable domain, then precise scoring."""
+    """Blocking with trigram name similarity + registrable domain, then precise scoring."""
     accounts = {a.id: a for a in (await db.execute(select(Account))).scalars().unique().all()}
     pairs: set[tuple] = set()
-    rows = await db.execute(
-        text(
-            "SELECT a.id, b.id FROM accounts a JOIN accounts b ON a.id < b.id "
-            "WHERE similarity(lower(a.name), lower(b.name)) > 0.35"
+    if is_postgres(db):  # pg_trgm in the database
+        rows = await db.execute(
+            text(
+                "SELECT a.id, b.id FROM accounts a JOIN accounts b ON a.id < b.id "
+                "WHERE similarity(lower(a.name), lower(b.name)) > 0.35"
+            )
         )
-    )
-    pairs.update(tuple(sorted((x, y), key=str)) for x, y in rows.all())
+        pairs.update(tuple(sorted((x, y), key=str)) for x, y in rows.all())
+    else:  # the same measure in Python, comparing only names that share a trigram
+        grams = {a.id: trigrams(a.name) for a in accounts.values()}
+        postings: dict[str, list] = {}
+        for aid, gs in grams.items():
+            for g in gs:
+                postings.setdefault(g, []).append(aid)
+        seen: set[tuple] = set()
+        for ids in postings.values():
+            for pair in combinations(sorted(ids, key=str), 2):
+                if pair not in seen:
+                    seen.add(pair)
+                    ga, gb = grams[pair[0]], grams[pair[1]]
+                    if len(ga & gb) / len(ga | gb) > 0.35:
+                        pairs.add(pair)
     by_domain: dict[str, list] = {}
     for a in accounts.values():
         for d in {registrable_domain(x) for x in [a.domain, *(a.alt_domains or [])]} - {None}:
@@ -285,7 +301,10 @@ async def auto_merge(db: AsyncSession) -> dict:
 async def find_account_duplicate(db: AsyncSession, name: str, domain: str | None) -> dict | None:
     """Best existing match for a would-be new account (used on create and in Quick-Log)."""
     probe = Account(name=name, domain=domain or "", alt_domains=[])
-    conds = [func.similarity(func.lower(Account.name), name.lower()) > 0.3]
+    if is_postgres(db):
+        conds = [func.similarity(func.lower(Account.name), name.lower()) > 0.3]
+    else:  # shortlist on any name word; account_match below does the precise scoring
+        conds = [func.lower(Account.name).like(f"%{w.lower()}%") for w in search_words(name) if len(w) > 2] or [func.lower(Account.name) == name.lower()]
     reg = registrable_domain(domain)
     if reg:
         conds.append(Account.domain.ilike(f"%{reg}"))

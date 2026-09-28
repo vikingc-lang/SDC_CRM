@@ -3,11 +3,11 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, Computed, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, func
-from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, UUID
+from sqlalchemy import Boolean, Computed, Date, ForeignKey, Integer, Numeric, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from app.core.types import JSONB, POSTGRES_ONLY, SearchVector, UTCDateTime, UUID
 
 __all__ = ["OnboardingProject", "OnboardingMilestone", "SupportTicket", "SupportQueue", "CaseComment", "KbArticle", "ProductUsage", "Invoice"]
 
@@ -29,7 +29,7 @@ class OnboardingProject(Base):
     kickoff_date: Mapped[date | None] = mapped_column(Date)
     target_go_live: Mapped[date | None] = mapped_column(Date)
     scope: Mapped[dict] = mapped_column(JSONB, default=dict)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now(), nullable=False)
 
     milestones: Mapped[list["OnboardingMilestone"]] = relationship(back_populates="project", lazy="selectin", cascade="all, delete-orphan", order_by="OnboardingMilestone.position")
     account = relationship("Account", lazy="joined")
@@ -45,7 +45,7 @@ class OnboardingMilestone(Base):
     due_date: Mapped[date | None] = mapped_column(Date)
     status: Mapped[str] = mapped_column(String(20), default="pending")
     position: Mapped[int] = mapped_column(Integer, default=0)
-    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
 
     project: Mapped[OnboardingProject] = relationship(back_populates="milestones")
 
@@ -59,8 +59,8 @@ class SupportTicket(Base):
     subject: Mapped[str] = mapped_column(String(300))
     severity: Mapped[str] = mapped_column(String(10))
     status: Mapped[str] = mapped_column(String(10), default="open")
-    opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    opened_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now())
+    resolved_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     # case management (services/cases.py)
     case_number: Mapped[str | None] = mapped_column(String(20), unique=True)
     description: Mapped[str | None] = mapped_column(Text)
@@ -69,18 +69,18 @@ class SupportTicket(Base):
     queue_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("support_queues.id", ondelete="SET NULL"))
     channel: Mapped[str] = mapped_column(String(10), default="web")
     category: Mapped[str | None] = mapped_column(String(60))
-    first_response_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    resolve_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    first_responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    first_response_due_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    resolve_due_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    first_responded_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     sla_breached: Mapped[bool] = mapped_column(Boolean, default=False)
-    breach_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    breach_notified_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     csat_token: Mapped[str | None] = mapped_column(String(64), unique=True)
     csat_score: Mapped[int | None] = mapped_column(Integer)
     csat_comment: Mapped[str | None] = mapped_column(Text)
     supplied_email: Mapped[str | None] = mapped_column(String(255))  # email-to-case sender when no contact matched
     supplied_name: Mapped[str | None] = mapped_column(String(200))
-    csat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    csat_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now(), onupdate=func.now())
 
 
 class SupportQueue(Base):
@@ -94,7 +94,7 @@ class SupportQueue(Base):
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
     email_address: Mapped[str | None] = mapped_column(String(255), unique=True)  # email-to-case: mail to this address opens cases here
     routing: Mapped[str] = mapped_column(String(12), default="least_loaded")  # least_loaded | presence (see services/routing.py)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now())
 
 
 class CaseComment(Base):
@@ -109,7 +109,7 @@ class CaseComment(Base):
     message_id: Mapped[str | None] = mapped_column(String(500))  # email thread id (inbound message or the reply we sent)
     from_email: Mapped[str | None] = mapped_column(String(255))  # a customer's emailed reply (author_id is null)
     emailed: Mapped[bool] = mapped_column(Boolean, default=False)  # a public reply that went out by email
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now())
 
 
 class KbArticle(Base):
@@ -125,13 +125,14 @@ class KbArticle(Base):
     views: Mapped[int] = mapped_column(Integer, default=0)
     helpful: Mapped[int] = mapped_column(Integer, default=0)
     not_helpful: Mapped[int] = mapped_column(Integer, default=0)
-    search_tsv = mapped_column(
-        TSVECTOR,
+    search_tsv = mapped_column(  # Postgres full-text vector; other databases search with LIKE
+        SearchVector,
         Computed("setweight(to_tsvector('english', coalesce(title, '')), 'A') || setweight(to_tsvector('english', coalesce(body, '')), 'B')", persisted=True),
         deferred=True,
+        info={POSTGRES_ONLY: True},
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now(), onupdate=func.now())
 
 
 class ProductUsage(Base):
@@ -158,4 +159,4 @@ class Invoice(Base):
     amount: Mapped[Decimal] = mapped_column(Numeric(16, 2))
     balance: Mapped[Decimal] = mapped_column(Numeric(16, 2))
     status: Mapped[str] = mapped_column(String(10), default="open")
-    synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    synced_at: Mapped[datetime | None] = mapped_column(UTCDateTime())

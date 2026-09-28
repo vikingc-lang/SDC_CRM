@@ -26,6 +26,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.dialect import next_number
 from app.models import (
     Account, Activity, Contact, Contract, Deal, DealStageHistory, Document, DocumentTemplate, Quote, SignatureRequest, Task, User,
 )
@@ -549,8 +550,7 @@ async def _complete(db: AsyncSession, doc: Document) -> None:
 
 async def next_contract_number(db: AsyncSession) -> str:
     year = date.today().year
-    count = (await db.execute(select(func.count()).select_from(Contract).where(Contract.contract_number.like(f"CT-{year}-%")))).scalar_one()
-    return f"CT-{year}-{count + 1:04d}"
+    return f"CT-{year}-{await next_number(db, f'contract:{year}'):04d}"
 
 
 async def create_contract_from_quote(db: AsyncSession, quote: Quote, doc: Document | None = None, start: date | None = None) -> Contract:

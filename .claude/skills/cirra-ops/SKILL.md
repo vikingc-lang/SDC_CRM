@@ -25,9 +25,12 @@ NetworkPolicy (`networkPolicy.allowEgressCIDRs`). Validate with
   FastAPI background task).
 
 ## Migrations
-`backend/alembic/versions/0NN_description.py`, raw SQL, `revision`/`down_revision` chain (latest: 016).
+`backend/alembic/versions/0NN_description.py`, raw SQL, `revision`/`down_revision` chain (latest: 017, portable data model + `number_sequences`).
 Never edit an applied migration; add a new one (e.g. 015 widened 002's check constraint). `/health/ready`
 reports `migrations` not at head.
+
+Moving databases: `python -m app.dbtools schema|copy|verify --target URL [--source URL]` (sync URLs), runbook
+and per-database differences in `docs/database-portability.md`. Postgres targets use `alembic upgrade head`.
 
 ## Health and observability
 `/health` (DB ping), `/health/live` (no deps), `/health/ready` (DB, migrations at head, Redis → 503 if not);

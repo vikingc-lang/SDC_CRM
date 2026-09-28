@@ -3,11 +3,11 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Numeric, String, Text, func
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import Boolean, Date, ForeignKey, Numeric, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from app.core.types import JSONB, UTCDateTime, UUID
 
 __all__ = ["Partner", "DealRegistration", "DealPartner", "Collateral", "CollateralDownload"]
 
@@ -18,8 +18,9 @@ def _pk() -> Mapped[uuid.UUID]:
     return mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 
 
-def _ts() -> Mapped[datetime]:
-    return mapped_column(DateTime(timezone=True), server_default=func.now())
+def _ts(nullable: bool | None = None) -> Mapped[datetime]:
+    # nullability follows the Mapped[...] annotation unless given
+    return mapped_column(UTCDateTime(), server_default=func.now(), **({} if nullable is None else {"nullable": nullable}))
 
 
 class Partner(Base):
@@ -34,7 +35,7 @@ class Partner(Base):
     commission_rate: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=10)
     referral_fee_rate: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=5)
     status: Mapped[str] = mapped_column(String(10), default="active")
-    created_at: Mapped[datetime] = _ts()
+    created_at: Mapped[datetime] = _ts(nullable=False)
 
 
 class DealRegistration(Base):
@@ -56,10 +57,10 @@ class DealRegistration(Base):
     exclusivity_expires_at: Mapped[date | None] = mapped_column(Date)
     conflicts: Mapped[list] = mapped_column(JSONB, default=list)
     decided_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
-    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    decided_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     decision_note: Mapped[str | None] = mapped_column(Text)
     deal_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("deals.id", ondelete="SET NULL"))
-    created_at: Mapped[datetime] = _ts()
+    created_at: Mapped[datetime] = _ts(nullable=False)
 
     partner: Mapped[Partner] = relationship(lazy="joined")
 
@@ -90,7 +91,7 @@ class Collateral(Base):
     min_tier: Mapped[str] = mapped_column(String(20), default="registered")
     allowed_domains: Mapped[list] = mapped_column(JSONB, default=list)
     is_published: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = _ts()
+    created_at: Mapped[datetime] = _ts(nullable=False)
 
     attachment = relationship("Attachment", lazy="joined")
 
@@ -102,4 +103,4 @@ class CollateralDownload(Base):
     collateral_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("collateral.id", ondelete="CASCADE"))
     user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     partner_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("partners.id", ondelete="SET NULL"))
-    created_at: Mapped[datetime] = _ts()
+    created_at: Mapped[datetime] = _ts(nullable=False)

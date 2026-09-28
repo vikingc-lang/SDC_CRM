@@ -23,11 +23,12 @@ from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 import httpx
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.models import Account, Activity, Contract, Deal, Order, OrderLine, PipelineStage, Quote, User
+from app.core.dialect import next_number
+from app.models import Account, Activity, Contract, Deal, Order, OrderLine, Quote, User
 from app.services.notify import emit, notify
 
 MAX_ATTEMPTS = 5
@@ -71,8 +72,7 @@ def billing_schedule(billing_type: str, net_unit: Decimal, qty: Decimal, term_mo
 
 async def next_order_number(db: AsyncSession) -> str:
     year = date.today().year
-    count = (await db.execute(select(func.count()).select_from(Order).where(Order.order_number.like(f"ORD-{year}-%")))).scalar_one()
-    return f"ORD-{year}-{count + 1:04d}"
+    return f"ORD-{year}-{await next_number(db, f'order:{year}'):04d}"
 
 
 async def primary_quote(db: AsyncSession, deal: Deal) -> Quote | None:

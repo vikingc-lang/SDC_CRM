@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import get_current_user
+from app.core.dialect import nulls_last
 from app.core.rbac import Principal, authorize
 from app.models import Account, Activity, Attachment, Contact, MailboxConnection, Notification, Task, User
 from app.services import calendar as cal
@@ -175,7 +176,7 @@ async def list_tasks(
     db: AsyncSession = Depends(get_db),
     p: Principal = Depends(authorize("tasks", "read")),
 ):
-    stmt = _task_scope(select(Task), p).order_by(Task.completed, Task.due_date.nulls_last(), Task.created_at.desc())
+    stmt = _task_scope(select(Task), p).order_by(Task.completed, nulls_last(Task.due_date), Task.created_at.desc())
     if status == "open":
         stmt = stmt.where(Task.completed.is_(False))
     elif status == "done":

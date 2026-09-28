@@ -120,6 +120,11 @@ mail relay).
   log with status and duration. `LOG_FORMAT=json` switches the whole API to one JSON object per line for log shippers.
 - **Response hardening:** `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer` and a deny-all CSP on API
   responses (the API only serves JSON; the interactive docs are exempt).
+- **Database portability:** PostgreSQL is the reference database. Models use portable types, the full schema
+  (checks, uniques, indexes) is declared in the models, and database-specific SQL lives in one adapter. The same
+  schema therefore builds on MySQL, SQL Server, Oracle or SQLite, and `python -m app.dbtools schema|copy|verify`
+  moves the data. What changes per database, and the runbook, are in
+  [docs/database-portability.md](docs/database-portability.md).
 - **CI** (`.github/workflows/ci.yml`) on every push and pull request: the backend suite against real Postgres/pgvector
   and Redis, the frontend typecheck, lint and production build, then both Docker images and a Helm lint and render.
 
@@ -246,8 +251,10 @@ Demo intake keys are printed by the seed: the hosted form is `/forms/cf_demo_web
 │   ├── alembic/versions/002_enterprise_pillars.py  # RBAC, audit triggers, privacy, CPQ/CLM, success, ERP, PRM
 │   └── app/
 │       ├── main.py           # app entrypoint + CORS
-│       ├── core/             # config, DB sessions, JWT/bcrypt, RBAC + row scope (rbac.py), field-level audit (audit.py)
-│       ├── models/           # SQLAlchemy models (mirror the migration)
+│       ├── core/             # config, DB sessions, JWT/bcrypt, RBAC + row scope (rbac.py), field-level audit (audit.py),
+│       │                     #   portable types (types.py) and database-specific SQL (dialect.py)
+│       ├── dbtools.py        # schema / copy / verify: move the data to another database
+│       ├── models/           # SQLAlchemy models (mirror the migrations; schema_rules.py = checks/indexes, portable)
 │       ├── schemas/          # Pydantic v2 contracts (ai.py = spec §9)
 │       ├── services/
 │       │   ├── ai_extractor.py      # spec §8 system prompt + deterministic extractor

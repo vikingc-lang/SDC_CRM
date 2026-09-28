@@ -15,10 +15,11 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Callable
 
-from sqlalchemy import Boolean, Date, Numeric, and_, case, cast, func, literal, not_, or_, select
+from sqlalchemy import Date, Numeric, and_, case, cast, func, literal, not_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from app.core.dialect import concat_words, date_bucket, looks_iso_date, looks_numeric, nulls_first, nulls_last, seconds_between
 from app.core.rbac import Principal
 from app.models import (
     Account, Activity, Campaign, CampaignMember, Contact, CustomRecord, Deal, FxRate, Lead, Order, Pipeline, PipelineStage, Quote, SupportQueue, SupportTicket,
@@ -158,7 +159,7 @@ def _contacts() -> Source:
 def _leads() -> Source:
     owner = aliased(User)
     fields = {
-        "name": F("Lead", "text", func.concat_ws(" ", Lead.first_name, Lead.last_name), groupable=False),
+        "name": F("Lead", "text", concat_words(Lead.first_name, Lead.last_name), groupable=False),
         "company": F("Company", "text", Lead.company_name),
         "source": F("Source", "text", Lead.source),
         "campaign": F("Campaign", "text", Lead.campaign),
@@ -305,9 +306,9 @@ def _campaigns() -> Source:
 
 def _cases() -> Source:
     acct, owner, queue = aliased(Account), aliased(User), aliased(SupportQueue)
-    # Postgres only has round(numeric, int): cast the epoch-seconds arithmetic before rounding to 0.1 h
-    first_resp_h = func.round(cast(func.extract("epoch", SupportTicket.first_responded_at - SupportTicket.opened_at) / 3600.0, Numeric), 1)
-    resolve_h = func.round(cast(func.extract("epoch", SupportTicket.resolved_at - SupportTicket.opened_at) / 3600.0, Numeric), 1)
+    # Postgres only has round(numeric, int): cast the seconds arithmetic before rounding to 0.1 h
+    first_resp_h = func.round(cast(seconds_between(SupportTicket.first_responded_at, SupportTicket.opened_at) / 3600.0, Numeric), 1)
+    resolve_h = func.round(cast(seconds_between(SupportTicket.resolved_at, SupportTicket.opened_at) / 3600.0, Numeric), 1)
     fields = {
         "case_number": F("Case #", "text", SupportTicket.case_number, groupable=False),
         "subject": F("Subject", "text", SupportTicket.subject, groupable=False),
@@ -365,11 +366,11 @@ def invalidate_custom_fields() -> None:
 def _custom_expr(col, defn):
     """Typed read of a JSONB custom value. Values that don't parse (stored before the field was defined, or by a
     sync) read as empty instead of failing the whole query."""
-    raw = col[defn.key].astext
+    raw = col[defn.key].as_string()
     if defn.field_type == "number":
-        return case((raw.op("~")(r"^\s*-?[0-9]+(\.[0-9]+)?\s*$"), cast(raw, Numeric)), else_=None)
+        return case((looks_numeric(raw), cast(raw, Numeric)), else_=None)
     if defn.field_type == "date":
-        return case((raw.op("~")(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}"), cast(func.substr(raw, 1, 10), Date)), else_=None)
+        return case((looks_iso_date(raw), cast(func.substr(raw, 1, 10), Date)), else_=None)
     if defn.field_type == "boolean":
         return case((func.lower(raw) == "true", literal(True)), (func.lower(raw) == "false", literal(False)), else_=None)
     return raw
@@ -623,7 +624,7 @@ def _bucketed(f: F, bucket: str | None):
     b = bucket or "month"
     if b not in BUCKETS:
         raise ReportError(f"Unknown date grouping '{b}'")
-    return cast(func.date_trunc(b, f.expr), Date)
+    return date_bucket(b, f.expr)
 
 
 def validate(defn: dict, src: Source | None = None) -> dict:
@@ -717,12 +718,12 @@ async def run(db: AsyncSession, p: Principal, defn: dict) -> dict:
         keys = {k: e for k, e in dims + meas}
         by = sort.get("by")
         if by in keys:
-            order = keys[by].desc().nullslast() if desc else keys[by].asc().nullsfirst()
+            order = nulls_last(keys[by], descending=True) if desc else nulls_first(keys[by])
             stmt = stmt.order_by(order)
         elif dims and any(src.fields[g["field"]].type == "date" for g in groups):
             stmt = stmt.order_by(*[d.asc() for _, d in dims])
         elif meas:
-            stmt = stmt.order_by(meas[0][1].desc().nullslast())
+            stmt = stmt.order_by(nulls_last(meas[0][1], descending=True))
         cols = ([{"key": g["field"], "label": src.fields[g["field"]].label + (f" ({g.get('bucket') or 'month'})" if src.fields[g["field"]].type == "date" else ""),
                   "type": "date" if src.fields[g["field"]].type == "date" else src.fields[g["field"]].type, "role": "dimension",
                   "bucket": (g.get("bucket") or "month") if src.fields[g["field"]].type == "date" else None} for g in groups]
@@ -736,7 +737,7 @@ async def run(db: AsyncSession, p: Principal, defn: dict) -> dict:
         by = sort.get("by")
         if by in src.fields:
             e = src.fields[by].expr
-            stmt = stmt.order_by(e.desc().nullslast() if desc else e.asc().nullsfirst())
+            stmt = stmt.order_by(nulls_last(e, descending=True) if desc else nulls_first(e))
         cols = [{"key": c, "label": src.fields[c].label, "type": src.fields[c].type, "role": "column"} for c in columns]
 
     rows = (await db.execute(stmt.limit(limit + 1))).all()

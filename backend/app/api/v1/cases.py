@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.dialect import full_text
 from app.core.rbac import Perm, Principal, authorize, load_matrix
 from app.models import Account, CaseComment, Contact, InboundEmail, KbArticle, SupportQueue, SupportTicket, User
 from app.services import app_settings, email_to_case, mailer, routing
@@ -427,9 +428,8 @@ async def list_articles(search: str | None = None, category: str | None = None, 
     if category:
         stmt = stmt.where(KbArticle.category == category)
     if search and search.strip():
-        q = func.websearch_to_tsquery("english", search.strip())
-        stmt = stmt.where(or_(KbArticle.search_tsv.op("@@")(q), KbArticle.title.ilike(f"%{search.strip()}%"))).order_by(
-            func.ts_rank(KbArticle.search_tsv, q).desc())
+        matches, rank = full_text(db, search.strip(), [KbArticle.title, KbArticle.body], vector=KbArticle.search_tsv)
+        stmt = stmt.where(or_(matches, KbArticle.title.ilike(f"%{search.strip()}%"))).order_by(rank.desc())
     else:
         stmt = stmt.order_by(KbArticle.updated_at.desc())
     rows = (await db.execute(stmt.limit(200))).scalars().all()

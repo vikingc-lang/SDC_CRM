@@ -4,7 +4,7 @@ import logging
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import text
+from sqlalchemy import literal, select, text
 
 from app.api.v1 import accounts, activities, admin, ai, analytics, auth, campaigns, cases, contacts, cpq, deals, developer, finance, leads, orders, partners, performance, forecasting, success, sync, views, workflows, objects, setup, journeys, inbound
 from app.core.config import enforce_secure_settings, settings
@@ -51,7 +51,7 @@ async def _validation_failed(request: Request, exc: validation.ValidationRuleErr
 @app.get("/health", tags=["system"])
 async def health():
     async with engine.connect() as conn:
-        await conn.execute(text("SELECT 1"))
+        await conn.execute(select(literal(1)))
     return {"status": "ok", "service": "cirra-api", "llm_provider": settings.llm_provider}
 
 

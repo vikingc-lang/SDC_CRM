@@ -2,13 +2,15 @@
 
 Vector similarity (pgvector cosine) and Postgres full-text rank are fused with
 Reciprocal Rank Fusion, so "accounts concerned about ERP migration timelines
-in Q2" finds both paraphrased notes (vector) and exact terms (keyword).
+in Q2" finds both paraphrased notes (vector) and exact terms (keyword). On other databases the vector signal is
+skipped and the keyword signal uses app.core.dialect.full_text (LIKE matching).
 """
 from __future__ import annotations
 
-from sqlalchemy import Text, cast, func, literal, literal_column, or_, select
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy import Text, cast, literal_column, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.dialect import full_text, is_postgres, json_without_keys
 
 from app.models import Account, Activity
 from app.services import custom_fields, embeddings
@@ -18,8 +20,7 @@ RRF_K = 60
 
 
 async def hybrid_search(db: AsyncSession, query: str, limit: int = 10, principal=None, account_id=None) -> list[dict]:
-    vector = await embeddings.embed(query)
-    tsq = func.websearch_to_tsquery("english", query)
+    vector = await embeddings.embed(query) if is_postgres(db) else None  # similarity search needs pgvector
     fused: dict[tuple, dict] = {}
 
     def add(key, rank, kind, payload, signal):
@@ -38,7 +39,8 @@ async def hybrid_search(db: AsyncSession, query: str, limit: int = 10, principal
         for rank, (a, sim) in enumerate(rows, 1):
             if sim is not None and sim > 0.05:
                 add(("activity", a.id), rank, "activity", (a, float(sim)), "vector")
-    rows = (await db.execute(base.add_columns(func.ts_rank(Activity.search_tsv, tsq).label("rank")).where(Activity.search_tsv.op("@@")(tsq))
+    matches, rank_of = full_text(db, query, [Activity.subject, Activity.summary, Activity.raw_text], vector=Activity.search_tsv)
+    rows = (await db.execute(base.add_columns(rank_of.label("rank")).where(matches)
                              .order_by(literal_column("rank").desc()).limit(limit * 3))).unique().all()
     for rank, (a, _) in enumerate(rows, 1):
         prev = fused.get(("activity", a.id))
@@ -46,12 +48,13 @@ async def hybrid_search(db: AsyncSession, query: str, limit: int = 10, principal
 
     if not account_id:
         hidden = custom_fields.hidden_keys("account", principal.user.role if principal is not None else None)
-        meta = Account.custom_metadata.op("-")(literal(hidden, ARRAY(Text))) if hidden else Account.custom_metadata  # field security
-        acc_doc = func.to_tsvector("english", func.concat_ws(" ", Account.name, Account.industry, Account.legal_name, cast(meta, Text)))
+        meta = json_without_keys(db, Account.custom_metadata, hidden)  # field security; None: leave custom fields out
+        fields = [Account.name, Account.industry, Account.legal_name] + ([cast(meta, Text)] if meta is not None else [])
+        acc_match, acc_rank = full_text(db, query, fields)
         acc_base = select(Account)
         if principal is not None:
             acc_base = principal.scope_accounts(acc_base)
-        rows = (await db.execute(acc_base.add_columns(func.ts_rank(acc_doc, tsq).label("rank")).where(or_(acc_doc.op("@@")(tsq), Account.name.ilike(f"%{query}%")))
+        rows = (await db.execute(acc_base.add_columns(acc_rank.label("rank")).where(or_(acc_match, Account.name.ilike(f"%{query}%")))
                                  .order_by(literal_column("rank").desc()).limit(limit))).unique().all()
         for rank, (acc, _) in enumerate(rows, 1):
             add(("account", acc.id), rank, "account", acc, "keyword")

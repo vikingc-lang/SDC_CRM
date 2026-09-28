@@ -18,7 +18,8 @@ from datetime import date, datetime, timedelta, timezone
 from fpdf import FPDF
 from sqlalchemy import func, select, text
 
-from app.core.database import SessionLocal
+from app.core.database import Base, SessionLocal
+from app.core.dialect import delete_all_rows, is_postgres
 from app.core.rbac import seed_permissions
 from app.core.security import hash_password
 from app.models import (
@@ -244,6 +245,10 @@ def _pdf(title: str, lines: list[str]) -> bytes:
 
 
 async def _reset(db) -> None:
+    if not is_postgres(db):
+        await delete_all_rows(db, Base.metadata)
+        await db.commit()
+        return
     # GUC name is fixed by the append-only trigger in migration 002 (internal identifier, predates the Cirra name)
     await db.execute(text("SET LOCAL relate.allow_ledger_reset = 'on'"))
     tables = (await db.execute(text("SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'alembic_version'"))).scalars().all()

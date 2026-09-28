@@ -34,6 +34,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import current_user_id
+from app.core.dialect import next_number
 from app.models import (
     Account, ApprovalGroup, ApprovalPolicy, ApprovalRequest, BundleComponent, Deal, PriceBook, PriceBookEntry, Product, ProductRule,
     Promotion, Quote, QuoteLine, User,
@@ -134,8 +135,7 @@ async def price_line(db: AsyncSession, product_id, currency: str, qty: float, di
 
 async def next_quote_number(db: AsyncSession) -> str:
     year = date.today().year
-    count = (await db.execute(select(func.count()).select_from(Quote).where(Quote.quote_number.like(f"Q-{year}-%")))).scalar_one()
-    return f"Q-{year}-{count + 1:04d}"
+    return f"Q-{year}-{await next_number(db, f'quote:{year}'):04d}"
 
 
 async def check_rules(db: AsyncSession, product_ids: set) -> list[str]:

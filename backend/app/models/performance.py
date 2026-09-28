@@ -3,11 +3,11 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text, func
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import Boolean, ForeignKey, Integer, Numeric, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
+from app.core.types import JSONB, UTCDateTime, UUID
 
 __all__ = ["Territory", "Quota", "CommissionPlan"]
 
@@ -28,7 +28,7 @@ class Territory(Base):
     member_ids: Mapped[list] = mapped_column(JSONB, default=list)
     criteria: Mapped[dict] = mapped_column(JSONB, default=dict)
     priority: Mapped[int] = mapped_column(Integer, default=100)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now())
 
 
 class Quota(Base):
@@ -39,7 +39,7 @@ class Quota(Base):
     period: Mapped[str] = mapped_column(String(7))
     amount: Mapped[Decimal] = mapped_column(Numeric(15, 2))
     set_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now(), onupdate=func.now())
 
 
 class CommissionPlan(Base):
@@ -54,4 +54,4 @@ class CommissionPlan(Base):
     roles: Mapped[list] = mapped_column(JSONB, default=list)
     member_ids: Mapped[list] = mapped_column(JSONB, default=list)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now())

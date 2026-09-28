@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.dialect import json_array_has
 from app.core.rbac import Principal, authorize
 from app.models import Account, ErpSyncRun, IntegrationEvent
 from app.services import erp
@@ -67,7 +68,7 @@ async def events_feed(after_id: int = 0, target: str | None = None, limit: int =
     """Cursor-based feed for neighbouring SDC modules (promo, Yield, deduct, nexora)."""
     stmt = select(IntegrationEvent).where(IntegrationEvent.id > after_id).order_by(IntegrationEvent.id).limit(min(max(limit, 1), 500))
     if target:  # filter in SQL so the cursor always advances past other modules' events
-        stmt = stmt.where(IntegrationEvent.targets.contains([target]))
+        stmt = stmt.where(json_array_has(IntegrationEvent.targets, target))
     rows = (await db.execute(stmt)).scalars().all()
     return {"next_after_id": rows[-1].id if rows else after_id,
             "events": [{"id": e.id, "type": e.event_type, "entity": e.entity_type, "entity_id": e.entity_id, "payload": e.payload,

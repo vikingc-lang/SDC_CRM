@@ -9,6 +9,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.dialect import nulls_last
 from app.core.rbac import Principal, authorize
 from app.models import (
     Account, Activity, Attachment, Contact, Deal, DealAlert, DealPartner, DealStageHistory, Document, Order, Partner, Pipeline, PipelineStage, Quote, Task,
@@ -305,7 +306,7 @@ async def get_deal(deal_id: uuid.UUID, db: AsyncSession = Depends(get_db), p: Pr
     card = deal_card(deal, rates)
     activities = (await db.execute(select(Activity).where(or_(Activity.deal_id == deal_id, Activity.account_id == deal.account_id))
                                    .order_by(Activity.occurred_at.desc()).limit(40))).scalars().unique().all()
-    tasks = (await db.execute(select(Task).where(Task.deal_id == deal_id).order_by(Task.completed, Task.due_date.nulls_last()))).scalars().unique().all()
+    tasks = (await db.execute(select(Task).where(Task.deal_id == deal_id).order_by(Task.completed, nulls_last(Task.due_date)))).scalars().unique().all()
     history = (await db.execute(select(DealStageHistory).where(DealStageHistory.deal_id == deal_id).order_by(DealStageHistory.changed_at))).scalars().unique().all()
     contacts = (await db.execute(select(Contact).where(Contact.account_id == deal.account_id, Contact.status != "erased"))).scalars().all()
     pipeline = await db.get(Pipeline, deal.pipeline_id)

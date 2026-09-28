@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.dialect import nulls_last
 from app.core.rbac import Principal, authorize
 from app.models import Account, Campaign, CampaignMember, Contact, Deal, Lead, User
 from app.services import campaigns as svc
@@ -74,7 +75,7 @@ async def meta(_: Principal = Depends(authorize("campaigns", "read"))):
 @router.get("")
 async def list_campaigns(status: CampaignStatus | None = None, db: AsyncSession = Depends(get_db),
                          _: Principal = Depends(authorize("campaigns", "read"))):
-    stmt = select(Campaign).order_by(Campaign.start_date.desc().nulls_last(), Campaign.name)
+    stmt = select(Campaign).order_by(nulls_last(Campaign.start_date, descending=True), Campaign.name)
     if status:
         stmt = stmt.where(Campaign.status == status)
     rows = (await db.execute(stmt)).scalars().all()

@@ -11,9 +11,10 @@ import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, or_, select, text
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.dialect import full_text, next_number, search_words
 from app.core.rbac import Principal
 from app.models import Account, CaseComment, Contact, KbArticle, SupportQueue, SupportTicket, User
 from app.services import app_settings, scoring
@@ -36,7 +37,7 @@ def scope(p: Principal, stmt):
 
 
 async def _next_number(db: AsyncSession) -> str:
-    n = (await db.execute(text("SELECT nextval('case_number_seq')"))).scalar_one()
+    n = await next_number(db, "case", start=1001)
     return f"CS-{n:05d}"
 
 
@@ -168,13 +169,13 @@ async def scan_breaches(db: AsyncSession) -> dict:
 
 
 async def suggest_articles(db: AsyncSession, text_: str, limit: int = 5) -> list[dict]:
-    words = " OR ".join(w for w in "".join(ch if ch.isalnum() else " " for ch in (text_ or "")).split() if len(w) > 2)
+    words = " OR ".join(w for w in search_words(text_) if len(w) > 2)
     if not words:
         return []
-    q = func.websearch_to_tsquery("english", words)
-    rows = (await db.execute(select(KbArticle.id, KbArticle.title, KbArticle.category, func.ts_rank(KbArticle.search_tsv, q).label("rank"))
-                             .where(KbArticle.status == "published", KbArticle.search_tsv.op("@@")(q))
-                             .order_by(text("rank DESC")).limit(limit))).all()
+    matches, rank = full_text(db, words, [KbArticle.title, KbArticle.body], vector=KbArticle.search_tsv, any_word=True)
+    rows = (await db.execute(select(KbArticle.id, KbArticle.title, KbArticle.category, rank.label("rank"))
+                             .where(KbArticle.status == "published", matches)
+                             .order_by(rank.desc()).limit(limit))).all()
     return [{"id": r.id, "title": r.title, "category": r.category} for r in rows]
 
 

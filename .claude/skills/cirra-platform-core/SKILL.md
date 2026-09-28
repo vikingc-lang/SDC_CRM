@@ -21,6 +21,9 @@ description: Cirra platform foundation - RBAC and row-level scope (Principal), a
   config export/import; `services/config_bundle.py` – bundle format, dry-run plan, all-or-nothing apply.
 - `api/v1/admin.py` – users, permissions matrix, custom-field CRUD (incl. `access`), audit, dedup, import/export.
 - `services/app_settings.py` – key/value settings with `DEFAULTS` (`get`, `put`).
+- `core/types.py` – portable column types (`UUID`, `JSONB`, `UTCDateTime`, `Embedding`, `SearchVector`);
+  `core/dialect.py` – every database-specific construct (see "Database portability" below);
+  `models/schema_rules.py` – checks, uniques and indexes the migrations create, declared on `Base.metadata`.
 
 ## Invariants
 - **Scope**: `own` roles see accounts they own or sell into (`owned_account_ids()`), plus accounts matching an
@@ -35,6 +38,17 @@ description: Cirra platform foundation - RBAC and row-level scope (Principal), a
   its fields, rules, views, reports (and dashboard tiles). Workflows don't run on custom objects yet.
 - The live field catalogue refreshes by a signature (counts + max `updated_at` of field definitions and objects),
   so every replica sees changes on its next request (`principal_for` refreshes it).
+
+## Database portability (docs/database-portability.md)
+- Models import types from `app.core.types` only (never `sqlalchemy.dialects.postgresql`); timestamps are
+  `UTCDateTime()`. Postgres stays the reference: its SQL is unchanged.
+- Queries use generic JSON (`col["k"].as_string()`), `dialect.json_array_has`, `date_bucket`, `seconds_between`,
+  `looks_numeric`/`looks_iso_date`, `concat_words`, `nulls_last`/`nulls_first`, `full_text`,
+  `insert_ignore`, `try_lock`. Raw Postgres SQL only behind `dialect.is_postgres(db)` with a fallback.
+- Running numbers: `await dialect.next_number(db, "quote:2026")` (row-locked counter in `number_sequences`),
+  never `count(*) + 1` or a database sequence.
+- A migration adding a check / unique / index the model doesn't declare also adds it to `schema_rules.py`;
+  `tests/test_portability.py` (drift, DDL for 5 databases, copy to SQLite) fails otherwise.
 
 ## Recipes
 - **New resource**: add to `RESOURCES`, give each role a spec in `DEFAULT_MATRIX` (missing rows fall back to

@@ -31,6 +31,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.dialect import json_array_has
 from app.models import Account, CaseComment, Contact, InboundEmail, SupportQueue, SupportTicket
 from app.services import cases, mailer
 from app.services.notify import notify
@@ -113,7 +114,7 @@ async def _match_account(db: AsyncSession, address: str) -> tuple[Account | None
     domain = address.rsplit("@", 1)[-1]
     if not domain or domain in FREE_MAIL:
         return None, None
-    acc = (await db.execute(select(Account).where(or_(func.lower(Account.domain) == domain, Account.alt_domains.contains([domain])))
+    acc = (await db.execute(select(Account).where(or_(func.lower(Account.domain) == domain, json_array_has(Account.alt_domains, domain)))
                             .order_by(Account.created_at))).scalars().first()
     return acc, None
 
