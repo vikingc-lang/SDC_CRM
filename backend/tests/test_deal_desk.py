@@ -121,9 +121,12 @@ async def test_legal_documents_redlines_comments_and_resend(client):
     doc = (await client.get(f"/api/v1/documents/{msa['id']}")).json()
     assert doc["current_version"] == 3 and doc["signers"] == [] and doc["status"] == "in_negotiation"  # old signatures voided
     sent = (await client.post(f"/api/v1/documents/{msa['id']}/send", json=signers)).json()
-    for s in sent["signers"]:
-        t = s["sign_url"].rsplit("/", 1)[1]
-        assert (await client.post(f"/api/v1/sign/{t}", json={"signature_text": s["name"], "agree": True})).status_code == 200
+    for s in sorted(sent["signers"], key=lambda s: s["order"]):
+        if s["party"] == "company":  # countersigned in the app by the named user (the client is Marcus)
+            r = await client.post(f"/api/v1/documents/{msa['id']}/countersign", json={"signature_text": s["name"], "agree": True})
+        else:
+            r = await client.post(f"/api/v1/sign/{s['sign_url'].rsplit('/', 1)[1]}", json={"signature_text": s["name"], "agree": True})
+        assert r.status_code == 200, r.text
     final = (await client.get(f"/api/v1/documents/{msa['id']}")).json()
     assert final["status"] == "completed" and final["pdf_attachment_id"]
     neg = (await client.get(f"/api/v1/documents/{msa['id']}/negotiation")).json()

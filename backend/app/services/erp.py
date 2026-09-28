@@ -8,7 +8,8 @@ Connectors (``ERP_CONNECTOR``):
 * ``rest`` - an integration-middleware API (MuleSoft, Boomi, SAP CPI, a
   NetSuite RESTlet) exposing ``GET /customers``, ``GET /invoices`` and
   ``POST /customers`` in the canonical schema below.
-* ``demo`` - deterministic data for the demo workspace.
+* ``demo`` - deterministic sample data for the demo workspace (refused outside development; flagged in the UI).
+* ``disabled`` - the default: no ERP data.
 
 Canonical customer: {erp_customer_id, crm_account_id?, domain?, tax_id?, legal_name,
 billing_address{line1,city,region,postal_code,country}, credit_limit, credit_hold, payment_terms}
@@ -194,6 +195,7 @@ async def ar_summary(db: AsyncSession, account: Account, today: date | None = No
         "buckets": {k: round(v, 2) for k, v in buckets.items()},
         "credit_limit": limit, "credit_available": round(limit - open_balance, 2) if limit is not None else None,
         "credit_hold": account.credit_hold, "erp_customer_id": account.erp_customer_id, "erp_synced_at": account.erp_synced_at,
+        "demo_data": settings.erp_connector == "demo",
         "invoices": [{"id": i.id, "invoice_number": i.invoice_number, "issue_date": i.issue_date, "due_date": i.due_date, "currency": i.currency,
                       "amount": float(i.amount), "balance": float(i.balance), "status": i.status,
                       "days_overdue": max(0, (today - i.due_date).days) if i.status == "open" and float(i.balance) > 0 else 0} for i in invoices],

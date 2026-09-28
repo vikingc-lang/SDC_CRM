@@ -194,6 +194,7 @@ class SignatureRequest(Base):
     signer_party: Mapped[str] = mapped_column(String(20))
     sign_order: Mapped[int] = mapped_column(Integer, default=1)
     token: Mapped[str] = mapped_column(String(64), unique=True)
+    expires_at: Mapped[datetime | None] = mapped_column(UTCDateTime())  # customer links stop working after this
     status: Mapped[str] = mapped_column(String(20), default="pending")
     signature_text: Mapped[str | None] = mapped_column(String(200))
     signature_image: Mapped[str | None] = mapped_column(Text)

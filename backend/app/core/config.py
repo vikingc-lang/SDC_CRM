@@ -51,7 +51,8 @@ class Settings(BaseSettings):
     whisper_model: str = "base"
 
     # ERP / back-office: 'demo' | 'file' (JSON exchange folder) | 'rest' (middleware API) | 'disabled'
-    erp_connector: Literal["demo", "file", "rest", "disabled"] = "demo"
+    # 'demo' generates sample invoices, balances and credit holds: demo workspaces only (refused outside development)
+    erp_connector: Literal["demo", "file", "rest", "disabled"] = "disabled"
     erp_exchange_dir: str = "./erp-exchange"
     erp_rest_url: str | None = None
     erp_rest_token: str | None = None
@@ -68,6 +69,7 @@ class Settings(BaseSettings):
     esign_api_url: str | None = None          # e.g. https://demo.docusign.net/restapi/v2.1/accounts/<id>
     esign_api_token: str | None = None
     esign_webhook_secret: str | None = None   # shared secret expected in the provider callback header
+    esign_link_days: int = 14                 # a customer's signing link expires after this many days (it can be re-sent)
 
     # System mail (scheduled report emails). Unset host: deliveries are in-app notifications only.
     smtp_host: str | None = None
@@ -96,6 +98,10 @@ class Settings(BaseSettings):
     support_imap_port: int = 993
     support_imap_user: str | None = None
     support_imap_password: str | None = None
+
+    # Internal hosts users may point webhooks and mailboxes at (comma-separated names or CIDRs, e.g.
+    # "exchange.corp.example, 10.20.0.0/16"). Everything else private, loopback or link-local is refused.
+    outbound_allowed_hosts: str = ""
 
     # Exchange-rate reference feed (ECB euro reference rates XML), loaded daily when set. Empty = rates are entered by hand.
     fx_feed_url: str = ""
@@ -151,6 +157,8 @@ def security_problems(s: "Settings") -> list[str]:
     if s.data_encryption_key is not None and (s.data_encryption_key.strip().lower() in KNOWN_INSECURE_SECRETS
                                               or len(s.data_encryption_key) < MIN_SECRET_LENGTH):
         problems.append(f"DATA_ENCRYPTION_KEY is a published default or shorter than {MIN_SECRET_LENGTH} characters")
+    if s.erp_connector == "demo":
+        problems.append("ERP_CONNECTOR=demo invents invoices, balances and credit holds (use file, rest or disabled)")
     return problems
 
 
@@ -170,10 +178,13 @@ def enforce_secure_settings(s: "Settings") -> None:
         log.warning("INSECURE CONFIGURATION, allowed only because ENVIRONMENT=%s: %s. Never use this setup for real data.",
                     s.environment, "; ".join(problems))
         return
-    raise RuntimeError("Refusing to start: " + "; ".join(problems) + ". Set JWT_SECRET (and DATA_ENCRYPTION_KEY) to long "
-                       "random values, e.g. `python -c \"import secrets; print(secrets.token_urlsafe(48))\"`, or leave them "
-                       "empty in docker compose to have them generated on first start. For a local demo only, set "
-                       "ENVIRONMENT=development.")
+    advice = []
+    if any(p.startswith(("JWT_SECRET", "DATA_ENCRYPTION_KEY")) for p in problems):
+        advice.append("Set JWT_SECRET (and DATA_ENCRYPTION_KEY) to long random values, e.g. "
+                      "`python -c \"import secrets; print(secrets.token_urlsafe(48))\"`, or leave them empty in docker compose "
+                      "to have them generated on first start")
+    advice.append("For a local demo only, set ENVIRONMENT=development")
+    raise RuntimeError("Refusing to start: " + "; ".join(problems) + ". " + ". ".join(advice) + ".")
 
 
 @lru_cache

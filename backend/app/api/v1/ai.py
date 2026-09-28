@@ -38,15 +38,13 @@ async def ai_status(_: User = Depends(get_current_user)):
     }
 
 
-async def _open_deals(db: AsyncSession, account_id: uuid.UUID) -> list[Deal]:
-    return (
-        await db.execute(
-            select(Deal)
-            .join(PipelineStage, Deal.stage_id == PipelineStage.id)
+async def _open_deals(db: AsyncSession, account_id: uuid.UUID, p: Principal | None = None) -> list[Deal]:
+    stmt = (select(Deal).join(PipelineStage, Deal.stage_id == PipelineStage.id)
             .where(Deal.account_id == account_id, PipelineStage.is_closed_won.is_(False), PipelineStage.is_closed_lost.is_(False))
-            .order_by(Deal.updated_at.desc())
-        )
-    ).scalars().unique().all()
+            .order_by(Deal.updated_at.desc()))
+    if p is not None:
+        stmt = p.scope_deals(stmt)
+    return (await db.execute(stmt)).scalars().unique().all()
 
 
 def _best_deal(deals: list[Deal], title: str | None) -> Deal | None:
@@ -65,30 +63,37 @@ async def quick_log(body: QuickLogRequest, db: AsyncSession = Depends(get_db), p
     """Parse unstructured notes into a validated preview. Nothing is written."""
     known = [(a.name, a.domain) for a in (await db.execute(p.scope_accounts(select(Account)))).scalars().unique().all()]
     result = await ai_extractor.extract(body.raw_text, known)
-    return await _enrich(db, result, body.account_id)
+    return await _enrich(db, p, result, body.account_id)
 
 
-async def _enrich(db: AsyncSession, result: QuickLogResponse, account_id: uuid.UUID | None) -> QuickLogResponse:
+async def _enrich(db: AsyncSession, p: Principal, result: QuickLogResponse, account_id: uuid.UUID | None) -> QuickLogResponse:
+    """Match the extraction to existing records the caller may see. Accounts and deals outside their scope are
+    never named in the preview (nor is their existence hinted at); the commit step applies the same rule."""
+    visible = p.scope_accounts(select(Account))
 
-    account = await db.get(Account, account_id) if account_id else None
+    async def seen(acc_id) -> Account | None:
+        return (await db.execute(visible.where(Account.id == acc_id))).scalars().first() if acc_id else None
+
+    account = await seen(account_id)
     if account is None and (result.domain or result.account_name):
         conds = []
         if result.domain:
             conds.append(Account.domain == result.domain.lower())
         if result.account_name:
             conds.append(func.lower(Account.name) == result.account_name.lower())
-        account = (await db.execute(select(Account).where(or_(*conds)))).scalars().first()
+        account = (await db.execute(visible.where(or_(*conds)))).scalars().first()
     if account is None and result.account_name:
         # fuzzy (Jaro-Winkler / Levenshtein / domain) match avoids creating duplicates
         match = await dedup.find_account_duplicate(db, result.account_name, result.domain)
         if match and match["score"] >= dedup.ACCOUNT_SUGGEST_AT:
-            account = await db.get(Account, match["account"]["id"])
-            result.signals = {**result.signals, "fuzzy_account_match": {"score": match["score"], "reasons": match["reasons"]}}
+            account = await seen(match["account"]["id"])
+            if account is not None:
+                result.signals = {**result.signals, "fuzzy_account_match": {"score": match["score"], "reasons": match["reasons"]}}
     if account is not None:
         result.matched_account_id = account.id
         result.account_name = account.name
         result.domain = account.domain
-        deal = _best_deal(await _open_deals(db, account.id), result.deal.title if result.deal else None)
+        deal = _best_deal(await _open_deals(db, account.id, p), result.deal.title if result.deal else None)
         if deal is not None:
             result.matched_deal_id = deal.id
             if result.deal:
@@ -352,6 +357,6 @@ async def transcribe(file: UploadFile = File(...), account_id: uuid.UUID | None 
     if not transcript.strip():
         raise HTTPException(422, "No speech detected in the recording")
     known = [(a.name, a.domain) for a in (await db.execute(p.scope_accounts(select(Account)))).scalars().unique().all()]
-    result = await _enrich(db, await ai_extractor.extract(transcript, known), account_id)
+    result = await _enrich(db, p, await ai_extractor.extract(transcript, known), account_id)
     result.signals = {**result.signals, "transcript": transcript}
     return result

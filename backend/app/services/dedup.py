@@ -31,14 +31,13 @@ import uuid
 from itertools import combinations
 
 from rapidfuzz.distance import JaroWinkler, Levenshtein
-from sqlalchemy import delete, func, or_, select, text, update
+from sqlalchemy import PrimaryKeyConstraint, UniqueConstraint, and_, delete, exists, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import _fmt, log_action
 from app.core.dialect import is_postgres, search_words, trigrams
 from app.models import (
-    Account, Activity, Attachment, Contact, Contract, Deal, DedupDismissal, Document, Invoice, MergeLog, OnboardingProject,
-    ProductUsage, SupportTicket, Task,
+    Account, Contact, DedupDismissal, MergeLog,
 )
 
 _SUFFIXES = r"\b(incorporated|inc|llc|l\.l\.c|ltd|limited|corp|corporation|co|company|gmbh|plc|s\.a|sa|ag|bv|pty|srl|holdings?)\b\.?"
@@ -210,16 +209,8 @@ async def merge_accounts(db: AsyncSession, survivor: Account, merged: Account, o
     resolution.update({"locations": "union", "alt_domains": "union", "custom_metadata": "union (survivor wins)", "credit_hold": "most restrictive"})
 
     await db.flush()
-    # usage rows are unique per (account, day): the survivor's measurement wins on colliding days
-    await db.execute(
-        delete(ProductUsage).where(
-            ProductUsage.account_id == merged.id,
-            ProductUsage.metric_date.in_(select(ProductUsage.metric_date).where(ProductUsage.account_id == survivor.id)),
-        )
-    )
-    for model in (Contact, Deal, Activity, Task, Document, Contract, Invoice, SupportTicket, ProductUsage, Attachment, OnboardingProject):
-        await db.execute(update(model).where(model.account_id == merged.id).values(account_id=survivor.id))
-    await db.execute(update(Account).where(Account.parent_id == merged.id, Account.id != survivor.id).values(parent_id=survivor.id))
+    resolution["moved"] = await reparent(db, Account.__table__, merged.id, survivor.id)
+    await _reload(db, survivor, merged)
     # Reload collections so the ORM's delete-orphan cascade doesn't remove the re-parented contacts.
     await db.refresh(merged, ["contacts"])
     await db.refresh(survivor, ["contacts"])
@@ -258,8 +249,9 @@ async def merge_contacts(db: AsyncSession, survivor: Contact, merged: Contact, o
         setattr(survivor, flag, getattr(survivor, flag) or getattr(merged, flag))
     resolution["privacy"] = "most restrictive"
     survivor.custom_fields = {**(merged.custom_fields or {}), **(survivor.custom_fields or {})}
-    await db.execute(update(Activity).where(Activity.contact_id == merged.id).values(contact_id=survivor.id))
-    await db.execute(update(Deal).where(Deal.primary_contact_id == merged.id).values(primary_contact_id=survivor.id))
+    await db.flush()
+    resolution["moved"] = await reparent(db, Contact.__table__, merged.id, survivor.id)
+    await _reload(db, survivor, merged)
     log = MergeLog(entity="contact", survivor_id=survivor.id, merged_id=merged.id, snapshot=snapshot, field_resolution=resolution,
                    score=score, automatic=automatic, merged_by=user_id)
     db.add(log)
@@ -267,6 +259,48 @@ async def merge_contacts(db: AsyncSession, survivor: Contact, merged: Contact, o
     await db.delete(merged)
     await db.flush()
     return log
+
+
+def _unique_keys(table, column: str) -> list[list[str]]:
+    keys = [[c.name for c in u.columns] for u in table.constraints
+            if isinstance(u, (UniqueConstraint, PrimaryKeyConstraint)) and column in [c.name for c in u.columns]]
+    keys += [[c.name for c in i.columns] for i in table.indexes if i.unique and column in [c.name for c in i.columns]]
+    return [k for k in {tuple(sorted(k)): k for k in keys}.values()]
+
+
+async def reparent(db: AsyncSession, target, old_id, new_id) -> dict[str, int]:
+    """Point every foreign key that references ``target`` row ``old_id`` at ``new_id``, across the whole schema
+    (so no child record is lost to a cascade, blocked by a RESTRICT, or unlinked by SET NULL when the merged
+    record is deleted). Where a unique key would collide (the same person twice in one campaign, one usage row
+    per day), the survivor's row is kept. Returns the rows moved per table.column."""
+    from app.core.database import Base
+
+    moved: dict[str, int] = {}
+    for table in Base.metadata.sorted_tables:
+        for fk in table.foreign_keys:
+            if fk.column.table is not target:
+                continue
+            col = table.c[fk.parent.name]
+            for key in _unique_keys(table, col.name):
+                twin = table.alias()
+                same = [twin.c[col.name] == new_id] + [twin.c[o] == table.c[o] for o in key if o != col.name]
+                res = await db.execute(delete(table).where(col == old_id, exists().where(and_(*same))))
+                if res.rowcount:
+                    moved[f"{table.name} (already on survivor)"] = moved.get(f"{table.name} (already on survivor)", 0) + res.rowcount
+            stmt = update(table).where(col == old_id).values({col.name: new_id})
+            if table is target:  # self-reference (parent account): never make the survivor its own parent
+                stmt = stmt.where(table.c.id != new_id)
+            res = await db.execute(stmt)
+            if res.rowcount:
+                moved[f"{table.name}.{col.name}"] = res.rowcount
+    return moved
+
+
+async def _reload(db: AsyncSession, *objs) -> None:
+    """Core updates bypass the identity map: expire everything, then reload the records the merge still uses."""
+    db.expire_all()
+    for o in objs:
+        await db.refresh(o)
 
 
 def pick_survivor(a, b):

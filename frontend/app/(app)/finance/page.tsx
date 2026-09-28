@@ -27,9 +27,15 @@ export default function FinancePage() {
   const [tab, setTab] = useState<"ar" | "erp" | "events">("ar");
   const aging = useQuery({ queryKey: ["finance", "aging"], queryFn: () => get<Aging>("/finance/ar-aging") });
   const overdue = aging.data ? aging.data.open_balance - aging.data.totals.current : 0;
+  const erp = useQuery({ queryKey: ["finance", "runs"], queryFn: () => get<Runs>("/integrations/erp/runs") });
   return (
     <div className="mx-auto max-w-6xl">
       <PageHeader title="Finance & ERP" description="Customer master, receivables and credit status synced from the ERP; commercial events published to neighbouring SDC modules." />
+      {erp.data?.connector === "demo" && (
+        <p className="mb-4 rounded-md border px-3 py-2 text-[13px]" style={{ borderColor: "color-mix(in srgb, var(--status-warning) 50%, transparent)" }}>
+          <span className="font-medium">Demo ERP:</span> invoices, balances and credit holds here are generated sample data, not from a real ERP.
+          Connect a real ERP (ERP_CONNECTOR=file or rest) before relying on them.</p>
+      )}
       <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatTile label="Open receivables" value={fmtMoney(aging.data?.open_balance, "USD", true)} icon={<Wallet className="h-4 w-4" />} />
         <StatTile label="Overdue" value={fmtMoney(overdue, "USD", true)} icon={<Landmark className="h-4 w-4" />}

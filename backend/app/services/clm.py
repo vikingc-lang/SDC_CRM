@@ -464,9 +464,15 @@ async def send_for_signature(db: AsyncSession, doc: Document, signers: list[dict
     await contracting.credit_check(db, doc)
     if not any(s["party"] == "customer" for s in signers) or not any(s["party"] == "company" for s in signers):
         raise ValueError("Add at least one customer signer and one company countersigner")
+    for s in signers:  # the company countersigns inside Cirra, so it must be a person who can sign in
+        if s["party"] == "company" and not (await db.execute(select(User.id).where(func.lower(User.email) == s["email"].strip().lower(),
+                                                                                  User.is_active.is_(True), User.role != "partner"))).first():
+            raise ValueError(f"The company countersigner ({s['email']}) must be an active Cirra user; they sign from the document page")
+    expires = datetime.now(timezone.utc) + timedelta(days=settings.esign_link_days)
     for s in sorted(signers, key=lambda s: 0 if s["party"] == "customer" else 1):
         db.add(SignatureRequest(document_id=doc.id, signer_name=s["name"], signer_email=s["email"], signer_party=s["party"],
-                                sign_order=1 if s["party"] == "customer" else 2, token=secrets.token_urlsafe(32)))
+                                sign_order=1 if s["party"] == "customer" else 2, token=secrets.token_urlsafe(32),
+                                expires_at=expires if s["party"] == "customer" else None))
     doc.status = "sent"
     provider = provider or settings.esign_provider
     if provider != "builtin":
@@ -486,6 +492,16 @@ async def send_for_signature(db: AsyncSession, doc: Document, signers: list[dict
 
 def sign_url(token: str) -> str:
     return f"{settings.public_web_url.rstrip('/')}/sign/{token}"
+
+
+def link_expired(req: SignatureRequest) -> bool:
+    return req.status == "pending" and req.expires_at is not None and req.expires_at < datetime.now(timezone.utc)
+
+
+def renew_link(req: SignatureRequest) -> None:
+    """A fresh customer link: new token (the old link stops working) and a new expiry."""
+    req.token = secrets.token_urlsafe(32)
+    req.expires_at = datetime.now(timezone.utc) + timedelta(days=settings.esign_link_days)
 
 
 def is_turn(req: SignatureRequest, doc: Document) -> bool:
@@ -631,7 +647,8 @@ def document_out(d: Document, include_body: bool = True) -> dict:
         "body_html": to_html(d.body) if include_body else None, "body": d.body if include_body else None,
         "signers": [{"id": s.id, "name": s.signer_name, "email": s.signer_email, "party": s.signer_party, "order": s.sign_order,
                      "status": s.status, "signed_at": s.signed_at, "signed_ip": s.signed_ip, "signature_text": s.signature_text,
-                     "sign_url": sign_url(s.token) if s.status == "pending" else None} for s in d.signers],
+                     "sign_url": sign_url(s.token) if s.status == "pending" and s.signer_party == "customer" else None,
+                     "expires_at": s.expires_at, "link_expired": link_expired(s)} for s in d.signers],
     }
 
 

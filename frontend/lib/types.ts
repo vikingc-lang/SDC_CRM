@@ -164,6 +164,7 @@ export interface Product { id: UUID; sku: string; name: string; description: str
   unit: string; active: boolean; product_type?: "standard" | "bundle"; tax_code?: string | null; prices: { currency: string; tiers: { min_qty: number; unit_price: number }[] }[] }
 
 export interface Signer { id: UUID; name: string; email: string; party: "customer" | "company"; order: number; status: string; signed_at: string | null;
+  expires_at?: string | null; link_expired?: boolean;
   signed_ip: string | null; signature_text: string | null; sign_url: string | null }
 export interface DocumentSummary { id: UUID; doc_type: "nda" | "sow" | "order_form" | "proposal" | "msa" | "sla" | "dpa"; title: string; status: string; account: { id: UUID; name: string };
   deal_id: UUID | null; quote_id: UUID | null; content_sha256: string; pdf_attachment_id: UUID | null; created_at: string; completed_at: string | null;
@@ -178,7 +179,7 @@ export interface OnboardingProject { id: UUID; name: string; status: string; acc
     stakeholders?: { name: string; title: string | null; role: string; email: string | null }[]; commercials?: Record<string, unknown> } }
 export interface ArSummary { open_balance: number; overdue_balance: number; buckets: Record<"current" | "1_30" | "31_60" | "61_90" | "90_plus", number>;
   credit_limit: number | null; credit_available: number | null; credit_hold: boolean; erp_customer_id: string | null; erp_synced_at: string | null;
-  invoices?: { id: UUID; invoice_number: string; issue_date: string; due_date: string; currency: string; amount: number; balance: number; status: string; days_overdue: number }[] }
+  demo_data?: boolean; invoices?: { id: UUID; invoice_number: string; issue_date: string; due_date: string; currency: string; amount: number; balance: number; status: string; days_overdue: number }[] }
 export interface Alert { id: UUID; kind: string; severity: "low" | "medium" | "high"; message: string; created_at?: string;
   deal?: { id: UUID; title: string; account: string; amount: number; currency: string } }
 export interface NBA { kind: string; action: string; why: string; impact: number; message: string | null }

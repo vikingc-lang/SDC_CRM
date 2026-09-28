@@ -10,7 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
-from app.core.rbac import Principal, authorize
+from app.core.audit import log_action
+from app.core.rbac import Principal, authorize, authorize_person
 from app.core.config import settings
 from app.models import (
     Account, ApprovalGroup, ApprovalPolicy, ApprovalRequest, Attachment, BundleComponent, Contract, Deal, Document, DocumentComment,
@@ -349,6 +350,50 @@ async def send_document(document_id: uuid.UUID, body: SendIn, db: AsyncSession =
     return clm.document_out(await db.get(Document, document_id))
 
 
+@router.post("/documents/{document_id}/countersign")
+async def countersign(document_id: uuid.UUID, body: SignIn, request: Request, db: AsyncSession = Depends(get_db),
+                      p: Principal = Depends(authorize_person("documents", "read"))):
+    """The company's signature, made by the named countersigner while signed in to Cirra (never through a link)."""
+    doc = await db.get(Document, document_id)
+    if doc is None:
+        raise HTTPException(404, "Document not found")
+    await p.ensure_account(db, doc.account_id, "documents")
+    await db.refresh(doc, ["signers"])
+    req = next((s for s in doc.signers if s.signer_party == "company" and s.status == "pending"
+                and s.signer_email.strip().lower() == p.user.email.lower()), None)
+    if req is None:
+        raise HTTPException(403, "You aren't the countersigner on this document")
+    if not body.decline and not body.agree:
+        raise HTTPException(422, "Please agree to sign electronically")
+    ip = request.headers.get("x-forwarded-for", request.client.host if request.client else "").split(",")[0].strip()
+    try:
+        await clm.sign(db, req, body.signature_text, body.signature_image, ip, request.headers.get("user-agent"), body.decline)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+    log_action(db, "countersign" if not body.decline else "countersign_no", "document", doc.id, doc.title[:200])
+    await db.commit()
+    return clm.document_out(await db.get(Document, document_id))
+
+
+@router.post("/documents/{document_id}/signers/{signer_id}/resend")
+async def resend_link(document_id: uuid.UUID, signer_id: uuid.UUID, db: AsyncSession = Depends(get_db),
+                      p: Principal = Depends(authorize("documents", "update"))):
+    """A new signing link for a customer signer (the previous link stops working), valid for ESIGN_LINK_DAYS."""
+    doc = await db.get(Document, document_id)
+    if doc is None:
+        raise HTTPException(404, "Document not found")
+    await p.ensure_account(db, doc.account_id, "documents")
+    req = await db.get(SignatureRequest, signer_id)
+    if req is None or req.document_id != doc.id:
+        raise HTTPException(404, "Signer not found")
+    if req.signer_party != "customer" or req.status != "pending" or doc.status not in ("sent", "partially_signed"):
+        raise HTTPException(409, "Only a customer who hasn't signed yet can get a new link")
+    clm.renew_link(req)
+    log_action(db, "esign_resend", "document", doc.id, req.signer_email)
+    await db.commit()
+    return clm.document_out(await db.get(Document, document_id))
+
+
 @router.get("/documents/{document_id}/pdf")
 async def document_pdf(document_id: uuid.UUID, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("documents", "read"))):
     doc = await db.get(Document, document_id)
@@ -363,11 +408,20 @@ async def document_pdf(document_id: uuid.UUID, db: AsyncSession = Depends(get_db
     return Response(data, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{doc.title}.pdf"'})
 
 
-@public.get("/sign/{token}")
-async def signing_view(token: str, db: AsyncSession = Depends(get_db)):
-    req = (await db.execute(select(SignatureRequest).where(SignatureRequest.token == token))).scalars().first()
+def _public_link(req: SignatureRequest | None) -> SignatureRequest:
+    """Public links are for customer signers only, and only until they expire."""
     if req is None:
         raise HTTPException(404, "This signing link is invalid")
+    if req.signer_party != "customer":
+        raise HTTPException(403, "Company countersignatures are made inside Cirra: sign in and open the document")
+    if clm.link_expired(req):
+        raise HTTPException(410, "This signing link has expired. Ask the sender for a new one")
+    return req
+
+
+@public.get("/sign/{token}")
+async def signing_view(token: str, db: AsyncSession = Depends(get_db)):
+    req = _public_link((await db.execute(select(SignatureRequest).where(SignatureRequest.token == token))).scalars().first())
     doc = await db.get(Document, req.document_id)
     await db.refresh(doc, ["signers"])
     comments = (await db.execute(select(DocumentComment).where(DocumentComment.document_id == doc.id).order_by(DocumentComment.created_at))).scalars().all()
@@ -382,9 +436,7 @@ async def signing_view(token: str, db: AsyncSession = Depends(get_db)):
 
 @public.post("/sign/{token}")
 async def signing_submit(token: str, body: SignIn, request: Request, db: AsyncSession = Depends(get_db)):
-    req = (await db.execute(select(SignatureRequest).where(SignatureRequest.token == token))).scalars().first()
-    if req is None:
-        raise HTTPException(404, "This signing link is invalid")
+    req = _public_link((await db.execute(select(SignatureRequest).where(SignatureRequest.token == token))).scalars().first())
     if not body.decline and not body.agree:
         raise HTTPException(422, "Please agree to sign electronically")
     ip = request.headers.get("x-forwarded-for", request.client.host if request.client else "").split(",")[0].strip()
@@ -729,9 +781,7 @@ class CustomerCommentIn(BaseModel):
 
 
 async def _signer(db: AsyncSession, token: str) -> tuple[SignatureRequest, Document]:
-    req = (await db.execute(select(SignatureRequest).where(SignatureRequest.token == token))).scalars().first()
-    if req is None:
-        raise HTTPException(404, "This signing link is invalid")
+    req = _public_link((await db.execute(select(SignatureRequest).where(SignatureRequest.token == token))).scalars().first())
     return req, await db.get(Document, req.document_id)
 
 

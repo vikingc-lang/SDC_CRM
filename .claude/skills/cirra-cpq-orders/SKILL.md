@@ -32,6 +32,10 @@ description: Cirra quote-to-order - products, price books, volume tiers, promoti
   credit hold, credit risk) and are decided in chain order `cpq.CHAIN`: sales manager → deal desk → VP sales →
   finance → legal (`app_settings` `approval_chain`).
 - Documents: the body is always the latest version; the SHA-256 changes per version so parties sign the exact text.
+- Public signing links are for customer signers only and expire after `ESIGN_LINK_DAYS` (410 after that);
+  `POST /documents/{id}/signers/{sid}/resend` issues a new token (the old link stops working). The company
+  countersigns inside Cirra (`POST /documents/{id}/countersign`, only the named signer, signed in); company
+  signers must be active Cirra users.
 - Order creation and ERP push are asynchronous; UI shows `submitted` until acknowledged.
 - Tax (`services/tax.py`, engine in `app_settings` key `tax`: none | builtin | india_gst | avalara) is
   recalculated at the end of every `rebuild` and via `POST /quotes/{id}/tax`, on each line's term total, from

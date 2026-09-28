@@ -325,6 +325,7 @@ function Commercial({ data }: { data: Account360 }) {
         <CardHeader title="Accounts receivable" icon={<Landmark className="h-4 w-4 text-muted-foreground" />}
           description={`Open ${money(f.open_balance)} · overdue ${money(f.overdue_balance)}${f.credit_limit != null ? ` · limit ${money(f.credit_limit)}` : ""}`} />
         <CardBody>
+          {f.demo_data && <p className="mb-3 text-[12px] text-muted-foreground">Sample data from the demo ERP connector, not a real ERP.</p>}
           {f.credit_hold && <p className="mb-3 rounded-md border px-3 py-2 text-[12.5px]" style={{ borderColor: "color-mix(in srgb, var(--status-critical) 45%, transparent)" }}><span className="font-medium">Credit hold</span>: new quotes require finance approval.</p>}
           <AgingBars buckets={f.buckets} />
           {!!f.invoices?.length && (

@@ -27,7 +27,7 @@ config:
   OLLAMA_MODEL: llama3.1:8b
   EMBEDDING_PROVIDER: hash
   TRANSCRIPTION_PROVIDER: disabled   # whisper_asr when whisper.enabled
-  ERP_CONNECTOR: demo                # demo | file | rest | disabled
+  ERP_CONNECTOR: disabled            # file | rest | disabled (demo = sample data, development only)
   ERP_REST_URL: ""
   ECOSYSTEM_WEBHOOKS: "{}"
   MAX_UPLOAD_MB: "25"

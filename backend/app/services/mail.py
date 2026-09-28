@@ -25,6 +25,7 @@ from cryptography.fernet import Fernet
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import netguard
 from app.core.config import settings
 from app.models import Activity, Contact, MailboxConnection, User
 from app.services.privacy import can_contact
@@ -90,6 +91,7 @@ async def ingest_message(db: AsyncSession, raw: bytes, mailbox_owner: User | Non
 
 
 def _imap_fetch(conn: MailboxConnection, password: str, since_uid: int, limit: int = 200) -> list[tuple[int, bytes]]:
+    netguard.check_mail_server(conn.imap_host, conn.imap_port or 993, "imap")  # at use too: DNS may have changed
     client = imaplib.IMAP4_SSL(conn.imap_host, conn.imap_port or 993)
     try:
         client.login(conn.username or conn.email_address, password)
@@ -153,6 +155,7 @@ async def deliver(db: AsyncSession, user: User, to: str, subject: str, body: str
     import asyncio
 
     def _send():
+        netguard.check_mail_server(conn.smtp_host, conn.smtp_port or 587, "smtp")
         with smtplib.SMTP(conn.smtp_host, conn.smtp_port or 587, timeout=30) as s:
             s.starttls()
             s.login(conn.username or conn.email_address, decrypt_secret(conn.secret_encrypted or ""))

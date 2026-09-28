@@ -114,21 +114,21 @@ async def test_document_assembly_esignature_and_contract(client):
         {"name": "Kim Sign", "email": "kim@signflow.example.com", "party": "customer"},
         {"name": "Marcus Vance", "email": "marcus@cirra.demo", "party": "company"}]})).json()
     customer, company = sorted(doc["signers"], key=lambda s: s["order"])
-    tok_c, tok_co = customer["sign_url"].rsplit("/", 1)[1], company["sign_url"].rsplit("/", 1)[1]
+    tok_c = customer["sign_url"].rsplit("/", 1)[1]
+    assert company["sign_url"] is None  # the company countersigns inside Cirra, never through a link
     from httpx import ASGITransport, AsyncClient
 
     from app.main import app
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as anon:  # public, token-only
-        view = (await anon.get(f"/api/v1/sign/{tok_co}")).json()
-        assert view["your_turn"] is False
-        assert (await anon.post(f"/api/v1/sign/{tok_co}", json={"signature_text": "Marcus Vance", "agree": True})).status_code == 409  # out of order
+        countersign = f"/api/v1/documents/{doc['id']}/countersign"
+        assert (await client.post(countersign, json={"signature_text": "Marcus Vance", "agree": True})).status_code == 409  # out of order
         assert (await anon.post(f"/api/v1/sign/{tok_c}", json={"signature_text": "Kim Sign"})).status_code == 422  # must agree
         r = await anon.post(f"/api/v1/sign/{tok_c}", json={"signature_text": "Kim Sign", "agree": True}, headers={"user-agent": "pytest-browser"})
         assert r.json()["document_status"] == "partially_signed"
         assert (await anon.post(f"/api/v1/sign/{tok_c}", json={"signature_text": "Kim Sign", "agree": True})).status_code == 409  # single use
-        r = await anon.post(f"/api/v1/sign/{tok_co}", json={"signature_text": "Marcus Vance", "agree": True})
-        assert r.json()["document_status"] == "completed"
+        r = await client.post(countersign, json={"signature_text": "Marcus Vance", "agree": True})
+        assert r.json()["status"] == "completed"
     final = (await client.get(f"/api/v1/documents/{doc['id']}")).json()
     assert final["status"] == "completed" and final["pdf_attachment_id"]
     pdf = await client.get(f"/api/v1/documents/{doc['id']}/pdf")

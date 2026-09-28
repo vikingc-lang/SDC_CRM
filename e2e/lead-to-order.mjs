@@ -290,12 +290,11 @@ const mgr = await login("marcus@cirra.demo");
     await p.getByRole("button", { name: "Send for e-signature" }).click(); await toast(p, "Sent for signature");
     await p.getByLabel("Signing link", { exact: true }).first().waitFor();
     links = await p.getByLabel("Signing link", { exact: true }).evaluateAll((els) => els.map((e) => new URL(e.value).pathname));
-    expect(links.length === 2, "expected 2 signing links");
+    expect(links.length === 1, "expected 1 signing link (the company countersigns inside Cirra)");
   }, p);
   await step(J, "Company cannot sign before the customer (signing order)", async () => {
-    const c = await browser.newContext(); const s = await c.newPage(); await s.goto(BASE + links[1]);
-    await s.getByText("Waiting for an earlier signer").waitFor();
-    await ev(s, "E16", "TC-30", "Company signer must wait for the customer (signing order enforced)", s.getByText("Waiting for an earlier signer")); await c.close();
+    await p.getByText("You countersign here once the customer has signed.").waitFor();
+    await ev(p, "E16", "TC-30", "Company signer must wait for the customer (signing order enforced)", p.getByText("You countersign here once the customer has signed."));
   }, p);
   await step(J, "Customer signs from the public link", async () => {
     const c = await browser.newContext(); const s = await c.newPage(); await s.goto(BASE + links[0]);
@@ -303,12 +302,11 @@ const mgr = await login("marcus@cirra.demo");
     await ev(s, "E17", "TC-31", "Customer signs the Order Form from the public signing link", s.getByRole("button", { name: "Sign document" }));
     await s.getByRole("button", { name: "Sign document" }).click(); await s.getByText("your signature is recorded").waitFor(); await c.close();
   }, p);
-  await step(J, "Company countersigns; document fully executed", async () => {
-    const c = await browser.newContext(); const s = await c.newPage(); await s.goto(BASE + links[1]);
-    await s.locator("#sig-name").fill("Marcus Vance"); await s.getByRole("checkbox").last().check();
-    await s.getByRole("button", { name: "Sign document" }).click(); await s.getByText("Fully executed").waitFor();
-    await ev(s, "E18", "TC-32", "Countersigned: Order Form fully executed", s.getByText("Fully executed")); await c.close();
-    await p.reload(); await p.getByText(/^completed$/i).first().waitFor();
+  await step(J, "Company countersigns inside Cirra; document fully executed", async () => {
+    await p.reload(); await p.locator("#countersign-name").fill("Marcus Vance"); await p.locator("#countersign-agree").check();
+    await p.getByRole("button", { name: "Countersign" }).click(); await toast(p, "Countersigned");
+    await p.getByText(/^completed$/i).first().waitFor();
+    await ev(p, "E18", "TC-32", "Countersigned in Cirra: Order Form fully executed", p.getByText(/^completed$/i));
   }, p);
 }
 

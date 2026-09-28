@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, CheckCircle2, Copy, Download, Fingerprint, Send } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Copy, Download, Fingerprint, PenLine, RefreshCw, Send } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
@@ -43,6 +43,11 @@ export default function DocumentPage() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["document", id] }); toast.success(provider === "builtin" ? "Sent for signature. Share the signing links." : `Envelope created in ${provider === "docusign" ? "DocuSign" : "Adobe Sign"}`); },
     onError: (e) => toast.error(errorMessage(e)),
   });
+  const resend = useMutation({
+    mutationFn: async (signerId: string) => (await api.post(`/documents/${id}/signers/${signerId}/resend`)).data,
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["document", id] }); toast.success("New signing link created; the old one no longer works"); },
+    onError: (e) => toast.error(errorMessage(e)),
+  });
   if (isLoading || !doc) return <div className="mx-auto max-w-6xl space-y-4"><Skeleton className="h-16 w-full" /><Skeleton className="h-96 w-full" /></div>;
   const counter = company ?? { name: me?.full_name ?? "", email: me?.email ?? "" };
 
@@ -77,7 +82,20 @@ export default function DocumentPage() {
                     <span className="ml-auto"><StatusPill status={s.status} /></span>
                   </div>
                   <p className="mt-1 text-[12px] text-muted-foreground">{s.email}{s.signed_at && ` · signed ${shortDate(s.signed_at, true)} from ${s.signed_ip}`}</p>
-                  {s.sign_url && (
+                  {s.party === "customer" && s.status === "pending" && s.expires_at && (
+                    <p className={s.link_expired ? "mt-1 text-[12px] text-destructive" : "mt-1 text-[12px] text-muted-foreground"}>
+                      {s.link_expired ? "Signing link expired" : `Link expires ${shortDate(s.expires_at, true)}`}
+                      {can("documents", "update") && ["sent", "partially_signed"].includes(doc.status) && (
+                        <button type="button" className="ml-2 inline-flex items-center gap-1 text-primary hover:underline disabled:opacity-50" disabled={resend.isPending}
+                          onClick={() => resend.mutate(s.id)}><RefreshCw className="h-3 w-3" />New link</button>)}
+                    </p>
+                  )}
+                  {s.party === "company" && s.status === "pending" && ["sent", "partially_signed"].includes(doc.status) && (
+                    s.email.toLowerCase() === me?.email?.toLowerCase()
+                      ? <Countersign docId={doc.id} ready={doc.signers.filter((x) => x.order < s.order).every((x) => x.status === "signed")} name={s.name} />
+                      : <p className="mt-1 text-[12px] text-muted-foreground">Countersigned by {s.name} inside Cirra</p>
+                  )}
+                  {s.sign_url && !s.link_expired && (
                     <div className="mt-2 flex gap-1.5">
                       <Input readOnly value={s.sign_url} className="h-8 text-[12px]" aria-label="Signing link" />
                       <Button size="icon" variant="outline" aria-label="Copy signing link" onClick={() => { navigator.clipboard?.writeText(s.sign_url ?? ""); toast.success("Signing link copied"); }}><Copy className="h-3.5 w-3.5" /></Button>
@@ -134,5 +152,29 @@ export default function DocumentPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+
+function Countersign({ docId, ready, name }: { docId: string; ready: boolean; name: string }) {
+  const qc = useQueryClient();
+  const [text, setText] = useState("");
+  const [agree, setAgree] = useState(false);
+  const sign = useMutation({
+    mutationFn: async () => (await api.post(`/documents/${docId}/countersign`, { signature_text: text, agree })).data,
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["document", docId] }); toast.success("Countersigned"); },
+    onError: (e) => toast.error(errorMessage(e)),
+  });
+  if (!ready) return <p className="mt-1 text-[12px] text-muted-foreground">You countersign here once the customer has signed.</p>;
+  return (
+    <form className="mt-2 space-y-2" onSubmit={(e) => { e.preventDefault(); sign.mutate(); }}>
+      <Label htmlFor="countersign-name">Type your full name to countersign</Label>
+      <Input id="countersign-name" required minLength={2} value={text} onChange={(e) => setText(e.target.value)} placeholder={name} />
+      <label className="flex items-start gap-2 text-[12px] text-muted-foreground">
+        <input id="countersign-agree" type="checkbox" className="mt-0.5" checked={agree} onChange={(e) => setAgree(e.target.checked)} />
+        I agree to sign this document electronically on behalf of the company.
+      </label>
+      <Button size="sm" type="submit" disabled={!agree || text.trim().length < 2} loading={sign.isPending}><PenLine className="h-3.5 w-3.5" />Countersign</Button>
+    </form>
   );
 }

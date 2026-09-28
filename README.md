@@ -120,6 +120,16 @@ mail relay).
   log with status and duration. `LOG_FORMAT=json` switches the whole API to one JSON object per line for log shippers.
 - **Response hardening:** `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer` and a deny-all CSP on API
   responses (the API only serves JSON; the interactive docs are exempt).
+- **Outbound safety:**
+  - Webhooks and user mailboxes can't reach private, loopback or cloud-metadata addresses; allow specific
+    internal servers with `OUTBOUND_ALLOWED_HOSTS`.
+  - Mail servers are limited to standard mail ports.
+  - Webhook logs record status codes, never response bodies.
+- **E-signature:**
+  - Customer signing links expire after `ESIGN_LINK_DAYS` (14 by default) and can be re-sent.
+  - The company countersigns inside Cirra, signed in, never through a link.
+- **ERP:** the connector defaults to `disabled`. `demo` (generated sample invoices and credit holds) is refused
+  outside `ENVIRONMENT=development` and is labelled as sample data in the app.
 - **AI governance:**
   - Every model call is metered: tokens, cost, latency and outcome, per person and per feature.
   - Organisation and per-person monthly budgets, and daily call limits, fall back to the rule-based engine

@@ -171,7 +171,7 @@ const toast = (page, text) => page.locator("[data-sonner-toast]", { hasText: tex
   }, p);
   await step("journey:admin", "create a webhook, get its secret once, send a test", async () => {
     await p.getByRole("button", { name: "New webhook" }).click();
-    await p.fill("#wh-name", `FT hook ${RUN}`); await p.fill("#wh-url", "http://api:9999/unreachable");
+    await p.fill("#wh-name", `FT hook ${RUN}`); await p.fill("#wh-url", "https://hooks.cirra-test.invalid/unreachable");  // internal hosts are refused (SSRF guard)
     await p.getByRole("button", { name: "Save", exact: true }).click();
     await p.getByRole("dialog").locator("code", { hasText: "whsec_" }).first().waitFor();
     await p.getByRole("button", { name: "Done" }).click();

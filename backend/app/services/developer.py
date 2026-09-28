@@ -15,6 +15,7 @@ Webhooks
 """
 from __future__ import annotations
 
+import asyncio
 import fnmatch
 import hashlib
 import hmac
@@ -22,13 +23,13 @@ import json
 import secrets
 import time
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urlparse
 
 import httpx
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dialect import insert_ignore, try_lock
+from app.core import netguard
 from app.models import ApiKey, IntegrationEvent, User, WebhookDelivery, WebhookSubscription
 from app.services.mail import decrypt_secret, encrypt_secret
 
@@ -102,11 +103,10 @@ def key_out(k: ApiKey, names: dict) -> dict:
 # ---- webhook subscriptions -------------------------------------------------------------------------
 
 def clean_url(url: str) -> str:
-    url = (url or "").strip()
-    u = urlparse(url)
-    if u.scheme not in ("http", "https") or not u.netloc:
-        raise DeveloperError("The endpoint must be an http(s) URL")
-    return url
+    try:
+        return netguard.check_url(url, "The endpoint")
+    except netguard.BlockedDestination as e:
+        raise DeveloperError(str(e)) from e
 
 
 def clean_patterns(patterns: list[str] | None) -> list[str]:
@@ -207,11 +207,14 @@ async def attempt(db: AsyncSession, d: WebhookDelivery, sub: WebhookSubscription
     started = time.monotonic()
     d.attempts += 1
     try:
+        await asyncio.to_thread(netguard.check_url, sub.url, "The endpoint")  # again at use: DNS may have changed
         r = await client.post(sub.url, content=body, headers=headers)
         d.response_code, ok = r.status_code, 200 <= r.status_code < 300
-        d.error = None if ok else (r.text or "")[:500] or f"HTTP {r.status_code}"
+        d.error = None if ok else f"HTTP {r.status_code}"  # never the body: the log mustn't relay other systems' replies
+    except netguard.BlockedDestination as e:
+        d.response_code, ok, d.error = None, False, str(e)[:500]
     except httpx.HTTPError as e:
-        d.response_code, ok, d.error = None, False, (str(e) or e.__class__.__name__)[:500]
+        d.response_code, ok, d.error = None, False, e.__class__.__name__
     d.duration_ms = int((time.monotonic() - started) * 1000)
     now = _now()
     if ok:

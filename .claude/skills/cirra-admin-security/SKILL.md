@@ -30,6 +30,12 @@ description: Cirra administration, security and governance - sign-in with lockou
   entrypoint generates both per install on the data volume when `JWT_SECRET` is empty. Never add a secret default.
 - Identity/permission/key management endpoints use `authorize_person` (API keys refused).
 - Never log secrets, tokens, server replies from SMTP/webhooks, or response bodies.
+- Anything the server connects to on a user's say-so goes through `core/netguard.py` (`check_url`,
+  `check_mail_server`): private, loopback, link-local, CGNAT and reserved addresses are refused unless listed in
+  `OUTBOUND_ALLOWED_HOSTS`; mail servers only on standard ports. Check when saving and again right before connecting.
+- AI and search enrichment never names records outside the caller's scope (Quick-Log `_enrich` scopes every
+  lookup, including fuzzy duplicate matches).
+- `ERP_CONNECTOR=demo` is refused outside development (`security_problems`); the default is `disabled`.
 - Security fixes ship with a regression test (`test_review_fixes*.py`, `test_scope_regressions.py`).
 - Adding an Admin tab: extend the `Tab` union and the `tabs` array (with its `can()` rule) and render the
   panel in `app/(app)/admin/page.tsx`; deep-link with `/admin?tab=<value>`.

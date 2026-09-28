@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import netguard
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.core.dialect import nulls_last
@@ -344,6 +345,12 @@ async def list_mailboxes(db: AsyncSession = Depends(get_db), user: User = Depend
 
 @router.post("/email/mailboxes", status_code=201)
 async def connect_mailbox(body: MailboxIn, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    try:
+        netguard.check_mail_server(body.imap_host, body.imap_port, "imap")
+        if body.smtp_host:
+            netguard.check_mail_server(body.smtp_host, body.smtp_port, "smtp")
+    except netguard.BlockedDestination as e:
+        raise HTTPException(422, str(e)) from e
     conn = MailboxConnection(user_id=user.id, provider="imap", email_address=body.email_address, imap_host=body.imap_host, imap_port=body.imap_port,
                              smtp_host=body.smtp_host, smtp_port=body.smtp_port, username=body.username or body.email_address,
                              secret_encrypted=mail.encrypt_secret(body.password))

@@ -57,9 +57,12 @@ async def test_lead_to_order_end_to_end(client):
         {"name": "Hana Sato", "email": "cio@northwind-rail-demo.com", "party": "customer"},
         {"name": "Marcus Vance", "email": "marcus@cirra.demo", "party": "company"}]}))
     assert sent.status_code == 200, sent.text
-    for s in sent.json()["signers"]:
-        token = s["sign_url"].rsplit("/", 1)[1]
-        assert (await client.post(f"/api/v1/sign/{token}", json={"signature_text": s["name"], "agree": True})).status_code == 200
+    for s in sorted(sent.json()["signers"], key=lambda s: s["order"]):
+        if s["party"] == "company":
+            r = await client.post(f"/api/v1/documents/{doc['id']}/countersign", json={"signature_text": s["name"], "agree": True})
+        else:
+            r = await client.post(f"/api/v1/sign/{s['sign_url'].rsplit('/', 1)[1]}", json={"signature_text": s["name"], "agree": True})
+        assert r.status_code == 200, r.text
 
     # 7: Closed-Won validation blocks until the ERP has what it needs
     r = await _stage(client, deal_id, "Closed-Won", win_debrief="Won on ERP-native quote-to-cash")

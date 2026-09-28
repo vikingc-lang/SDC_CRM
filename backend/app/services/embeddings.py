@@ -99,7 +99,11 @@ async def embed(text: str) -> list[float] | None:
                 )
                 resp.raise_for_status()
                 return _fit(resp.json()["embeddings"][0])
-        if provider == "aws_bedrock":
+        if provider == "aws_bedrock":  # a cloud service: personal data is masked first, like model prompts
+            from app.services import ai_governance
+
+            if (await ai_governance.policy())["mask_pii"]:
+                text = ai_governance.Masking().mask(text)
             return _fit(await asyncio.to_thread(_titan_embed, text))
     except Exception as exc:
         log.warning("Embedding provider '%s' unavailable: %s", provider, exc)

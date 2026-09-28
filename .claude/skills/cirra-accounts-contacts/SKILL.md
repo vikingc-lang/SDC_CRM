@@ -15,6 +15,9 @@ description: Cirra accounts, contacts and the customer 360 - account 360 view, h
   `components/objects.tsx` (`RelatedObjectRecords` on the account page), `components/indicators.tsx`.
 
 ## Rules
+- Merges re-point every foreign key in the schema at the survivor (`dedup.reparent`), so orders, price books,
+  campaign history, cases, converted leads and custom records all move; on a unique-key collision the survivor's
+  row is kept. New tables need nothing extra, provided their link is a real foreign key.
 - Health = 0.30 recency + 0.25 sentiment + 0.15 velocity + 0.15 support + 0.15 milestones; rescore with
   `scoring.rescore_account(db, account_id)` after changes that affect it (activities, cases, milestones).
 - Contacts belong to exactly one account; emails are unique CRM-wide (`contacts_email_key`), so never create a
