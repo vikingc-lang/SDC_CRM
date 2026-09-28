@@ -15,6 +15,9 @@ description: Cirra accounts, contacts and the customer 360 - account 360 view, h
   `components/objects.tsx` (`RelatedObjectRecords` on the account page), `components/indicators.tsx`.
 
 ## Rules
+- Money roll-ups are in US dollars: hierarchy totals (`hierarchy._totals_usd`: won deals at their close-date rate,
+  open pipeline and contracts at today's) and receivables (`erp.ar_summary`: open balances at today's rate; the
+  invoice list keeps each invoice's own currency). Never add amounts across currencies.
 - Merges re-point every foreign key in the schema at the survivor (`dedup.reparent`), so orders, price books,
   campaign history, cases, converted leads and custom records all move; on a unique-key collision the survivor's
   row is kept. New tables need nothing extra, provided their link is a real foreign key.

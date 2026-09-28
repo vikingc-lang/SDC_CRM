@@ -16,7 +16,10 @@ description: Cirra no-code workflow engine - rules with created / field-changed 
 - Frontend: Admin → Workflows (`components/admin/workflows.tsx`, `app/(app)/admin/workflows`).
 
 ## Rules
-- Rules evaluate after the transaction commits, so a rolled-back change never triggers anything.
+- Rules evaluate after the transaction commits, so a rolled-back change never triggers anything. Watched changes
+  are written to `workflow_events` inside the same transaction (`_capture`, after_flush) and evaluated right after
+  commit (`_run_queued`); the `workflow_events` job (every minute) evaluates anything a stopped process left
+  (claimed with SKIP LOCKED). `drain()` waits only for this event loop's tasks.
 - Workflow-made changes may trigger other rules up to `MAX_DEPTH`; a rule never re-triggers itself.
 - Workflow sessions are system sessions: validation rules and field security don't apply.
 - Outbound URLs must be https to public hosts (`developer.clean_url` + `_blocked_host`).

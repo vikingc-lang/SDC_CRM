@@ -240,8 +240,9 @@ let unsubToken = UNSUB;
     const send = p.getByRole("button", { name: /^Send to \d+/ });
     if (await send.isDisabled()) return "nobody eligible (all blocked by consent)";
     await send.click();
-    await toast(p, "Sent to");
-    return "sent";
+    await toast(p, "Sending in the background");
+    await p.getByText(/^Last send: \d+ sent/).waitFor({ timeout: 30000 });  // the page picks up the job's result
+    return "sent by the background job";
   }, p);
   await step("journey:marketing", "campaign overview shows funnel and attribution", async () => {
     await p.getByRole("tab", { name: "Overview" }).or(p.getByRole("button", { name: "Overview" })).first().click();

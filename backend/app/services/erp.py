@@ -176,8 +176,14 @@ async def sync_outbound(db: AsyncSession, since: datetime | None = None) -> ErpS
     return run
 
 
-async def ar_summary(db: AsyncSession, account: Account, today: date | None = None) -> dict:
+async def ar_summary(db: AsyncSession, account: Account, today: date | None = None, rates: dict | None = None) -> dict:
+    """Receivables for one account, in US dollars: each invoice's balance converts at today's rate (it is still
+    owed, so it is worth today's rate), so invoices in different currencies add up correctly. Invoices keep their
+    own currency in the list. Credit limits are held in US dollars."""
+    from app.services import fx
+
     today = today or date.today()
+    rates = rates if rates is not None else await fx.rates(db)
     invoices = (await db.execute(select(Invoice).where(Invoice.account_id == account.id).order_by(Invoice.due_date.desc()))).scalars().all()
     buckets = {b[0]: 0.0 for b in AGING_BUCKETS}
     for inv in invoices:
@@ -186,12 +192,12 @@ async def ar_summary(db: AsyncSession, account: Account, today: date | None = No
         overdue = (today - inv.due_date).days
         for name, lo, hi in AGING_BUCKETS:
             if (lo is None and overdue <= 0) or (lo is not None and overdue >= lo and (hi is None or overdue <= hi)):
-                buckets[name] += float(inv.balance)
+                buckets[name] += fx.to_usd(float(inv.balance), inv.currency, rates)
                 break
     open_balance = round(sum(buckets.values()), 2)
     limit = float(account.credit_limit) if account.credit_limit is not None else None
     return {
-        "open_balance": open_balance, "overdue_balance": round(open_balance - buckets["current"], 2),
+        "currency": "USD", "open_balance": open_balance, "overdue_balance": round(open_balance - buckets["current"], 2),
         "buckets": {k: round(v, 2) for k, v in buckets.items()},
         "credit_limit": limit, "credit_available": round(limit - open_balance, 2) if limit is not None else None,
         "credit_hold": account.credit_hold, "erp_customer_id": account.erp_customer_id, "erp_synced_at": account.erp_synced_at,

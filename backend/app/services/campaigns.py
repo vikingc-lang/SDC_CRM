@@ -17,10 +17,11 @@ Email
 """
 from __future__ import annotations
 
+import logging
 import re
 import secrets
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,6 +31,8 @@ from app.core.rbac import Principal
 from app.models import Account, Campaign, CampaignMember, Contact, Deal, EmailSend, Lead, PipelineStage, User
 from app.services import fx, privacy, reporting
 from app.services.notify import emit
+
+log = logging.getLogger(__name__)
 
 TYPES = ("email", "webinar", "event", "trade_show", "paid_ads", "content", "partner", "other")
 STATUSES = ("planned", "active", "completed", "aborted")
@@ -210,6 +213,46 @@ async def recipients(db: AsyncSession, campaign: Campaign) -> list[dict]:
     return [await person_for(db, m, lead, contact) for m, lead, contact in rows]
 
 
+SEND_STALE_AFTER = timedelta(minutes=30)  # a send stuck this long (its worker died) may be started again
+
+
+def queue_send(campaign: Campaign, user: User) -> None:
+    """Mark the campaign for a background send (``run_send``); the request returns at once."""
+    if not (campaign.email_subject and campaign.email_body):
+        raise CampaignError("Write the email subject and body first")
+    if campaign.status in ("completed", "aborted"):
+        raise CampaignError("This campaign is closed")
+    now = datetime.now(timezone.utc)
+    if campaign.send_status in ("queued", "sending") and campaign.send_requested_at and now - campaign.send_requested_at < SEND_STALE_AFTER:
+        raise CampaignError("This campaign's email is already being sent")
+    campaign.send_status, campaign.send_result = "queued", None
+    campaign.send_requested_by, campaign.send_requested_at = user.id, now
+
+
+async def run_send(db: AsyncSession, campaign_id, user_id) -> None:
+    """Background job: send the campaign email and record the outcome on the campaign."""
+    campaign = await db.get(Campaign, campaign_id)
+    user = await db.get(User, user_id)
+    if campaign is None or user is None or campaign.send_status != "queued":
+        return
+    campaign.send_status = "sending"
+    await db.commit()
+    try:
+        out = await send(db, campaign, user)
+        campaign.send_status, campaign.send_result = "done", out
+    except CampaignError as e:
+        campaign.send_status, campaign.send_result = "failed", {"error": str(e)}
+    except Exception:
+        log.exception("Campaign send %s failed", campaign_id)
+        campaign.send_status, campaign.send_result = "failed", {"error": "The send stopped unexpectedly; people already emailed are recorded. Send again to continue."}
+    await db.commit()
+    from app.services.notify import notify
+
+    notify(db, [user.id], "campaign", f"{campaign.name}: " + (f"email sent to {campaign.send_result.get('sent', 0)}" if campaign.send_status == "done"
+                                                              else "email send stopped"), campaign.send_result.get("error"), f"/campaigns/{campaign.id}")
+    await db.commit()
+
+
 async def send(db: AsyncSession, campaign: Campaign, sender: User) -> dict:
     """Email every eligible 'targeted' member. Each message is committed as soon as it is handed to SMTP, so a
     failure part-way never un-marks people who already received it (a retry won't email them twice). A refused
@@ -350,6 +393,7 @@ def campaign_out(c: Campaign, owner: str | None = None) -> dict:
             "owner_id": c.owner_id, "owner": owner, "start_date": c.start_date, "end_date": c.end_date,
             "budget": float(c.budget or 0), "actual_cost": float(c.actual_cost or 0), "expected_revenue": float(c.expected_revenue or 0),
             "email_subject": c.email_subject, "email_body": c.email_body, "last_sent_at": c.last_sent_at,
+            "send_status": c.send_status, "send_result": c.send_result, "send_requested_at": c.send_requested_at,
             "created_at": c.created_at, "updated_at": c.updated_at}
 
 

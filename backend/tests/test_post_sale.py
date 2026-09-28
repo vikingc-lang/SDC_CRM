@@ -83,7 +83,8 @@ async def test_file_based_erp_connector(client, tmp_path, monkeypatch):
         assert run["status"] == "succeeded" and run["stats"]["invoices_upserted"] == 1
         out = (await admin.post("/api/v1/integrations/erp/sync", params={"direction": "outbound"})).json()
     ar = (await client.get(f"/api/v1/finance/accounts/{helios['id']}/ar")).json()
-    assert ar["erp_customer_id"] == "SAP-100200" and ar["credit_limit"] == 250000 and ar["buckets"]["31_60"] + ar["buckets"]["61_90"] == 12000
+    eur = next(c["rate_to_usd"] for c in (await client.get("/api/v1/finance/fx")).json()["current"] if c["currency"] == "EUR")
+    assert ar["erp_customer_id"] == "SAP-100200" and ar["credit_limit"] == 250000 and ar["buckets"]["31_60"] + ar["buckets"]["61_90"] == pytest.approx(12000 * eur, abs=0.01)  # EUR invoice, in USD
     assert out["status"] == "succeeded"
     exported = json.loads(next((tmp_path / "outbound").glob("customers-*.json")).read_text())
     assert any(c["erp_customer_id"] == "SAP-100200" and c["tax_id"] == "DE811223344" for c in exported)

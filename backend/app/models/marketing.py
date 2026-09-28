@@ -7,7 +7,7 @@ from sqlalchemy import Date, ForeignKey, Numeric, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
-from app.core.types import UTCDateTime, UUID
+from app.core.types import JSONB, UTCDateTime, UUID
 
 __all__ = ["Campaign", "CampaignMember"]
 
@@ -34,6 +34,11 @@ class Campaign(Base):
     email_subject: Mapped[str | None] = mapped_column(String(200))
     email_body: Mapped[str | None] = mapped_column(Text)
     last_sent_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    # the email send runs in the background: queued -> sending -> done | failed, with its outcome
+    send_status: Mapped[str | None] = mapped_column(String(10))
+    send_result: Mapped[dict | None] = mapped_column(JSONB)
+    send_requested_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    send_requested_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now(), onupdate=func.now())
 

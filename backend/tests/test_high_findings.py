@@ -168,7 +168,7 @@ async def test_signing_links_expire_and_countersigning_happens_in_cirra(client):
 # ---- 5. the ERP connector doesn't invent data by default ------------------------------------------------------------
 
 def test_erp_demo_is_off_by_default_and_refused_in_production(monkeypatch):
-    for var in ("ERP_CONNECTOR", "JWT_SECRET", "DATA_ENCRYPTION_KEY", "ENVIRONMENT"):
+    for var in ("ERP_CONNECTOR", "JWT_SECRET", "DATA_ENCRYPTION_KEY", "ENVIRONMENT", "REDIS_URL"):
         monkeypatch.delenv(var, raising=False)
     strong = "k" * 48
     assert Settings(_env_file=None).erp_connector == "disabled"

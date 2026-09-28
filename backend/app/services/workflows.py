@@ -4,7 +4,8 @@ check conditions and run actions (create a task, notify people, update a field, 
 How record triggers fire: a session listener notes which watched records were inserted or had a
 watched column change during each flush; after the transaction commits, the rules are evaluated in
 a fresh session (so a rolled-back change never triggers anything). Changes made by a workflow can
-trigger other workflows, up to MAX_DEPTH levels, and a rule never re-triggers itself.
+trigger other workflows, up to MAX_DEPTH levels, and a rule never re-triggers itself. The noted changes are
+written to ``workflow_events`` in the same transaction, so a restart between commit and evaluation loses nothing.
 
 Conditions use the reporting catalogue's filter syntax (services/reporting.py), so rules carry no SQL.
 """
@@ -19,14 +20,14 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable
 
-from sqlalchemy import event, func, inspect, select
+from sqlalchemy import and_, delete, event, func, inspect, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal
 from app.core.rbac import ROLES
 from app.models import (
-    Account, Activity, Contact, Deal, Lead, Order, Quote, SupportTicket, Task, User, WorkflowRule, WorkflowRun,
+    Account, Activity, Contact, Deal, Lead, Order, Quote, SupportTicket, Task, User, WorkflowEvent, WorkflowRule, WorkflowRun,
 )
 from app.services import reporting
 from app.services.notify import emit, notify
@@ -538,11 +539,19 @@ async def _active_record_rules(db: AsyncSession) -> list[dict]:
 
 @event.listens_for(Session, "after_flush")
 def _capture(session: Session, flush_context) -> None:
-    events = session.info.setdefault("wf_events", [])
+    """Queue the watched changes of this flush in ``workflow_events``, inside the same transaction: a rolled-back
+    change leaves nothing behind, and a committed one is never lost even if this process stops before the
+    rules run (the ``workflow_events`` job picks it up)."""
+    depth, origin = session.info.get("wf_depth", 0), session.info.get("wf_rule")
+    if depth >= MAX_DEPTH:
+        if session.new or session.dirty:
+            log.debug("Workflow chain stops at depth %s", depth)
+        return
+    rows = []
     for obj in session.new:
         key = _MODEL_KEY.get(type(obj))
         if key:
-            events.append({"kind": "created", "source": key, "id": obj.id, "changed": []})
+            rows.append({"kind": "created", "source": key, "record_id": obj.id, "changed": []})
     for obj in session.dirty:
         key = _MODEL_KEY.get(type(obj))
         if not key or not ENTITIES[key].watch:
@@ -550,33 +559,90 @@ def _capture(session: Session, flush_context) -> None:
         state = inspect(obj)
         changed = [k for k, attr in ENTITIES[key].watch.items() if state.attrs[attr].history.has_changes()]
         if changed:
-            events.append({"kind": "updated", "source": key, "id": obj.id, "changed": changed})
+            rows.append({"kind": "updated", "source": key, "record_id": obj.id, "changed": changed})
+    if not rows:
+        return
+    now = datetime.now(timezone.utc)
+    for r in rows:
+        r.update(id=uuid.uuid4(), depth=depth, origin_rule_id=origin, created_at=now)
+    session.connection().execute(WorkflowEvent.__table__.insert(), rows)
+    session.info.setdefault("wf_event_ids", []).extend(r["id"] for r in rows)
 
 
 @event.listens_for(Session, "after_commit")
 def _dispatch(session: Session) -> None:
-    events = session.info.pop("wf_events", None)
-    if not events:
+    ids = session.info.pop("wf_event_ids", None)
+    if not ids:
         return
-    depth, origin = session.info.get("wf_depth", 0), session.info.get("wf_rule")
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
-        return
-    task = loop.create_task(_process(events, depth, origin))
+        return  # no loop (sync tooling): the workflow_events job will run them
+    task = loop.create_task(_run_queued(ids))
     _pending.add(task)
     task.add_done_callback(_pending.discard)
 
 
 @event.listens_for(Session, "after_rollback")
 def _discard(session: Session) -> None:
-    session.info.pop("wf_events", None)
+    session.info.pop("wf_event_ids", None)
+
+
+async def _claim(db: AsyncSession, stmt) -> list[WorkflowEvent]:
+    rows = list((await db.execute(stmt.with_for_update(skip_locked=True))).scalars())
+    now = datetime.now(timezone.utc)
+    for r in rows:
+        r.claimed_at = now
+    await db.commit()
+    return rows
+
+
+async def _run_queued(ids: list | None = None, stale: bool = False) -> int:
+    """Evaluate queued events (``ids`` from a commit just now, or with ``stale`` anything left behind by a
+    stopped process), then remove them. Claiming uses SKIP LOCKED, so no event runs twice concurrently."""
+    try:
+        async with SessionLocal() as db:
+            stmt = select(WorkflowEvent)
+            if ids is not None:
+                stmt = stmt.where(WorkflowEvent.id.in_(ids), WorkflowEvent.claimed_at.is_(None))
+            else:
+                now = datetime.now(timezone.utc)
+                stmt = stmt.where(or_(and_(WorkflowEvent.claimed_at.is_(None), WorkflowEvent.created_at < now - timedelta(minutes=1)),
+                                      WorkflowEvent.claimed_at < now - timedelta(minutes=10))).order_by(WorkflowEvent.created_at).limit(500)
+            rows = await _claim(db, stmt)
+        if not rows:
+            return 0
+        groups: dict[tuple, list[dict]] = {}
+        for r in rows:
+            groups.setdefault((r.depth, r.origin_rule_id), []).append({"kind": r.kind, "source": r.source, "id": r.record_id, "changed": r.changed})
+        for (depth, origin), events in groups.items():
+            await _process(events, depth, origin)
+        async with SessionLocal() as db:
+            await db.execute(delete(WorkflowEvent).where(WorkflowEvent.id.in_([r.id for r in rows])))
+            await db.commit()
+        return len(rows)
+    except Exception:  # never let automation break the request that triggered it; the rescue job retries
+        log.exception("Queued workflow evaluation failed")
+        return 0
+
+
+async def run_stale_events() -> dict:
+    """Job: evaluate triggers a stopped process left in the queue."""
+    return {"recovered": await _run_queued(stale=True)}
 
 
 async def drain() -> None:
-    """Wait for in-flight workflow evaluations (tests, and background jobs before their loop closes)."""
-    while _pending:
-        await asyncio.gather(*list(_pending), return_exceptions=True)
+    """Wait for in-flight workflow evaluations on this event loop (tests, and background jobs before their loop
+    closes). Tasks left on a loop that has since closed are dropped: their events are still in the queue and the
+    ``workflow_events`` job evaluates them."""
+    loop = asyncio.get_running_loop()
+    while True:
+        for t in [t for t in _pending if t.get_loop() is not loop]:
+            _pending.discard(t)
+        mine = [t for t in _pending if not t.done()]
+        if not mine:
+            return
+        await asyncio.gather(*mine, return_exceptions=True)
 
 
 async def _process(events: list[dict], depth: int, origin) -> None:

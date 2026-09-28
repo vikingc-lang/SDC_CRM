@@ -25,18 +25,22 @@ NetworkPolicy (`networkPolicy.allowEgressCIDRs`). Validate with
   FastAPI background task).
 
 ## Migrations
-`backend/alembic/versions/0NN_description.py`, raw SQL, `revision`/`down_revision` chain (latest: 018, P0 depth: AI usage / actions, workflow waits, deal products / teams / splits, FX history,
-tax, calendar sync, user locale).
+`backend/alembic/versions/0NN_description.py`, raw SQL, `revision`/`down_revision` chain (latest: 020: campaign send status, per-folder mail cursors, `workflow_events` queue; 019: signing-link
+expiry; 018: P0 depth).
 Never edit an applied migration; add a new one (e.g. 015 widened 002's check constraint). `/health/ready`
 reports `migrations` not at head.
 
 Moving databases: `python -m app.dbtools schema|copy|verify --target URL [--source URL]` (sync URLs), runbook
 and per-database differences in `docs/database-portability.md`. Postgres targets use `alembic upgrade head`.
 
-New jobs: `workflow_waits` (*/5), `calendar_sync` (*/10), `ai_housekeeping` (04:30, AI log retention and
+New jobs: `workflow_events` (every minute, queued triggers a stopped process left), `campaign_send`
+(on demand), `workflow_waits` (*/5), `calendar_sync` (*/10), `ai_housekeeping` (04:30, AI log retention and
 suggestion expiry), `fx_feed` (17:15, only with `FX_FEED_URL`). New settings: `FX_FEED_URL`, `AVALARA_*`,
 `GOOGLE_CALENDAR_*`, `MICROSOFT_CALENDAR_*` (redirect URI `{PUBLIC_API_URL}/api/v1/calendar/oauth/callback`).
 The demo seed recreates default tax rates and the initial FX history after `--reset`.
+
+Compose publishes Postgres, Redis and Ollama on 127.0.0.1 only; Redis requires `REDIS_PASSWORD` (in `REDIS_URL`),
+and Helm generates it into the chart secret. Outside development a password-less or default Redis URL is refused.
 
 ## Health and observability
 `/health` (DB ping), `/health/live` (no deps), `/health/ready` (DB, migrations at head, Redis → 503 if not);

@@ -39,7 +39,8 @@ export default function CampaignPage() {
   const { can } = useMe();
   const [tab, setTab] = useState<TabKey>("overview");
   const [editing, setEditing] = useState(false);
-  const c = useQuery({ queryKey: ["campaigns", "detail", id], queryFn: () => get<Campaign>(`/campaigns/${id}`) });
+  const c = useQuery({ queryKey: ["campaigns", "detail", id], queryFn: () => get<Campaign>(`/campaigns/${id}`),
+    refetchInterval: (q) => (["queued", "sending"].includes(q.state.data?.send_status ?? "") ? 2000 : false) });
   const del = useMutation({
     mutationFn: async () => (await api.delete(`/campaigns/${id}`)).data,
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["campaigns"] }); router.push("/campaigns"); },
@@ -230,14 +231,14 @@ function EmailTab({ cp, editable }: { cp: Campaign; editable: boolean }) {
     onError: (e) => toast.error(errorMessage(e)),
   });
   const send = useMutation({
-    mutationFn: async () => (await api.post<{ sent: number; delivered_via_smtp: number; skipped: Record<string, number> }>(`/campaigns/${cp.id}/email/send`)).data,
-    onSuccess: (r) => {
-      qc.invalidateQueries({ queryKey: ["campaigns"] });
-      const skipped = Object.values(r.skipped).reduce((a, b) => a + b, 0);
-      toast.success(`Sent to ${r.sent}${r.delivered_via_smtp < r.sent ? ` (${r.sent - r.delivered_via_smtp} logged only: no SMTP mailbox connected)` : ""}${skipped ? `; ${skipped} skipped` : ""}`);
-    },
+    mutationFn: async () => (await api.post(`/campaigns/${cp.id}/email/send`)).data,
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["campaigns"] }); toast.success("Sending in the background; this page updates when it's done"); },
     onError: (e) => toast.error(errorMessage(e)),
   });
+  const busy = cp.send_status === "queued" || cp.send_status === "sending";
+  const r = cp.send_result;
+  const skipped = r?.skipped ? Object.values(r.skipped).reduce((a, b) => a + b, 0) : 0;
+  useEffect(() => { if (!busy) qc.invalidateQueries({ queryKey: ["campaigns", "preview", cp.id] }); }, [busy, qc, cp.id]);
   const p = preview.data;
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
@@ -258,7 +259,11 @@ function EmailTab({ cp, editable }: { cp: Campaign; editable: boolean }) {
               <p><span className="text-2xl font-semibold tabular">{p.eligible}</span> <span className="text-muted-foreground">will receive it</span></p>
               {Object.entries(p.blocked).map(([why, n]) => <p key={why} className="flex justify-between text-muted-foreground"><span>{why}</span><span className="tabular">{n}</span></p>)}
               {cp.last_sent_at && <p className="text-[12px] text-subtle">Last sent {relativeDays(cp.last_sent_at)}. People are only emailed once.</p>}
-              {editable && <Button className="w-full" size="sm" disabled={!p.eligible || dirty || !subject || !body} loading={send.isPending}
+              {busy && <p className="rounded-md bg-muted px-2.5 py-1.5 text-[12.5px]">{cp.send_status === "queued" ? "Queued for sending…" : "Sending…"} You can leave this page.</p>}
+              {!busy && cp.send_status === "done" && r && (
+                <p className="text-[12.5px]">Last send: {r.sent} sent{(r.delivered_via_smtp ?? 0) < (r.sent ?? 0) ? ` (${(r.sent ?? 0) - (r.delivered_via_smtp ?? 0)} logged only: no SMTP mailbox connected)` : ""}{skipped ? `; ${skipped} skipped` : ""}.</p>)}
+              {!busy && cp.send_status === "failed" && r?.error && <p className="text-[12.5px] text-destructive">{r.error}</p>}
+              {editable && <Button className="w-full" size="sm" disabled={!p.eligible || dirty || !subject || !body || busy} loading={send.isPending || busy}
                 onClick={() => confirm(`Send to ${p.eligible} ${p.eligible === 1 ? "person" : "people"}?`) && send.mutate()}><Send className="h-3.5 w-3.5" />Send to {p.eligible}</Button>}
               {dirty && <p className="text-[12px] text-subtle">Save the email before sending.</p>}
             </>}

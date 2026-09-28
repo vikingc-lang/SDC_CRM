@@ -3,7 +3,7 @@ import uuid
 from datetime import date
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -15,6 +15,7 @@ from app.core.rbac import Principal, authorize
 from app.models import Account, Campaign, CampaignMember, Contact, Deal, Lead, User
 from app.services import campaigns as svc
 from app.services import fx
+from app.services.jobs import enqueue
 from app.services.notify import emit
 
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
@@ -270,15 +271,18 @@ async def email_preview(campaign_id: uuid.UUID, db: AsyncSession = Depends(get_d
                        "body": svc.render(c.email_body or "", sample["person"], None)} if sample else None}  # inert link: a click here unsubscribes nobody
 
 
-@router.post("/{campaign_id}/email/send")
-async def email_send(campaign_id: uuid.UUID, db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("campaigns", "update"))):
+@router.post("/{campaign_id}/email/send", status_code=202)
+async def email_send(campaign_id: uuid.UUID, background: BackgroundTasks, db: AsyncSession = Depends(get_db),
+                     p: Principal = Depends(authorize("campaigns", "update"))):
+    """Queue the email send; it runs as a background job (the campaign's ``send_status`` / ``send_result``)."""
     c = await _get(db, campaign_id)
     try:
-        out = await svc.send(db, c, p.user)
+        svc.queue_send(c, p.user)
     except svc.CampaignError as e:
         raise HTTPException(422, str(e))
     await db.commit()
-    return out
+    enqueue(background, "campaign_send", str(c.id), str(p.user.id))
+    return {"status": "queued", "campaign_id": c.id}
 
 
 # ---- public unsubscribe ----------------------------------------------------------------------------

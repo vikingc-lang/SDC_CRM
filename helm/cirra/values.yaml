@@ -14,12 +14,13 @@ publicApiUrl: https://crm.example.com    # baked into the web image at build tim
 seedDemoData: false
 
 secrets:
-  # Provide an existing Secret with keys JWT_SECRET, DATA_ENCRYPTION_KEY, POSTGRES_PASSWORD
+  # Provide an existing Secret with keys JWT_SECRET, DATA_ENCRYPTION_KEY, POSTGRES_PASSWORD, REDIS_PASSWORD
   # (and optionally ERP_REST_TOKEN, ANTHROPIC_API_KEY), or let the chart create one.
   existingSecret: ""
   jwtSecret: ""                 # generated if empty
   dataEncryptionKey: ""         # generated if empty
   postgresPassword: ""          # generated if empty; use URL-safe characters (it is embedded in DATABASE_URL)
+  redisPassword: ""             # generated if empty; URL-safe characters (embedded in REDIS_URL)
   erpRestToken: ""
 
 config:

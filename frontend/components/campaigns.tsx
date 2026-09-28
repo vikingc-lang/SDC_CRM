@@ -24,6 +24,8 @@ export interface Campaign {
   id: string; name: string; code: string; type: string; status: CampaignStatus; description: string | null; owner_id: string | null; owner: string | null;
   start_date: string | null; end_date: string | null; budget: number; actual_cost: number; expected_revenue: number;
   email_subject: string | null; email_body: string | null; last_sent_at: string | null; metrics: Metrics;
+  send_status?: "queued" | "sending" | "done" | "failed" | null; send_requested_at?: string | null;
+  send_result?: { sent?: number; delivered_via_smtp?: number; skipped?: Record<string, number>; error?: string } | null;
 }
 
 export const TYPE_LABELS: Record<string, string> = {

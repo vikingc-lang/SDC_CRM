@@ -12,7 +12,7 @@ __all__ = [
     "RolePermission", "AuditLog", "CustomFieldDefinition", "MergeLog", "DedupDismissal", "SubjectKey",
     "ConsentEvent", "ErasureLog", "Notification", "Attachment", "MailboxConnection", "DealAlert", "FxRate",
     "IntegrationEvent", "ErpSyncRun", "SsoLoginState", "SavedReport", "Dashboard", "WorkflowRule", "WorkflowRun", "ForecastSubmission", "ForecastAdjustment",
-    "ListView", "ReportSubscription", "CustomObject", "CustomRecord", "ValidationRule", "SharingRule", "NumberSequence",
+    "ListView", "ReportSubscription", "CustomObject", "CustomRecord", "ValidationRule", "SharingRule", "NumberSequence", "WorkflowEvent",
 ]
 
 
@@ -173,7 +173,8 @@ class MailboxConnection(Base):
     smtp_port: Mapped[int | None] = mapped_column(Integer, default=587)
     username: Mapped[str | None] = mapped_column(String(255))
     secret_encrypted: Mapped[str | None] = mapped_column(Text)
-    last_uid: Mapped[int] = mapped_column(BigInteger, default=0)
+    last_uid: Mapped[int] = mapped_column(BigInteger, default=0)  # legacy single cursor (before per-folder cursors)
+    folder_state: Mapped[dict] = mapped_column(JSONB, default=dict)  # {folder: {"uidvalidity": n, "last_uid": n}}
     last_synced_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     status: Mapped[str] = mapped_column(String(20), default="active")
     last_error: Mapped[str | None] = mapped_column(Text)
@@ -303,6 +304,24 @@ class WorkflowRun(Base):
     resume_at: Mapped[datetime | None] = mapped_column(UTCDateTime())  # a waiting run continues then
     pending_actions: Mapped[list | None] = mapped_column(JSONB)  # the steps still to run after the wait
     created_at: Mapped[datetime] = _ts()
+
+
+class WorkflowEvent(Base):
+    """A record change waiting for workflow evaluation. Written in the same transaction as the change (so a
+    rolled-back change leaves nothing), processed right after commit, and picked up again by the
+    ``workflow_events`` job if the process stopped before finishing (restart, crash, deploy)."""
+    __tablename__ = "workflow_events"
+    __table_args__ = (Index("ix_workflow_events_created", "created_at"),)
+
+    id: Mapped[uuid.UUID] = _pk()
+    kind: Mapped[str] = mapped_column(String(10))  # created | updated
+    source: Mapped[str] = mapped_column(String(20))
+    record_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    changed: Mapped[list] = mapped_column(JSONB, default=list)
+    depth: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    origin_rule_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    claimed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    created_at: Mapped[datetime] = _ts(nullable=False)
 
 
 class ForecastSubmission(Base):

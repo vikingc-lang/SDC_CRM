@@ -19,7 +19,7 @@ STRONG = "k" * 20 + uuid.uuid4().hex  # 52 characters
 # ---- 1. the token secret ---------------------------------------------------------------------------------------
 
 def _settings(monkeypatch, **kw) -> Settings:
-    for var in ("JWT_SECRET", "DATA_ENCRYPTION_KEY", "ENVIRONMENT", "ERP_CONNECTOR"):
+    for var in ("JWT_SECRET", "DATA_ENCRYPTION_KEY", "ENVIRONMENT", "ERP_CONNECTOR", "REDIS_URL"):
         monkeypatch.delenv(var, raising=False)
     return Settings(_env_file=None, **kw)
 

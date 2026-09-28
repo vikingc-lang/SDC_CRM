@@ -133,6 +133,17 @@ async def job_workflow_waits() -> None:
         await workflows.resume_waiting(db)
 
 
+async def job_workflow_events() -> None:
+    await workflows.run_stale_events()
+
+
+async def job_campaign_send(campaign_id: str, user_id: str) -> None:
+    from app.services import campaigns
+
+    async with SessionLocal() as db:
+        await campaigns.run_send(db, uuid.UUID(campaign_id), uuid.UUID(user_id))
+
+
 async def job_ai_housekeeping() -> None:
     from app.services import agents, ai_governance
 
@@ -211,6 +222,8 @@ JOBS = {
     "case_routing": job_case_routing,
     "support_mail": job_support_mail,
     "workflow_waits": job_workflow_waits,
+    "workflow_events": job_workflow_events,
+    "campaign_send": job_campaign_send,
     "ai_housekeeping": job_ai_housekeeping,
     "calendar_sync": job_calendar_sync,
     "fx_feed": job_fx_feed,

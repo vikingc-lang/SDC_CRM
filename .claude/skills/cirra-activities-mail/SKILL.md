@@ -19,6 +19,10 @@ description: Cirra activity ledger and engagement - activities timeline, tasks w
 - Frontend: `components/ActivityTimeline.tsx`, `LogActivityDialog.tsx`, `TaskList.tsx`, `app/(app)/tasks`.
 
 ## Rules
+- Mailbox sync keeps a UID cursor per folder (`mailbox_connections.folder_state`: uidvalidity + last_uid): INBOX
+  plus the folder flagged `\Sent` (RFC 6154), else Sent / Sent Items / [Gmail]/Sent Mail. It works through each
+  folder oldest-first in batches of `mail.BATCH`, so a backlog is never skipped; a changed UIDVALIDITY restarts that
+  folder (ingest de-duplicates by Message-ID). Tests swap `mail.IMAP_CLIENT`.
 - Two mail paths: **user mailbox** (`mail.deliver`, sales email, campaign and journey sends) vs **system
   mailer** (`mailer.send`, service and reports). Don't mix them.
 - Every outbound email to a contact checks `privacy.can_contact`.

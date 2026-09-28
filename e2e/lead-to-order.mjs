@@ -62,7 +62,7 @@ const moveTo = async (page, stage) => { await page.locator(`button[title="Move t
 // ---------------------------------------------------------------------------------------------------------------
 const FIRST = process.env.E2E_FIRST ?? "Anna", LAST = process.env.E2E_LAST ?? "Keller";
 const DOMAIN = process.env.E2E_DOMAIN ?? `nordlicht-${RUN}.de`;
-const company = process.env.E2E_COMPANY ?? `Nordlicht Maschinenbau ${RUN}`;
+const company = process.env.E2E_COMPANY ?? `${RUN.charAt(0).toUpperCase()}${RUN.slice(1)} Werke`;  // mostly the run id: names from earlier runs must not fuzzy-match (JW < 0.88)
 const FULL = `${FIRST} ${LAST}`, email = `${FIRST}.${LAST}@${DOMAIN}`.toLowerCase().replace(/\s+/g, "");
 let leadId, dealId, quoteId, orderFormUrl, orderId;
 

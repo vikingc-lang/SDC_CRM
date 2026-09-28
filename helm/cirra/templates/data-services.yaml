@@ -64,6 +64,10 @@ spec:
       containers:
         - name: redis
           image: {{ .Values.redis.image }}
+          args: ["--requirepass", "$(REDIS_PASSWORD)"]
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ include "cirra.secretName" . }}, key: REDIS_PASSWORD } }
           ports: [{ name: redis, containerPort: 6379 }]
 ---
 apiVersion: v1

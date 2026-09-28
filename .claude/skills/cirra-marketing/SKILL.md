@@ -24,6 +24,10 @@ description: Cirra marketing - campaigns, members (leads/contacts), list buildin
 - Frontend: `app/(app)/campaigns`, `app/(app)/journeys/[id]`, `components/campaigns.tsx`, `components/journeys.tsx`.
 
 ## Rules
+- Campaign email sends run as the `campaign_send` job: `POST /campaigns/{id}/email/send` validates, marks the
+  campaign `send_status = queued` and returns 202; the job records `sending`, then `done` (counts in
+  `send_result`) or `failed` (error), and notifies the requester. A second send is refused while one is queued or
+  running (unless it has been stuck for `SEND_STALE_AFTER`). Each email is committed as it's handed to SMTP.
 - Consent first: leads need no denial and, under GDPR, granted consent; contacts go through `can_contact`.
 - Journeys exit on unsubscribe, bounce, lost consent ("Can't email: …"), lead converted/disqualified.
   Edits only when draft/paused; a journey that has run can only be archived.

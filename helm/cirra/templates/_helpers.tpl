@@ -15,7 +15,7 @@ app.kubernetes.io/component: {{ .component }}
 {{- end -}}
 {{- define "cirra.secretName" -}}{{ .Values.secrets.existingSecret | default (printf "%s-secrets" (include "cirra.fullname" .)) }}{{- end -}}
 {{- define "cirra.dbHost" -}}{{ if .Values.postgresql.enabled }}{{ include "cirra.fullname" . }}-postgres{{ else }}{{ .Values.externalDatabase.host }}{{ end }}{{- end -}}
-{{- define "cirra.redisUrl" -}}{{ if .Values.redis.enabled }}redis://{{ include "cirra.fullname" . }}-redis:6379/0{{ else }}{{ .Values.externalRedisUrl }}{{ end }}{{- end -}}
+{{- define "cirra.redisUrl" -}}{{ if .Values.redis.enabled }}redis://:$(REDIS_PASSWORD)@{{ include "cirra.fullname" . }}-redis:6379/0{{ else }}{{ .Values.externalRedisUrl }}{{ end }}{{- end -}}
 {{/* Environment shared by api and worker */}}
 {{- define "cirra.backendEnv" -}}
 - name: ENVIRONMENT
@@ -30,6 +30,8 @@ app.kubernetes.io/component: {{ .component }}
   valueFrom: { secretKeyRef: { name: {{ include "cirra.secretName" . }}, key: DATA_ENCRYPTION_KEY } }
 - name: ERP_REST_TOKEN
   valueFrom: { secretKeyRef: { name: {{ include "cirra.secretName" . }}, key: ERP_REST_TOKEN, optional: true } }
+- name: REDIS_PASSWORD
+  valueFrom: { secretKeyRef: { name: {{ include "cirra.secretName" . }}, key: REDIS_PASSWORD } }
 - name: REDIS_URL
   value: {{ include "cirra.redisUrl" . | quote }}
 - name: OLLAMA_ENDPOINT

@@ -90,25 +90,67 @@ async def ingest_message(db: AsyncSession, raw: bytes, mailbox_owner: User | Non
     return act
 
 
-def _imap_fetch(conn: MailboxConnection, password: str, since_uid: int, limit: int = 200) -> list[tuple[int, bytes]]:
+IMAP_CLIENT = imaplib.IMAP4_SSL  # tests swap in a fake server
+BATCH = 200  # messages per folder per sync; the rest follow on the next sync (oldest first, nothing skipped)
+SENT_NAMES = ("Sent", "Sent Items", "Sent Messages", "Sent Mail", "[Gmail]/Sent Mail", "INBOX.Sent", "INBOX/Sent")
+_LIST_LINE = re.compile(r'\((?P<flags>[^)]*)\) (?:"[^"]*"|NIL) (?P<name>.+)$')
+
+
+def _quote(folder: str) -> str:
+    return '"' + folder.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _folders(client) -> list[str]:
+    """INBOX plus the sent folder: the one flagged \\Sent (RFC 6154), else the first of the usual names."""
+    names, sent = [], []
+    typ, data = client.list()
+    for raw in (data or []) if typ == "OK" else []:
+        line = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else str(raw)
+        m = _LIST_LINE.match(line)
+        if not m:
+            continue
+        name = m.group("name").strip().strip('"')
+        names.append(name)
+        if "\\sent" in m.group("flags").lower():
+            sent.append(name)
+    if not sent:
+        sent = [n for n in SENT_NAMES if n in names][:1]
+    return ["INBOX", *[n for n in sent if n.upper() != "INBOX"]]
+
+
+def _uidvalidity(client) -> int | None:
+    typ, data = client.response("UIDVALIDITY")
+    try:
+        return int(data[0]) if data and data[0] else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _imap_fetch(conn: MailboxConnection, password: str, state: dict, limit: int = BATCH) -> tuple[list[tuple[str, int, bytes]], dict]:
+    """New messages per folder since each folder's own UID cursor (UIDs are per folder, so one shared cursor
+    skips mail). Returns the messages and each folder's current UIDVALIDITY; a changed UIDVALIDITY restarts that
+    folder (ingest de-duplicates by Message-ID)."""
     netguard.check_mail_server(conn.imap_host, conn.imap_port or 993, "imap")  # at use too: DNS may have changed
-    client = imaplib.IMAP4_SSL(conn.imap_host, conn.imap_port or 993)
+    client = IMAP_CLIENT(conn.imap_host, conn.imap_port or 993)
     try:
         client.login(conn.username or conn.email_address, password)
-        out = []
-        for folder in ("INBOX", '"[Gmail]/Sent Mail"', "Sent"):
-            if client.select(folder, readonly=True)[0] != "OK":
+        out, validity = [], {}
+        for folder in _folders(client):
+            if client.select(_quote(folder), readonly=True)[0] != "OK":
                 continue
-            typ, data = client.uid("search", None, f"UID {since_uid + 1}:*")
+            uv = _uidvalidity(client)
+            validity[folder] = uv
+            prev = state.get(folder) or {}
+            since = int(prev.get("last_uid") or 0) if prev.get("uidvalidity") in (None, uv) else 0
+            typ, data = client.uid("search", None, f"UID {since + 1}:*")
             if typ != "OK":
                 continue
-            for uid in (data[0].split() if data and data[0] else [])[-limit:]:
-                if int(uid) <= since_uid:
-                    continue
-                typ, msg_data = client.uid("fetch", uid, "(RFC822)")
+            uids = sorted(int(u) for u in (data[0].split() if data and data[0] else []) if int(u) > since)
+            for uid in uids[:limit]:
+                typ, msg_data = client.uid("fetch", str(uid), "(RFC822)")
                 if typ == "OK" and msg_data and isinstance(msg_data[0], tuple):
-                    out.append((int(uid), msg_data[0][1]))
-        return out
+                    out.append((folder, uid, msg_data[0][1]))
+        return out, validity
     finally:
         try:
             client.logout()
@@ -120,20 +162,31 @@ async def sync_mailbox(db: AsyncSession, conn: MailboxConnection) -> dict:
     import asyncio
 
     owner = await db.get(User, conn.user_id)
+    state = {k: dict(v) for k, v in (conn.folder_state or {}).items()}
+    if not state and conn.last_uid:  # before per-folder cursors: the old cursor was INBOX's
+        state["INBOX"] = {"uidvalidity": None, "last_uid": conn.last_uid}
     try:
-        messages = await asyncio.to_thread(_imap_fetch, conn, decrypt_secret(conn.secret_encrypted or ""), conn.last_uid)
+        messages, validity = await asyncio.to_thread(_imap_fetch, conn, decrypt_secret(conn.secret_encrypted or ""), state)
     except Exception as exc:
         conn.status, conn.last_error = "error", str(exc)[:500]
         await db.commit()
         return {"status": "error", "error": conn.last_error}
-    created = 0
-    for uid, raw in sorted(messages):
+    for folder, uv in validity.items():
+        prev = state.get(folder) or {}
+        if prev.get("uidvalidity") not in (None, uv):
+            prev = {}
+        state[folder] = {"uidvalidity": uv, "last_uid": int(prev.get("last_uid") or 0)}
+    created, by_folder = 0, {}
+    for folder, uid, raw in sorted(messages, key=lambda m: (m[0], m[1])):
         if await ingest_message(db, raw, owner):
             created += 1
-        conn.last_uid = max(conn.last_uid, uid)
+        state[folder]["last_uid"] = max(state[folder]["last_uid"], uid)
+        by_folder[folder] = by_folder.get(folder, 0) + 1
+    conn.folder_state = state
+    conn.last_uid = max([conn.last_uid or 0, *(v["last_uid"] for k, v in state.items() if k == "INBOX")])
     conn.status, conn.last_error, conn.last_synced_at = "active", None, datetime.now(timezone.utc)
     await db.commit()
-    return {"status": "ok", "fetched": len(messages), "logged": created}
+    return {"status": "ok", "fetched": len(messages), "logged": created, "folders": by_folder}
 
 
 async def deliver(db: AsyncSession, user: User, to: str, subject: str, body: str, in_reply_to: str | None = None,

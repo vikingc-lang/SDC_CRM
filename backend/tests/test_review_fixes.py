@@ -91,7 +91,9 @@ async def test_campaign_send_keeps_progress_when_smtp_fails(client, monkeypatch)
 
         monkeypatch.setattr(mail, "deliver", flaky)
         r = await mkt.post(f"/api/v1/campaigns/{cid}/email/send")
-        assert r.status_code == 422 and "after 2 email" in r.json()["detail"]
+        assert r.status_code == 202
+        detail = (await mkt.get(f"/api/v1/campaigns/{cid}")).json()
+        assert detail["send_status"] == "failed" and "after 2 email" in detail["send_result"]["error"]
     async with SessionLocal() as db:
         sent = (await db.execute(select(func.count()).select_from(CampaignMember).where(CampaignMember.campaign_id == uuid.UUID(cid),
                                                                                          CampaignMember.status == "sent"))).scalar()

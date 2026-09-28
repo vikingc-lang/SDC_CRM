@@ -120,6 +120,11 @@ mail relay).
   log with status and duration. `LOG_FORMAT=json` switches the whole API to one JSON object per line for log shippers.
 - **Response hardening:** `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer` and a deny-all CSP on API
   responses (the API only serves JSON; the interactive docs are exempt).
+- **Data services:**
+  - Postgres, Redis and Ollama listen on this machine only (127.0.0.1) in docker compose.
+  - Redis requires a password (`REDIS_PASSWORD`); the Helm chart generates one.
+  - Workflow triggers are queued in the database with the change itself, so a restart never loses one.
+  - Campaign email is sent by a background job.
 - **Outbound safety:**
   - Webhooks and user mailboxes can't reach private, loopback or cloud-metadata addresses; allow specific
     internal servers with `OUTBOUND_ALLOWED_HOSTS`.

@@ -43,8 +43,9 @@ async def credit_risk(account_id: uuid.UUID, db: AsyncSession = Depends(get_db),
 async def ar_aging(db: AsyncSession = Depends(get_db), p: Principal = Depends(authorize("finance", "read"))):
     accounts = (await db.execute(p.scope_accounts(select(Account), "finance").where(Account.erp_customer_id.is_not(None)))).scalars().unique().all()
     rows, totals = [], {b[0]: 0.0 for b in erp.AGING_BUCKETS}
+    rates = await fx.rates(db)
     for a in accounts:
-        s = await erp.ar_summary(db, a)
+        s = await erp.ar_summary(db, a, rates=rates)
         for k, v in s["buckets"].items():
             totals[k] += v
         rows.append({"account": {"id": a.id, "name": a.name}, **{k: v for k, v in s.items() if k != "invoices"}})

@@ -60,8 +60,11 @@ async def test_list_building_responses_email_and_unsubscribe(client):
         preview = (await mkt.get(f"{API}/{cid}/email/preview")).json()
         assert preview["eligible"] + sum(preview["blocked"].values()) == added["added"]
         assert "/unsubscribe/" in preview["sample"]["body"] and preview["sample"]["subject"].startswith("Hi ")
-        sent = (await mkt.post(f"{API}/{cid}/email/send")).json()
-        assert sent["sent"] == preview["eligible"] and sent["skipped"] == preview["blocked"]
+        queued = await mkt.post(f"{API}/{cid}/email/send")
+        assert queued.status_code == 202 and queued.json()["status"] == "queued"  # sent by a background job
+        detail = (await mkt.get(f"{API}/{cid}")).json()
+        sent = detail["send_result"]
+        assert detail["send_status"] == "done" and sent["sent"] == preview["eligible"] and sent["skipped"] == preview["blocked"]
         assert (await mkt.get(f"{API}/{cid}/email/preview")).json()["eligible"] == 0  # nobody is emailed twice
         members = (await mkt.get(f"{API}/{cid}/members", params={"status": "sent"})).json()["members"]
         first = members[0]

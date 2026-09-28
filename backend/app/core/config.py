@@ -1,6 +1,7 @@
 """Application settings, loaded from environment variables (see .env.example)."""
 import logging
 import secrets
+from urllib.parse import urlparse
 from functools import lru_cache
 from typing import Literal
 
@@ -142,7 +143,7 @@ class Settings(BaseSettings):
 # Secrets that have been published (old defaults, examples) or are trivially guessable.
 KNOWN_INSECURE_SECRETS = frozenset({
     "super_secret_jwt_key_change_in_production", "change_me", "change-me", "changeme", "secret", "jwt_secret",
-    "your-secret-key", "cirra", "password",
+    "your-secret-key", "cirra", "password", "cirra_redis_dev_password", "cirra_secure_password",
 })
 DEV_ENVIRONMENTS = ("development", "dev", "local", "test")
 MIN_SECRET_LENGTH = 32
@@ -157,6 +158,10 @@ def security_problems(s: "Settings") -> list[str]:
     if s.data_encryption_key is not None and (s.data_encryption_key.strip().lower() in KNOWN_INSECURE_SECRETS
                                               or len(s.data_encryption_key) < MIN_SECRET_LENGTH):
         problems.append(f"DATA_ENCRYPTION_KEY is a published default or shorter than {MIN_SECRET_LENGTH} characters")
+    redis_password = urlparse(s.redis_url).password or ""
+    if (redis_password.strip().lower() in KNOWN_INSECURE_SECRETS or len(redis_password) < 16) and not s.redis_url.startswith("redis://localhost"):
+        problems.append("REDIS_URL has no password, a published one or one shorter than 16 characters "
+                        "(set REDIS_PASSWORD; anyone reaching Redis could read the job queue and rate-limit data)")
     if s.erp_connector == "demo":
         problems.append("ERP_CONNECTOR=demo invents invoices, balances and credit holds (use file, rest or disabled)")
     return problems
